@@ -359,6 +359,24 @@ describe('move jobs store', () => {
     expect(store.trackedById['job-1']).toBeUndefined()
   })
 
+  it('explicitly reports copy-and-retain completion', () => {
+    const store = useMoveJobsStore()
+    store.trackQueuedJob({ jobId: 'job-1', target: '/library/book' })
+
+    signalRMocks.callback?.({
+      jobId: 'job-1',
+      status: 'Completed',
+      target: '/library/book',
+      sourceRetained: true,
+    })
+
+    expect(toastMocks.success).toHaveBeenCalledWith(
+      'Copy completed',
+      'Files copied to /library/book; source retained',
+    )
+    expect(store.trackedById['job-1']).toBeUndefined()
+  })
+
   it('shows attention toast and clears tracked job on NeedsAttention', () => {
     const store = useMoveJobsStore()
     store.trackQueuedJob({ jobId: 'job-1', target: '/library/book' })

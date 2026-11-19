@@ -72,6 +72,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(command);
+            command = NormalizeSourceCleanupAuthorization(command);
+            ValidateSourceCleanupAuthorization(command);
             await EnsureExternalRecoveryAllowsMutationAsync(
                 command.AudiobookId,
                 allowActiveDeletionIntent: false,
@@ -115,29 +117,13 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     $"The source mutation boundary is invalid: {sourceAuthorizationReason}");
             }
 
-            if (command.SourceBoundaryDirectoryObjectIdentityVersion <= 0
-                || string.IsNullOrWhiteSpace(
-                    command.SourceBoundaryDirectoryObjectIdentity)
-                || command.TargetBoundaryDirectoryObjectIdentityVersion <= 0
-                || string.IsNullOrWhiteSpace(
-                    command.TargetBoundaryDirectoryObjectIdentity))
-            {
-                throw new InvalidOperationException(
-                    "A physical move requires durable source- and target-boundary generation authorization.");
-            }
-
             var persistedSourceBoundary = command.SourceCleanupBoundary == null
                 ? null
                 : sourceAuthorizationBoundary;
+            // v3 persists path/content/config evidence only. Boundary object identity
+            // is acquired fresh by each live execution attempt and is never durable
+            // mutation authority.
             var persistedEntries = manifest.Entries.ToList();
-            persistedEntries.Add(
-                MoveManifestIdentity.CreateSourceBoundaryAuthorization(
-                    command.SourceBoundaryDirectoryObjectIdentityVersion,
-                    command.SourceBoundaryDirectoryObjectIdentity));
-            persistedEntries.Add(
-                MoveManifestIdentity.CreateTargetBoundaryAuthorization(
-                    command.TargetBoundaryDirectoryObjectIdentityVersion,
-                    command.TargetBoundaryDirectoryObjectIdentity));
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 command.AudiobookId,
                 source,
@@ -161,6 +147,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     token);
                 var existingDb = await _persistence.GetActiveByKeyAsync(
                     deduplicationKey,
+                    token);
+                await EnsureMoveEnqueueRecoveryAllowsPublicationAsync(
+                    command.AudiobookId,
+                    existingDb?.Id,
                     token);
                 if (existingDb != null)
                 {
@@ -189,6 +179,14 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     SourcePath = source,
                     SourceCleanupBoundary = persistedSourceBoundary,
                     DeleteEmptySource = command.DeleteEmptySource,
+                    SourceCleanupMode = command.SourceCleanupMode,
+                    SourceRootFolderId = command.SourceRootFolderId,
+                    SourcePolicyRevision = command.SourcePolicyRevision,
+                    SourceStorageContractRevision = command.SourceStorageContractRevision,
+                    TargetRootFolderId = command.TargetRootFolderId,
+                    TargetPolicyRevision = command.TargetPolicyRevision,
+                    TargetStorageContractRevision = command.TargetStorageContractRevision,
+                    ForceCopyAndRetainSource = command.ForceCopyAndRetainSource,
                     RelocationId = command.RelocationId,
                     Entries = persistedEntries
                 };

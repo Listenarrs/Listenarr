@@ -712,7 +712,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteTrackedFiles === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -733,7 +736,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteFolder === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -744,6 +750,12 @@
               </div>
             </label>
           </div>
+          <p v-if="deleteCapabilities?.reason" class="warning-text">
+            {{ deleteCapabilities.reason }}
+            <span v-if="deleteCapabilities.canRemoveFromLibrary">
+              The audiobook can still be removed from the library.
+            </span>
+          </p>
         </div>
       </template>
     </DeleteConfirmationModal>
@@ -796,12 +808,12 @@ import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { showConfirm } from '@/composables/useConfirm'
-import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import { EmptyState, LoadingState, Pill } from '@/components/base'
 import type {
   Audiobook,
+  AudiobookDeleteCapabilities,
   AudiobookStatus,
   AuthorCatalogBook,
   AuthorCatalogResponse,
@@ -1142,8 +1154,6 @@ function getSortValue(book: CollectionDisplayItem): string {
       return book.authors?.[0] || ''
     case 'series':
       return book.series || ''
-    case 'added':
-      return book.inLibrary ? String(book.id).padStart(12, '0') : 'zzzzzzzzzzzz'
     default:
       return book.title || ''
   }
@@ -1250,6 +1260,14 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
     // position by default — then orders books within each group.
     if (isMetadataCollection.value && a.inLibrary !== b.inLibrary) {
       return a.inLibrary ? -1 : 1
+    }
+
+    if (sortKey.value === 'added') {
+      const aTime = Date.parse(a.added ?? '')
+      const bTime = Date.parse(b.added ?? '')
+      if (!Number.isFinite(aTime)) return Number.isFinite(bTime) ? 1 : 0
+      if (!Number.isFinite(bTime)) return -1
+      return aTime - bTime
     }
 
     const aVal = safeText(getSortValue(a))
@@ -1513,6 +1531,7 @@ const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
+const deleteCapabilities = ref<AudiobookDeleteCapabilities | null>(null)
 const lastClickedIndex = ref<number | null>(null)
 
 function showBulkEdit() {
@@ -2177,16 +2196,37 @@ const editAudiobook = (audiobook: CollectionDisplayItem) => {
   editingAudiobook.value = audiobook
 }
 
-const deleteAudiobook = (audiobook: CollectionDisplayItem) => {
+const deleteAudiobook = async (audiobook: CollectionDisplayItem) => {
   if (!audiobook.inLibrary) return
   deleteTarget.value = audiobook
   resetDeleteOptions()
+  deleteCapabilities.value = null
+  const targetId = audiobook.id
+  let capabilities: AudiobookDeleteCapabilities
+  try {
+    capabilities = await apiService.getAudiobookDeleteCapabilities(targetId)
+  } catch {
+    capabilities = unavailableDeleteCapabilities()
+  }
+  if (deleteTarget.value?.id !== targetId) return
+  deleteCapabilities.value = capabilities
   showDeleteDialog.value = true
+}
+
+function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
+  return {
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: false,
+    canDeleteFolder: false,
+    reason: 'Filesystem delete capability could not be checked.',
+    fallbackAction: 'RemoveFromLibraryOnly',
+  }
 }
 
 function cancelDelete() {
   resetDeleteOptions()
   deleteTarget.value = null
+  deleteCapabilities.value = null
   showDeleteDialog.value = false
 }
 
@@ -2200,10 +2240,6 @@ async function executeDelete() {
     await libraryStore.removeFromLibrary(deleteTarget.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
-      retryAfterBlockedMutation: shouldDeleteFiles
-        ? (error) =>
-            preparePhysicalDeleteRetry(error, deleteTarget.value!.id, deleteTarget.value?.basePath)
-        : undefined,
     })
   } catch (err) {
     errorTracking.captureException(err as Error, {
@@ -2215,6 +2251,7 @@ async function executeDelete() {
     deleting.value = false
     resetDeleteOptions()
     deleteTarget.value = null
+    deleteCapabilities.value = null
     showDeleteDialog.value = false
   }
 }

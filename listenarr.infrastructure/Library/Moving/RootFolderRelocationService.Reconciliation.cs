@@ -55,6 +55,12 @@ public sealed partial class RootFolderRelocationService
         var relocation = await db.RootFolderRelocations
             .Include(candidate => candidate.MoveJobs)
             .SingleAsync(candidate => candidate.Id == job.RelocationId, cancellationToken);
+        // Late child notifications cannot reapply historical root settings after
+        // finalization has released this relocation's ownership of the root.
+        if (relocation.ActiveRootFolderId == null)
+        {
+            return null;
+        }
         var root = relocation.RootFolderId is int rootFolderId
             ? await db.RootFolders.SingleOrDefaultAsync(
                 candidate => candidate.Id == rootFolderId,

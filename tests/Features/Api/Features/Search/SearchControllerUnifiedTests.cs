@@ -180,6 +180,33 @@ namespace Listenarr.Tests.Features.Api.Features.Search
         }
 
         [Fact]
+        public async Task AdvancedSearch_AsinWithEmptyRegionalRecord_ReturnsNoResult()
+        {
+            var mockSearch = new Mock<ISearchService>();
+            var stubAudible = new StubAudibleService
+            {
+                // What Audible returns for an ASIN it doesn't sell in the requested market
+                BookResponseToReturn = new AudibleBookResponseBuilder()
+                    .WithAsin("B008DFUGCQ")
+                    .WithTitle(string.Empty)
+                    .Build()
+            };
+            var mockMeta = new Mock<IAudiobookMetadataService>();
+
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
+
+            var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", asin = "B008DFUGCQ", region = "fr" });
+            var res = await controller.Search(reqJson);
+
+            var ok = Assert.IsType<OkObjectResult>(res.Result);
+            var serialized = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var doc = System.Text.Json.JsonDocument.Parse(serialized);
+            Assert.Empty(doc.RootElement.EnumerateArray());
+            Assert.Equal("fr", stubAudible.LastRegion);
+            mockSearch.Verify(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
         public async Task SimpleSearch_WithoutRegion_Uses_ConfiguredDefaultRegion()
         {
             var mockSearch = new Mock<ISearchService>();

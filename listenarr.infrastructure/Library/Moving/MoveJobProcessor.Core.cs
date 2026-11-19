@@ -137,14 +137,12 @@ internal partial class MoveJobProcessor
                 }
 
                 cleanupBoundaryResolution = GetPersistedCleanupBoundary(job);
-                var recoveryRequest = new AudiobookContentMoveRequest(
+                var recoveryRequest = CreateContentMoveRequest(
+                    job,
                     source,
                     target,
-                    job.Id,
-                    job.DeleteEmptySource,
                     resolvedSourceIdentity.Semantics,
                     targetSemantics,
-                    CreateLeaseToken(job),
                     cleanupBoundaryResolution.Boundary);
                 try
                 {
@@ -278,27 +276,6 @@ internal partial class MoveJobProcessor
             }
 
             audiobook = currentAudiobook;
-            IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities = null;
-            if (recoveredMove?.SourceCleanupCompleted != true)
-            {
-                try
-                {
-                    sourcePhysicalObjectIdentities = BuildSourcePhysicalObjectIdentities(
-                        audiobook,
-                        job,
-                        source,
-                        sourceIdentity.Semantics);
-                }
-                catch (MoveNeedsAttentionException exception)
-                {
-                    await MarkSourceStateNeedsAttentionAsync(
-                        job,
-                        exception.Message,
-                        stoppingToken);
-                    return;
-                }
-            }
-
             var sourceSemantics = sourceIdentity.Semantics;
             cleanupBoundaryResolution ??= GetPersistedCleanupBoundary(job);
             LogCleanupBoundary(job, cleanupBoundaryResolution);
@@ -325,7 +302,6 @@ internal partial class MoveJobProcessor
                 targetSemantics,
                 cleanupBoundaryResolution,
                 recoveredMove,
-                sourcePhysicalObjectIdentities,
                 scope,
                 registerPostCommit,
                 stoppingToken);
@@ -360,64 +336,43 @@ internal partial class MoveJobProcessor
         FileSystemPathSemantics targetSemantics,
         MoveCleanupBoundaryResolution cleanupBoundaryResolution,
         AudiobookContentMoveResult? recoveredMove,
-        IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities,
         IServiceScope scope,
         Action<MovePostCommitContext> registerPostCommit,
         CancellationToken stoppingToken)
     {
         AudiobookContentMoveRequest? moveRequest = null;
         AudiobookContentMoveResult? moveResult = recoveredMove;
+        var ownerMetadataCommitted = false;
         try
         {
-            moveRequest = new AudiobookContentMoveRequest(
+            moveRequest = CreateContentMoveRequest(
+                job,
                 source,
                 target,
-                job.Id,
-                job.DeleteEmptySource,
                 sourceSemantics,
                 targetSemantics,
-                CreateLeaseToken(job),
                 cleanupBoundaryResolution.Boundary,
-                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities,
-                ProgressReporter: (progress, phase, token) =>
+                (progress, phase, token) =>
                     moveQueueService.PublishProgressAsync(
                         job.Id,
                         progress,
                         phase,
                         token));
+            moveRequest = moveRequest with
+            {
+                CommitOwnerMetadataAsync = async (publication, token) =>
+                {
+                    await CommitMoveOwnerMetadataAsync(job, audiobook.Id, moveRequest!, publication, token);
+                    ownerMetadataCommitted = true;
+                }
+            };
             moveResult ??= await contentMoveService.MoveContentsAsync(moveRequest, stoppingToken);
             moveResult = await contentMoveService.ResumeSourceCleanupAsync(moveRequest, moveResult, stoppingToken);
             source = moveResult.Source;
             target = moveResult.Target;
-            if (AfterSourceCleanupBeforeMetadataRewriteForTest != null)
+            if (!ownerMetadataCommitted)
             {
-                await AfterSourceCleanupBeforeMetadataRewriteForTest(job);
-            }
-            await contentMoveService.EnsureMutationAuthorizedAsync(
-                moveRequest,
-                stoppingToken);
-            await contentMoveService.VerifyTargetBeforeMetadataRewriteAsync(
-                moveRequest,
-                moveResult,
-                stoppingToken);
-
-            using (var rewriteScope = scopeFactory.CreateScope())
-            {
-                var rewriteRepository = rewriteScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                var targetCaseSensitivityMode = job.TryGetTargetIdentity(out var targetIdentity)
-                    ? targetIdentity.RequestedMode
-                    : FileSystemCaseSensitivityMode.Auto;
-                await MovedAudiobookPathRewriter.RewriteAsync(
-                    audiobook.Id,
-                    source,
-                    target,
-                    moveRequest.SourceSemantics,
-                    moveRequest.TargetSemantics,
-                    rewriteRepository,
-                    logger,
-                    stoppingToken,
-                    moveResult.TargetPhysicalObjectIdentities,
-                    targetCaseSensitivityMode);
+                await CommitMoveOwnerMetadataAsync(job, audiobook.Id, moveRequest, moveResult, stoppingToken);
             }
 
             using var currentAudiobookScope = scopeFactory.CreateScope();
@@ -440,6 +395,7 @@ internal partial class MoveJobProcessor
                     contentMoveService,
                     moveRequest,
                     moveResult.TargetVerificationLease,
+                    moveResult.SourceRetained,
                     registerPostCommit,
                     stoppingToken))
             {
@@ -448,10 +404,10 @@ internal partial class MoveJobProcessor
 
             metrics.Increment("worker.move.job.completed");
             logger.LogInformation(
-                "Move job {JobId} completed: {Source} -> {Target}",
-                job.Id,
+                "Move job {JobId} completed: {Source} -> {Target}. SourceRetained={SourceRetained}", job.Id,
                 LogRedaction.SanitizeFilePath(source),
-                LogRedaction.SanitizeFilePath(target));
+                LogRedaction.SanitizeFilePath(target),
+                moveResult.SourceRetained);
         }
         catch (Exception ex) when (ex is PersistenceException or MoveLeaseLostException)
         {
@@ -493,8 +449,8 @@ internal partial class MoveJobProcessor
         }
         finally
         {
+            moveResult?.SourceAncestorRetirementLease?.Dispose();
             moveResult?.TargetVerificationLease?.Dispose();
         }
     }
-
 }

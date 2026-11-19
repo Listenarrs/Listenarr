@@ -28,11 +28,20 @@ public class FileSystemController : ControllerBase
 {
     private readonly ILogger<FileSystemController> _logger;
     private readonly IFileSystem _fileSystem;
+    private readonly IMoveSourceCleanupPolicyResolver? _sourceCleanupPolicyResolver;
+    private readonly IFileSystemVolumeResolver _volumeResolver;
 
-    public FileSystemController(ILogger<FileSystemController> logger, IFileSystem fileSystem)
+    public FileSystemController(
+        ILogger<FileSystemController> logger,
+        IFileSystem fileSystem,
+        IFileSystemVolumeResolver volumeResolver,
+        IMoveSourceCleanupPolicyResolver? sourceCleanupPolicyResolver = null)
     {
         _logger = logger;
         _fileSystem = fileSystem;
+        _sourceCleanupPolicyResolver = sourceCleanupPolicyResolver;
+        _volumeResolver = volumeResolver
+            ?? throw new ArgumentNullException(nameof(volumeResolver));
     }
 
     /// <summary>
@@ -207,9 +216,13 @@ public class FileSystemController : ControllerBase
     /// </summary>
     /// <param name="sourcePath">Source directory path.</param>
     /// <param name="destPath">Destination directory path.</param>
+    /// <param name="cancellationToken">Request cancellation token.</param>
     /// <returns>Volume comparison result including a warning if hardlinks will be broken.</returns>
     [HttpGet("check-volume")]
-    public ActionResult<VolumeCheckResponse> CheckVolume([FromQuery] string? sourcePath, [FromQuery] string? destPath)
+    public async Task<ActionResult<VolumeCheckResponse>> CheckVolume(
+        [FromQuery] string? sourcePath,
+        [FromQuery] string? destPath,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -223,20 +236,34 @@ public class FileSystemController : ControllerBase
                 });
             }
 
-            var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourcePath));
-            var destRoot = Path.GetPathRoot(Path.GetFullPath(destPath));
+            var comparison = _volumeResolver.Compare(sourcePath, destPath);
+            var sourceRoot = comparison.SourceBoundary
+                ?? Path.GetPathRoot(Path.GetFullPath(sourcePath));
+            var destRoot = comparison.DestinationBoundary
+                ?? Path.GetPathRoot(Path.GetFullPath(destPath));
+            var sameVolume = comparison.IsAvailable && comparison.SameVolume;
 
-            var sameVolume = string.Equals(sourceRoot, destRoot, StringComparison.OrdinalIgnoreCase);
-
+            var cleanup = _sourceCleanupPolicyResolver == null
+                ? null
+                : await _sourceCleanupPolicyResolver.ResolveAsync(
+                    sourcePath,
+                    destPath,
+                    cancellationToken);
             return Ok(new VolumeCheckResponse
             {
                 SameVolume = sameVolume,
                 WillBreakHardlinks = !sameVolume,
                 SourceVolume = sourceRoot,
                 DestVolume = destRoot,
-                Message = sameVolume
+                VerifiedSourceDeletionEnabled = cleanup?.DeletesSourceAfterVerifiedCopy ?? false,
+                ForceCopyAndRetainSource = cleanup?.ForceCopyAndRetainSource ?? false,
+                SourceIsManagedRoot = cleanup?.SourceIsManagedRoot ?? false,
+                SourceCleanupMessage = cleanup?.Message,
+                Message = !comparison.IsAvailable
+                    ? "Unable to prove that the paths are on the same volume; copy behavior will be assumed."
+                    : sameVolume
                     ? "Paths are on the same volume"
-                    : "âš ï¸ Moving across volumes will break hardlinks and create independent copies"
+                    : "Moving across volumes will break hardlinks and create independent copies"
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -282,4 +309,8 @@ public class VolumeCheckResponse
     public string? SourceVolume { get; set; }
     public string? DestVolume { get; set; }
     public string? Message { get; set; }
+    public bool VerifiedSourceDeletionEnabled { get; set; }
+    public bool ForceCopyAndRetainSource { get; set; }
+    public bool SourceIsManagedRoot { get; set; }
+    public string? SourceCleanupMessage { get; set; }
 }

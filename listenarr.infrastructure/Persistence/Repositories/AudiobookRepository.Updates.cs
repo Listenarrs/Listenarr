@@ -119,6 +119,7 @@ public partial class AudiobookRepository
             var preservedFilePath = existing.FilePath;
             var preservedFileSize = existing.FileSize;
             var preservedImageUrl = existing.ImageUrl;
+            var preservedAdded = existing.Added;
             _db.Entry(existing).CurrentValues.SetValues(audiobook);
             // A detached entity has no original-value snapshot, so any path-bearing value may
             // be stale. Path changes must use a tracked entity or the dedicated expected-source
@@ -127,6 +128,7 @@ public partial class AudiobookRepository
             existing.FilePath = preservedFilePath;
             existing.FileSize = preservedFileSize;
             existing.ImageUrl = preservedImageUrl;
+            existing.Added = preservedAdded;
         }
 
         // Tracked entities retain EF's original-value snapshot, so SaveChanges writes only

@@ -76,9 +76,15 @@ namespace Listenarr.Domain.Audiobooks
         Retained
     }
 
+    public enum MoveSourceCleanupMode
+    {
+        RetainSource = 0,
+        DeleteAfterVerifiedCopy = 1
+    }
+
     public static class MoveIdentityProtocol
     {
-        public const int Current = 2;
+        public const int Current = 3;
     }
 
     public static class MoveExecutionProtocol
@@ -86,7 +92,8 @@ namespace Listenarr.Domain.Audiobooks
         public const int PreDurableReleased = 0;
         public const int TargetBoundaryMarkerlessDatabaseState = 1;
         public const int MarkerlessDatabaseState = 2;
-        public const int Current = MarkerlessDatabaseState;
+        public const int OperationEvidence = 3;
+        public const int Current = OperationEvidence;
 
         public static bool IsCurrent(int version) => version == Current;
     }
@@ -141,6 +148,17 @@ namespace Listenarr.Domain.Audiobooks
         public string? TargetIdentityBoundary { get; set; }
         public string? SourceCleanupBoundary { get; set; }
         public bool DeleteEmptySource { get; set; } = true;
+        public MoveSourceCleanupMode SourceCleanupMode { get; set; } =
+            MoveSourceCleanupMode.RetainSource;
+        public bool ForceCopyAndRetainSource { get; set; }
+        public int? SourceRootFolderId { get; set; }
+        // Legacy revision retained for persisted execution-contract compatibility.
+        public int? SourcePolicyRevision { get; set; }
+        public int? SourceStorageContractRevision { get; set; }
+        public int? TargetRootFolderId { get; set; }
+        // Current cleanup authority uses storage-contract revisions and live evidence.
+        public int? TargetPolicyRevision { get; set; }
+        public int? TargetStorageContractRevision { get; set; }
         public ICollection<MoveJobEntry> Entries { get; set; } = new List<MoveJobEntry>();
         public ICollection<MoveJobCreatedDirectory> CreatedDirectories { get; set; } = new List<MoveJobCreatedDirectory>();
         public MoveScanHandoff? ScanHandoff { get; set; }

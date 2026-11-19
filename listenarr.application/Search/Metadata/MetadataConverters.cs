@@ -20,7 +20,7 @@ public class MetadataConverters
         _requestContextAccessor = requestContextAccessor;
     }
 
-    private static List<AudiobookSeriesMembership>? BuildSeriesMemberships(IEnumerable<AudibleSeries>? series)
+    internal static List<AudiobookSeriesMembership>? BuildSeriesMemberships(IEnumerable<AudibleSeries>? series)
     {
         if (series == null)
         {
@@ -138,32 +138,7 @@ public class MetadataConverters
             Explicit = audnexusData.IsAdult ?? false
         };
 
-        var audnexusSeriesMemberships = new List<AudiobookSeriesMembership>();
-        if (audnexusData.SeriesPrimary != null)
-        {
-            audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
-            {
-                SeriesName = audnexusData.SeriesPrimary.Name,
-                SeriesNumber = audnexusData.SeriesPrimary.Position,
-                IsPrimary = true,
-                SortOrder = 0
-            });
-        }
-
-        if (audnexusData.SeriesSecondary != null)
-        {
-            audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
-            {
-                SeriesName = audnexusData.SeriesSecondary.Name,
-                SeriesNumber = audnexusData.SeriesSecondary.Position,
-                IsPrimary = audnexusSeriesMemberships.Count == 0,
-                SortOrder = audnexusSeriesMemberships.Count
-            });
-        }
-
-        metadata.SeriesMemberships = audnexusSeriesMemberships.Count == 0
-            ? null
-            : AudiobookSeriesMembershipHelper.Normalize(audnexusSeriesMemberships);
+        metadata.SeriesMemberships = BuildSeriesMemberships(AudnexusSeriesMapper.ToAudibleSeries(audnexusData));
         ApplyPrimarySeriesFields(metadata);
 
         if (metadata.SeriesMemberships != null && metadata.SeriesMemberships.Count > 0)
@@ -332,6 +307,7 @@ public class MetadataConverters
             Description = metadata.Description,
             Publisher = metadata.Publisher,
             Language = metadata.Language ?? fallbackLanguage,
+            LanguageOrigin = metadata.Language != null ? IdentityEvidenceOrigin.ProviderSupplied : IdentityEvidenceOrigin.ContextDerived,
             Runtime = metadata.Runtime,
             Narrator = string.Join(", ", metadata.Narrators ?? new List<string>()),
             Series = metadata.Series,
@@ -466,6 +442,7 @@ public class MetadataConverters
             Subtitle = metadata.Subtitle,
             Publisher = metadata.Publisher,
             Language = metadata.Language ?? fallbackLanguage,
+            LanguageOrigin = metadata.Language != null ? IdentityEvidenceOrigin.ProviderSupplied : IdentityEvidenceOrigin.ContextDerived,
             Runtime = metadata.Runtime,
             Narrator = string.Join(", ", metadata.Narrators ?? new List<string>()),
             Series = metadata.Series,

@@ -48,6 +48,14 @@ namespace Listenarr.Application.Downloads.Queue
                 return;
             }
 
+            if (clientQueueResult.IsIncomplete)
+            {
+                logger.LogWarning(
+                    "Skipping orphan cleanup for client {ClientName}: the live queue snapshot left out items the client reported",
+                    client.Name);
+                return;
+            }
+
             var clientQueue = clientQueueResult.QueueItems;
             if (clientQueue.Count == 0 && clientDownloads.Any())
             {

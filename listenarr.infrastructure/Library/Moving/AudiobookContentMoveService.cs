@@ -26,9 +26,17 @@ internal sealed record AudiobookContentMoveRequest(
     MoveLeaseToken LeaseToken,
     string? SourceCleanupBoundary = null,
     LibraryDirectoryOwnership? TargetDirectoryOwnership = null,
-    IReadOnlyDictionary<string, string>? SourcePhysicalObjectIdentities = null,
     Func<double, string, CancellationToken, Task>? ProgressReporter = null,
-    MarkerlessMoveBoundaryAuthorizationState? BoundaryAuthorization = null)
+    MarkerlessMoveBoundaryAuthorizationState? BoundaryAuthorization = null,
+    MoveSourceCleanupMode SourceCleanupMode = MoveSourceCleanupMode.RetainSource,
+    int? SourceRootFolderId = null,
+    int? SourcePolicyRevision = null,
+    int? TargetRootFolderId = null,
+    int? TargetPolicyRevision = null,
+    int? SourceStorageContractRevision = null,
+    int? TargetStorageContractRevision = null,
+    bool ForceCopyAndRetainSource = false,
+    Func<AudiobookContentMoveResult, CancellationToken, Task>? CommitOwnerMetadataAsync = null)
 {
     public string LeaseOwner => LeaseToken.Owner;
     public int LeaseGeneration => LeaseToken.Generation;
@@ -40,8 +48,10 @@ internal sealed record AudiobookContentMoveResult(
     bool TargetInsideSource,
     bool SourceInsideTarget,
     bool SourceCleanupCompleted,
+    bool SourceRetained,
     IReadOnlyDictionary<string, string> TargetPhysicalObjectIdentities,
-    MarkerlessTargetVerificationLease? TargetVerificationLease = null);
+    MarkerlessTargetVerificationLease? TargetVerificationLease = null,
+    MarkerlessSourceRetirementLease? SourceAncestorRetirementLease = null);
 
 internal sealed class MoveNeedsAttentionException(string message) : IOException(message);
 
@@ -52,7 +62,8 @@ internal sealed partial class AudiobookContentMoveService(
     IMoveFaultInjector? faultInjector = null,
     IMoveExecutionStore? moveExecutionStore = null,
     ILibraryDirectoryOwnershipStore? directoryOwnershipStore = null,
-    LibraryDirectoryOwnershipBoundaryAuthorizer? ownershipAuthorizer = null)
+    LibraryDirectoryOwnershipBoundaryAuthorizer? ownershipAuthorizer = null,
+    IMoveSourceCleanupPolicyResolver? sourceCleanupPolicyResolver = null)
 {
     private const int MaxCopyAttempts = 5;
     private readonly IMoveExecutionStore executionStore =
@@ -62,6 +73,8 @@ internal sealed partial class AudiobookContentMoveService(
     private readonly LibraryDirectoryOwnershipBoundaryAuthorizer ownershipAuthorizer =
         ownershipAuthorizer
         ?? new LibraryDirectoryOwnershipBoundaryAuthorizer(dbContextFactory);
+    private readonly IMoveSourceCleanupPolicyResolver? sourceCleanupPolicyResolver =
+        sourceCleanupPolicyResolver;
 
     internal void OnCompletionHandoff(
         Guid jobId,
@@ -75,7 +88,10 @@ internal sealed partial class AudiobookContentMoveService(
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
 
         var source = NormalizeMoveDirectoryEndpoint(request.Source);
         var target = NormalizeMoveDirectoryEndpoint(request.Target);

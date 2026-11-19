@@ -17,7 +17,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity: null,
-            expectedSourceProof: null);
+            expectedSourceProof: null,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     public Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
@@ -35,7 +37,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof: null);
+            expectedSourceProof: null,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     public Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
@@ -53,7 +57,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     private async Task<IAudiobookFileRegistrationLease?>
@@ -63,7 +69,9 @@ public partial class FileMover
             string destination,
             Guid operationId,
             string? expectedRegisteredPhysicalObjectIdentity,
-            FilePublicationSourceProof? expectedSourceProof)
+            FilePublicationSourceProof? expectedSourceProof,
+            bool isCompanionFile,
+            int? companionAudiobookId)
     {
         if (action is not (
                 FileAction.Move or
@@ -103,7 +111,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile,
+            companionAudiobookId);
         if (markerless.Handled)
         {
             return markerless.Lease;
@@ -296,7 +306,7 @@ public partial class FileMover
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            LogMutation(FileMutationOutcome.Failed, action, source, destination, exception.Message);
+            LogMutation(FileMutationOutcome.Failed, action, source, destination, exception.Message, exception);
             throw new InvalidOperationException($"Unable to perform {action} on {source} to {destination}", exception);
         }
     }
@@ -314,7 +324,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity: null,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile: false,
+            companionAudiobookId: null);
         if (!markerless.Handled)
         {
             LogMutation(
@@ -341,9 +353,7 @@ public partial class FileMover
         if (journal.AudiobookId.HasValue
             || journal.State == FileMutationJournalState.NeedsAttention
             || journal.State < FileMutationJournalState.TargetVerified
-            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
-            || !lease.MatchesPhysicalObjectIdentity(
-                journal.TargetPhysicalObjectIdentity))
+            || !lease.MatchesCurrentPublication())
         {
             return false;
         }
@@ -405,15 +415,47 @@ public partial class FileMover
         return true;
     }
 
-    private void LogMutation(FileMutationOutcome outcome, FileAction action, string source, string? destination, string? reason = null)
+    private void LogMutation(
+        FileMutationOutcome outcome,
+        FileAction action,
+        string source,
+        string? destination,
+        string? reason = null,
+        Exception? exception = null)
     {
         var result = new FileMutationResult(outcome, action, source, destination, reason);
-        _logger.LogInformation(
-            "File mutation {Outcome}: {Action} {Source} -> {Destination}. Reason: {Reason}",
+        var arguments = new object?[]
+        {
             result.Outcome,
             result.Action,
             LogRedaction.SanitizeFilePath(result.SourcePath),
             LogRedaction.SanitizeFilePath(result.DestinationPath ?? string.Empty),
-            LogRedaction.SanitizeText(result.Reason ?? string.Empty));
+            LogRedaction.SanitizeText(result.Reason ?? string.Empty)
+        };
+        const string template =
+            "File mutation {Outcome}: {Action} {Source} -> {Destination}. Reason: {Reason}";
+        switch (outcome)
+        {
+            case FileMutationOutcome.Blocked:
+                _logger.LogWarning(template, arguments);
+                break;
+            case FileMutationOutcome.Failed:
+                // The exception object, not just its Message. Without it the log records
+                // that a mutation failed and not what stopped it, so a cross-device link,
+                // a permissions error and a full disk are indistinguishable afterwards.
+                // Wrapped so the exception's own messages get the same line-break
+                // sanitizing as the template arguments above.
+                _logger.LogError(
+                    exception is null ? null : new SanitizedLogException(exception),
+                    template,
+                    arguments);
+                break;
+            case FileMutationOutcome.Skipped:
+                _logger.LogDebug(template, arguments);
+                break;
+            default:
+                _logger.LogInformation(template, arguments);
+                break;
+        }
     }
 }

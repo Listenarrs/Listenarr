@@ -10,37 +10,29 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 public sealed class AudiobookDeletionIntentReconcilerTests : BaseTests
 {
     [Fact]
-    public async Task ReconcileAsync_PlannedIntent_CleansFilesystemBeforeDeletingDatabaseRow()
+    public async Task ReconcileAsync_PlannedIntent_RetainsFilesystemAndDatabaseUntilExplicitRetry()
     {
+        var root = FileService.GetTempDirectory("delete-recovery-planned");
+        var file = await FileService.GetFileAsync(root, "book.m4b", "audio");
         var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
             .WithTitle("Delete Recovery")
-            .WithBasePath(FileService.GetTempDirectory("delete-recovery-planned"))
+            .WithBasePath(root)
+            .WithFilePath(file)
             .Build());
         var store = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
         var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: true);
-        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
-        filesystem.Setup(service => service.DeleteAsync(
-                It.Is<Audiobook>(candidate => candidate.Id == audiobook.Id),
-                true,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AudiobookFilesystemDeleteResult
-            {
-                TrackedFileCleanupComplete = true
-            });
-        var reconciler = new AudiobookDeletionIntentReconciler(
-            store,
-            _audiobookRepository,
-            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
-            filesystem.Object,
-            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+        var reconciler = BuildReconciler(store);
 
         await reconciler.ReconcileAsync();
 
-        filesystem.VerifyAll();
-        Assert.Null(await _audiobookRepository.GetByIdAsync(audiobook.Id));
-        Assert.Equal(
-            AudiobookDeletionIntentState.Completed,
-            await GetIntentStateAsync(intent.Id));
+        Assert.True(File.Exists(file));
+        Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+        var persisted = await GetIntentAsync(intent.Id);
+        Assert.Equal(AudiobookDeletionIntentState.Planned, persisted.State);
+        Assert.Contains(
+            "live delete proof",
+            persisted.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -53,28 +45,18 @@ public sealed class AudiobookDeletionIntentReconcilerTests : BaseTests
         var store = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
         var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: false);
         await store.MarkFilesystemCleanupCompletedAsync(intent.Id);
-        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
-        var reconciler = new AudiobookDeletionIntentReconciler(
-            store,
-            _audiobookRepository,
-            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
-            filesystem.Object,
-            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+        var reconciler = BuildReconciler(store);
 
         await reconciler.ReconcileAsync();
 
-        filesystem.Verify(service => service.DeleteAsync(
-            It.IsAny<Audiobook>(),
-            It.IsAny<bool>(),
-            It.IsAny<CancellationToken>()), Times.Never);
         Assert.Null(await _audiobookRepository.GetByIdAsync(audiobook.Id));
         Assert.Equal(
             AudiobookDeletionIntentState.Completed,
-            await GetIntentStateAsync(intent.Id));
+            (await GetIntentAsync(intent.Id)).State);
     }
 
     [Fact]
-    public async Task ReconcileAsync_DatabaseRowAlreadyDeletedAfterCleanup_CompletesIntentWithoutRepeatingCleanup()
+    public async Task ReconcileAsync_DatabaseRowAlreadyDeletedAfterCleanup_CompletesIntent()
     {
         var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
             .WithTitle("Delete Recovery Post Commit Crash")
@@ -84,93 +66,87 @@ public sealed class AudiobookDeletionIntentReconcilerTests : BaseTests
         var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: true);
         await store.MarkFilesystemCleanupCompletedAsync(intent.Id);
         Assert.True(await _audiobookRepository.DeleteByIdAsync(audiobook.Id));
-        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
-        var reconciler = new AudiobookDeletionIntentReconciler(
-            store,
-            _audiobookRepository,
-            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
-            filesystem.Object,
-            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+        var reconciler = BuildReconciler(store);
 
         await reconciler.ReconcileAsync();
 
-        filesystem.VerifyNoOtherCalls();
         Assert.Equal(
             AudiobookDeletionIntentState.Completed,
-            await GetIntentStateAsync(intent.Id));
+            (await GetIntentAsync(intent.Id)).State);
     }
 
     [Fact]
-    public async Task ReconcileAsync_FilesystemFailure_PreservesDatabaseRowForRetry()
+    public async Task ReconcileAsync_NeedsAttentionIntent_DoesNotBlockIndependentCommittedIntent()
     {
-        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
-            .WithTitle("Delete Recovery Failure")
-            .WithBasePath(FileService.GetTempDirectory("delete-recovery-failure"))
+        var blockedBook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Scoped Delete Repair")
+            .WithBasePath(FileService.GetTempDirectory("delete-recovery-scoped-repair"))
+            .Build());
+        var committedBook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Independent Delete Commit")
+            .WithBasePath(FileService.GetTempDirectory("delete-recovery-independent"))
             .Build());
         var store = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
-        var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: true);
-        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
-        filesystem.Setup(service => service.DeleteAsync(
-                It.IsAny<Audiobook>(),
-                true,
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("Injected cleanup failure."));
-        var reconciler = new AudiobookDeletionIntentReconciler(
-            store,
-            _audiobookRepository,
-            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
-            filesystem.Object,
-            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+        var blockedIntent = await store.GetOrCreateAsync(
+            blockedBook.Id,
+            deleteFolder: true);
+        await store.MarkNeedsAttentionAsync(
+            blockedIntent.Id,
+            "Injected scoped repair state.");
+        var committedIntent = await store.GetOrCreateAsync(
+            committedBook.Id,
+            deleteFolder: false);
+        await store.MarkFilesystemCleanupCompletedAsync(committedIntent.Id);
+        var reconciler = BuildReconciler(store);
 
         await reconciler.ReconcileAsync();
 
-        Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+        Assert.NotNull(await _audiobookRepository.GetByIdAsync(blockedBook.Id));
         Assert.Equal(
-            AudiobookDeletionIntentState.Planned,
-            await GetIntentStateAsync(intent.Id));
+            AudiobookDeletionIntentState.NeedsAttention,
+            (await GetIntentAsync(blockedIntent.Id)).State);
+        Assert.Null(await _audiobookRepository.GetByIdAsync(committedBook.Id));
+        Assert.Equal(
+            AudiobookDeletionIntentState.Completed,
+            (await GetIntentAsync(committedIntent.Id)).State);
     }
 
     [Fact]
-    public async Task ReconcileAsync_IncompleteTrackedFileCleanup_RemainsPlannedWithoutFailingGlobalRecovery()
+    public async Task ReconcileAsync_PlannedIntentWithMissingDatabaseRow_BecomesScopedNeedsAttention()
     {
         var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
-            .WithTitle("Delete Recovery Pending File")
-            .WithBasePath(FileService.GetTempDirectory("delete-recovery-pending-file"))
+            .WithTitle("Delete Recovery Missing Row")
+            .WithBasePath(FileService.GetTempDirectory("delete-recovery-missing-row"))
             .Build());
         var store = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
         var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: true);
-        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
-        filesystem.Setup(service => service.DeleteAsync(
-                It.IsAny<Audiobook>(),
-                true,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AudiobookFilesystemDeleteResult
-            {
-                TrackedFileCleanupComplete = false
-            });
-        var reconciler = new AudiobookDeletionIntentReconciler(
-            store,
-            _audiobookRepository,
-            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
-            filesystem.Object,
-            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+        Assert.True(await _audiobookRepository.DeleteByIdAsync(audiobook.Id));
+        var reconciler = BuildReconciler(store);
 
         await reconciler.ReconcileAsync();
 
-        Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
-        Assert.Equal(
-            AudiobookDeletionIntentState.Planned,
-            await GetIntentStateAsync(intent.Id));
-        filesystem.VerifyAll();
+        var persisted = await GetIntentAsync(intent.Id);
+        Assert.Equal(AudiobookDeletionIntentState.NeedsAttention, persisted.State);
+        Assert.Contains(
+            "audiobook row disappeared",
+            persisted.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<AudiobookDeletionIntentState> GetIntentStateAsync(Guid intentId)
+    private AudiobookDeletionIntentReconciler BuildReconciler(
+        IAudiobookDeletionIntentStore store) =>
+        new(
+            store,
+            _audiobookRepository,
+            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
+            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+
+    private async Task<AudiobookDeletionIntent> GetIntentAsync(Guid intentId)
     {
         var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         return await db.AudiobookDeletionIntents
-            .Where(candidate => candidate.Id == intentId)
-            .Select(candidate => candidate.State)
-            .SingleAsync();
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == intentId);
     }
 }

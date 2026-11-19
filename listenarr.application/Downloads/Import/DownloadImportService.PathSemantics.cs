@@ -16,13 +16,31 @@ public partial class DownloadImportService
             throw new InvalidOperationException(reason);
         }
 
-        var mode = await ResolveDestinationCaseSensitivityModeAsync(
+        var contract = await ResolveDestinationCaseContractAsync(
             canonicalBasePath,
             cancellationToken);
         var resolution = await semanticsResolver.ResolveAsync(
             canonicalBasePath,
-            mode,
+            contract.Mode,
             cancellationToken);
+        if (contract.Mode == FileSystemCaseSensitivityMode.Auto
+            && contract.ManagedSemantics is { } managedSemantics)
+        {
+            if (resolution.State == PathIdentityState.Unavailable)
+            {
+                resolution = await semanticsResolver.ResolveAsync(
+                    canonicalBasePath,
+                    managedSemantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive,
+                    cancellationToken);
+            }
+            if (resolution.State == PathIdentityState.Valid && resolution.Semantics != managedSemantics)
+            {
+                throw new InvalidOperationException(
+                    "The destination folder case rules differ from the configured root contract.");
+            }
+        }
         return resolution.State == PathIdentityState.Valid
             ? resolution
             : throw new InvalidOperationException(
@@ -126,7 +144,7 @@ public partial class DownloadImportService
             destinationResolution.Semantics.Syntax);
     }
 
-    private async Task<FileSystemCaseSensitivityMode> ResolveDestinationCaseSensitivityModeAsync(
+    private async Task<(FileSystemCaseSensitivityMode Mode, FileSystemPathSemantics? ManagedSemantics)> ResolveDestinationCaseContractAsync(
         string basePath,
         CancellationToken cancellationToken)
     {
@@ -138,7 +156,8 @@ public partial class DownloadImportService
                 "The download-import destination does not have a valid host filesystem identity.");
         }
 
-        RootFolder? bestRoot = null;
+        var bestMode = FileSystemCaseSensitivityMode.Auto;
+        FileSystemPathSemantics? bestSemantics = null;
         var bestRootLength = -1;
         var unavailableRootLength = -1;
         foreach (var root in await rootFolderService.GetAllAsync())
@@ -192,7 +211,10 @@ public partial class DownloadImportService
 
             if (canonicalRoot.Length > bestRootLength)
             {
-                bestRoot = root;
+                // Apply the freshly resolved root contract to descendants, including
+                // empty audiobook folders that cannot supply read-only case evidence.
+                bestMode = root.CaseSensitivityMode;
+                bestSemantics = resolution.Semantics;
                 bestRootLength = canonicalRoot.Length;
             }
         }
@@ -204,7 +226,7 @@ public partial class DownloadImportService
                 "A configured root that may contain this download-import destination has unavailable or ambiguous persisted filesystem identity. Repair or change that root before importing here.");
         }
 
-        return bestRoot?.CaseSensitivityMode ?? FileSystemCaseSensitivityMode.Auto;
+        return (bestMode, bestSemantics);
     }
 
     private async Task<FileSystemPathSemantics> ResolvePathSemanticsAsync(

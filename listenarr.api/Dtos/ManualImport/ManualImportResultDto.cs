@@ -27,6 +27,11 @@ namespace Listenarr.Api.Dtos.ManualImport
         public string? Error { get; set; }
         public bool Skipped { get; set; }
         public string? SkipReason { get; set; }
+        public string? RequestedAction { get; set; }
+        public string? EffectiveAction { get; set; }
+        public string? SourceDisposition { get; set; }
+        public string? WarningCode { get; set; }
+        public string? Warning { get; set; }
 
         public static ManualImportResultDto SkippedResult(
             string reason,

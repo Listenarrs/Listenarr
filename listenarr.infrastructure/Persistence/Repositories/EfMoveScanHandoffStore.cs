@@ -100,7 +100,9 @@ public sealed partial class EfMoveScanHandoffStore(
                     EventType = "Moved",
                     Outcome = HistoryOutcome.Succeeded,
                     Source = "Move",
-                    Message = $"Moved audiobook files from {command.Source} to {command.Target}",
+                    Message = command.SourceRetained
+                        ? $"Copied audiobook files from {command.Source} to {command.Target}; source retained"
+                        : $"Moved audiobook files from {command.Source} to {command.Target}",
                     Timestamp = now,
                     CorrelationId = correlationId,
                     IdempotencyKey = moveIdempotencyKey,
@@ -108,7 +110,8 @@ public sealed partial class EfMoveScanHandoffStore(
                     {
                         JobId = command.MoveJobId,
                         Source = command.Source,
-                        Target = command.Target
+                        Target = command.Target,
+                        command.SourceRetained
                     })
                 };
                 db.History.Add(moveHistory);

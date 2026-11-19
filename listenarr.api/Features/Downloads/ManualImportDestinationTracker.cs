@@ -138,7 +138,8 @@ public sealed class ManualImportDestinationTracker(
         {
             return new ManualImportDestinationReservation(
                 desiredDestination,
-                boundaryKey);
+                boundaryKey,
+                ReusesExistingFile: true);
         }
 
         // Use the destination volume's case rules for both in-memory batch collisions
@@ -179,4 +180,7 @@ public sealed class ManualImportDestinationTracker(
     }
 }
 
-public sealed record ManualImportDestinationReservation(string Path, string BoundaryKey);
+public sealed record ManualImportDestinationReservation(
+    string Path,
+    string BoundaryKey,
+    bool ReusesExistingFile = false);

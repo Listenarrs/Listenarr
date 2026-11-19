@@ -20,7 +20,8 @@ namespace Listenarr.Application.Downloads.Submission
     {
         public async Task<string> CreateTrackedDownloadAsync(
             PreparedDirectDownloadSubmission submission,
-            int? audiobookId)
+            int? audiobookId,
+            string? releaseIdentifier = null)
         {
             if (submission.Artifacts.Count == 0)
             {
@@ -50,6 +51,10 @@ namespace Listenarr.Application.Downloads.Submission
                     OriginalUrl = primaryArtifact.DownloadUri.ToString(),
                     Progress = 0,
                     TotalSize = submission.Size,
+                    // TotalSize is not usable as an identity input here: DirectDownloadProcessor
+                    // raises it three separate times as bytes arrive. ExpectedFileSize holds the
+                    // advertised size unchanged.
+                    ExpectedFileSize = submission.Size,
                     DownloadedSize = 0,
                     DownloadPath = string.Empty,
                     FinalPath = string.Empty,
@@ -73,6 +78,14 @@ namespace Listenarr.Application.Downloads.Submission
                             artifact => artifact.Packaging == DirectDownloadArtifactPackaging.Archive)
                     }
                 };
+
+                // Same stamp as the client-backed path in DownloadRecordFactory. A direct download
+                // that fails has to be blockable by the identity the search result was grabbed
+                // under, or the automatic search picks the same dead link up again.
+                if (!string.IsNullOrWhiteSpace(releaseIdentifier))
+                {
+                    download.SetMetadata(ReleaseIdentity.MetadataKey, releaseIdentifier);
+                }
 
                 await downloadRepository.AddAsync(download);
                 return id;

@@ -152,7 +152,12 @@ Never use `async void` in production code. Always use `async Task` — `async vo
 - Only add repository data *after* calling `Init()`.
 - Use builder classes under `tests/Builders/` with fluent `.With...().Build()` chains for coherent test entities. Add a focused builder rather than repeating multi-property inline object initializers.
 - Structure tests as Given / When / Then.
-- API mocks inherit `BaseMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
+- Metadata providers (Audible, Audnexus, OpenLibrary) are answered by `tests/Listenarr.FakeProviders` (route class per provider, fixtures per provider); never hand-mock them. Download client and tracker API mocks live in `tests/Mocks/{Category}/` and inherit `BaseApiMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
+- Wall-clock assertions on Listenarr code take their limit from `CoverageInstrumentation.TimeLimitMilliseconds(typeof(TestedClass), ms)` (`tests/Common/`): coverage instrumentation (off by default; `tests/coverage.runsettings`, the `coverage` input of the `Run Tests` workflow) slows instrumented code several times.
+
+### Running CI on a Fork
+
+`npm run ci:fork -- [--jobs a,b] [--runner <name|label|github>] [--ref <branch>]` (`scripts/ci/run-tests.mjs`) runs the `Run Tests` workflow on the contributor's fork for the working tree as it is (a throwaway `ci/wip-<branch>` snapshot branch) or for a pushed branch, on a self-hosted runner of the fork or GitHub's, and reports one line per job. Run only the jobs a change concerns. See "Running CI on your fork" in `CONTRIBUTING.md`.
 
 ### Pre-Push Checks
 

@@ -2,6 +2,7 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
 {
+    internal bool ForceCopyForHardlinkForTest { get; init; }
     internal Func<string, string, Task>? AfterFileMoveEndpointsResolvedForTestAsync
     {
         get;
@@ -102,6 +103,7 @@ public partial class FileMover
     }
     internal bool DisableNativeFileRenameForTest { get; init; }
     internal bool ForceCrossVolumeForTest { get; init; }
+    internal bool ForceContentOnlySourceProofForTest { get; init; }
     internal Action<string>? BeforeFileMoveDurabilityBarrierForTest { get; init; }
     internal string? FileMoveLockDirectoryForTest { get; init; }
 }

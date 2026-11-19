@@ -41,16 +41,6 @@
               <strong>{{ filesystemBehaviorTitle }}</strong>
               <small class="semantics-help">{{ filesystemBehaviorDetail }}</small>
             </div>
-
-            <button
-              v-if="needsCaseSettingConfirmation"
-              type="button"
-              class="btn btn-primary detected-semantics-action"
-              :disabled="rootFilesystemMutationLocked"
-              @click="useDetectedCaseSetting"
-            >
-              Use detected setting: {{ detectedCaseSettingLabel }}
-            </button>
           </div>
 
           <details class="advanced-semantics">
@@ -64,7 +54,7 @@
               class="form-input"
               :disabled="rootFilesystemMutationLocked"
             >
-              <option value="Auto">Automatic (recommended)</option>
+              <option value="Auto">Automatic when supported</option>
               <option value="Sensitive">Case-sensitive</option>
               <option value="Insensitive">Case-insensitive</option>
             </select>
@@ -157,11 +147,6 @@ import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
 import { persistedRootPathKind, rootFolderPathChanged } from '@/utils/rootFolderPath'
-import {
-  caseSensitivityLabel,
-  detectedMutationSemantics,
-  needsMutationSemanticsConfirmation,
-} from '@/composables/useMutationSemanticsConfirmation'
 
 const { root } = defineProps<{ root?: RootFolder }>()
 const emit = defineEmits<{
@@ -189,40 +174,20 @@ const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
 
-const detectedCaseSetting = computed(() => (root ? detectedMutationSemantics(root) : null))
-const needsCaseSettingConfirmation = computed(
-  () =>
-    Boolean(root) &&
-    form.value.caseSensitivityMode === 'Auto' &&
-    needsMutationSemanticsConfirmation(root!),
-)
-const detectedCaseSettingLabel = computed(() =>
-  detectedCaseSetting.value ? caseSensitivityLabel(detectedCaseSetting.value) : 'unknown',
-)
 const filesystemBehaviorTitle = computed(() => {
-  if (needsCaseSettingConfirmation.value) return 'Confirmation needed'
   if (form.value.caseSensitivityMode === 'Sensitive') return 'Case-sensitive'
   if (form.value.caseSensitivityMode === 'Insensitive') return 'Case-insensitive'
-  return 'Automatic (recommended)'
+  return 'Automatic when supported'
 })
 const filesystemBehaviorDetail = computed(() => {
-  if (needsCaseSettingConfirmation.value) {
-    return `Listenarr detected ${detectedCaseSettingLabel.value} behavior, but this storage cannot report it reliably enough for file moves and deletes. Confirm the detected setting to enable those operations.`
-  }
   if (form.value.caseSensitivityMode !== 'Auto') {
     return 'File operations will use this explicitly configured behavior.'
   }
   if (root?.resolvedCaseSensitivity && root.resolvedCaseSensitivity !== 'Unknown') {
-    return `Detected ${caseSensitivityLabel(root.resolvedCaseSensitivity)} behavior automatically.`
+    return `Detected ${root.resolvedCaseSensitivity === 'Sensitive' ? 'case-sensitive' : 'case-insensitive'} behavior automatically.`
   }
   return 'Listenarr will detect case behavior automatically when the storage provides reliable evidence.'
 })
-
-function useDetectedCaseSetting() {
-  if (detectedCaseSetting.value) {
-    form.value.caseSensitivityMode = detectedCaseSetting.value
-  }
-}
 
 // Local state for showing the inline folder browser
 const showBrowser = ref(false)

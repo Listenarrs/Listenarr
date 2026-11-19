@@ -1,5 +1,10 @@
+# Runs the native backend tests (the whole solution) after checking the runner's capabilities.
+# -CoverageDirectory <dir> (default: $env:LISTENARR_COVERAGE_DIRECTORY, unset: no coverage) also collects
+# their coverage (tests/coverage.runsettings): one <dir>/<guid>/coverage.cobertura.xml per test project.
 [CmdletBinding()]
-param()
+param(
+    [string]$CoverageDirectory = $env:LISTENARR_COVERAGE_DIRECTORY
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -60,10 +65,15 @@ try {
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {
+        $coverageArguments = @()
+        if ($CoverageDirectory) {
+            $coverageArguments = @('--settings', 'tests/coverage.runsettings', '--results-directory', $CoverageDirectory)
+        }
         & dotnet test listenarr.slnx `
             -c Release `
             --no-build `
-            --logger 'console;verbosity=normal'
+            --logger 'console;verbosity=normal' `
+            @coverageArguments
         $exitCode = $LASTEXITCODE
     }
 

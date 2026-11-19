@@ -76,6 +76,8 @@ internal static class DownloadRegistrationExtensions
             provider.GetRequiredService<FileMover>());
         services.AddScoped<IFilePublicationSourceCapability>(provider =>
             provider.GetRequiredService<FileMover>());
+        services.AddScoped<IFilePublicationCapabilityResolver,
+            FilePublicationCapabilityResolver>();
         services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
         services.AddOptions<FileMoverOptions>()
             .Bind(configuration.GetSection("FileMover"))

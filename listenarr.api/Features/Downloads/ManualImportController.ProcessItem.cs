@@ -16,6 +16,7 @@ public partial class ManualImportController
         List<RootFolder> rootFolders,
         ApplicationSettings settings,
         bool hasMultipleFile,
+        Guid compatibilityBatchId,
         CancellationToken cancellationToken)
     {
         try
@@ -60,6 +61,39 @@ public partial class ManualImportController
                 return ManualImportResultDto.FailureResult(
                     "Source file is not within the requested import path or a configured root folder",
                     item.FullPath);
+            }
+
+            // An ambiguous container cannot be admitted on its extension, because the same
+            // extension carries audiobooks and films. Probe the content once, here, before any
+            // filesystem mutation is planned, so a film is refused with a reason the user can act
+            // on rather than failing late with a generic registration error. One probe per
+            // user-selected item is affordable; the library scanner, which walks every file,
+            // stays extension-only and never reaches this.
+            if (FileUtils.IsAmbiguousAudioContainer(item.FullPath)
+                && !FileUtils.IsAudioFile(item.FullPath))
+            {
+                var probedContent = await _metadataService.ExtractFileMetadataAsync(
+                    item.FullPath);
+                if (probedContent == null)
+                {
+                    return ManualImportResultDto.FailureResult(
+                        "Failed to extract metadata from file",
+                        item.FullPath);
+                }
+
+                if (!FileUtils.IsProbedAudioContent(probedContent))
+                {
+                    _logger.LogInformation(
+                        "Refused manual import of ambiguous container {Path}: audio stream {HasAudio}, video stream {HasVideo}",
+                        LogRedaction.SanitizeFilePath(item.FullPath),
+                        probedContent.HasAudioStream,
+                        probedContent.HasVideoStream);
+                    return ManualImportResultDto.FailureResult(
+                        probedContent.HasVideoStream
+                            ? "The file carries video, so it was not imported as an audiobook."
+                            : "The file carries no audio stream.",
+                        item.FullPath);
+                }
             }
 
             if (action == FileAction.None)
@@ -191,13 +225,29 @@ public partial class ManualImportController
                     item.FullPath);
             }
 
-            var destinationReservation =
-                await destinationTracker.PlanIdempotentOrUniqueAsync(
-                    sourceProof,
-                    destinationPath,
-                    destinationResolution,
-                    cancellationToken);
-            destinationPath = destinationReservation.Path;
+            var requestedDestinationPath = destinationPath;
+            ManualImportDestinationReservation destinationReservation;
+            AudiobookFileOwnershipCheckResult ownership;
+            while (true)
+            {
+                destinationReservation =
+                    await destinationTracker.PlanIdempotentOrUniqueAsync(
+                        sourceProof,
+                        requestedDestinationPath,
+                        destinationResolution,
+                        cancellationToken);
+                destinationPath = destinationReservation.Path;
+                ownership = await _audiobookFileService
+                    .CheckAudiobookFileOwnershipAsync(
+                        audiobook,
+                        destinationPath,
+                        pathPlan.AudiobookBasePath,
+                        cancellationToken);
+                // A byte-identical existing destination may be adopted when
+                // ownership is available. Content proof is the idempotency evidence;
+                // persisted kernel identity is intentionally irrelevant.
+                break;
+            }
             var authoritativeBasePath = pathPlan.AudiobookBasePath;
             if (string.IsNullOrWhiteSpace(authoritativeBasePath))
             {
@@ -206,12 +256,6 @@ public partial class ManualImportController
                     item.FullPath);
             }
 
-            var ownership = await _audiobookFileService
-                .CheckAudiobookFileOwnershipAsync(
-                    audiobook,
-                    destinationPath,
-                    authoritativeBasePath,
-                    cancellationToken);
             if (ownership.Outcome is not (
                     AudiobookFileOwnershipCheckOutcome.Available or
                     AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook))
@@ -241,6 +285,32 @@ public partial class ManualImportController
                 };
             }
 
+            var publicationPlan = _filePublicationCapabilityResolver == null
+                ? FilePublicationPlan.Durable(action)
+                : await _filePublicationCapabilityResolver.ResolveAsync(
+                    action,
+                    item.FullPath,
+                    destinationPath,
+                    sourceProof,
+                    cancellationToken,
+                    compatibilityBatchId,
+                    CompatibilityCleanupOwner.Listenarr);
+            if (!publicationPlan.IsAllowed)
+            {
+                return new ManualImportResultDto
+                {
+                    Success = false,
+                    Error = publicationPlan.Message,
+                    SourcePath = item.FullPath,
+                    DestinationPath = destinationPath,
+                    Audiobook = audiobook,
+                    RequestedAction = action.ToString(),
+                    EffectiveAction = publicationPlan.EffectiveAction.ToString(),
+                    SourceDisposition = publicationPlan.SourceDisposition.ToString(),
+                    WarningCode = publicationPlan.ReasonCode
+                };
+            }
+
             var operationId = FileMoveOperationIdentity.CreateForPaths(
                 "manual-import",
                 audiobook.Id,
@@ -250,9 +320,9 @@ public partial class ManualImportController
                 sourceProof,
                 destinationPath,
                 destinationSemantics);
-            using (var registrationLease =
+            var preparation =
                 await PrepareOwnedManualImportActionForRegistrationAsync(
-                    action,
+                    publicationPlan,
                     item.FullPath,
                     destinationPath,
                     audiobook,
@@ -262,15 +332,43 @@ public partial class ManualImportController
                     operationId,
                     ownership.ExistingFile?.PhysicalObjectIdentity,
                     sourceProof,
-                    cancellationToken))
+                    cancellationToken);
+            var metadataEnrichmentDeferred = preparation.RegistrationLease != null
+                && !preparation.RegistrationLease.SupportsMetadataWrite
+                && !string.IsNullOrWhiteSpace(audiobook.Asin);
+            using (var registrationLease = preparation.RegistrationLease)
             {
-                if (registrationLease == null
-                    || !await RegisterPublishedManualImportAsync(
-                        audiobook,
-                        ownership,
-                        registrationLease,
-                        authoritativeBasePath,
-                        cancellationToken))
+                if (registrationLease == null)
+                {
+                    return new ManualImportResultDto
+                    {
+                        Success = false,
+                        Error = preparation.Message
+                            ?? "The file could not be published and registered safely.",
+                        SourcePath = item.FullPath,
+                        DestinationPath = destinationPath,
+                        Audiobook = audiobook
+                    };
+                }
+
+                var registered = publicationPlan.Mode is
+                        FilePublicationExecutionMode.AdditiveCopyRetainSource or
+                        FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
+                        ? await _audiobookFileService
+                            .RegisterCompatibilityPublicationWithBasePathAsync(
+                                audiobook,
+                                ownership,
+                                registrationLease,
+                                authoritativeBasePath,
+                                "manual-import",
+                                cancellationToken)
+                        : await RegisterPublishedManualImportAsync(
+                            audiobook,
+                            ownership,
+                            registrationLease,
+                            authoritativeBasePath,
+                            cancellationToken);
+                if (!registered)
                 {
                     return new ManualImportResultDto
                     {
@@ -282,7 +380,7 @@ public partial class ManualImportController
                     };
                 }
 
-                if (action == FileAction.Move
+                if (publicationPlan.EffectiveAction == FileAction.Move
                     && !await _fileMover.CompletePreparedMoveAsync(
                         item.FullPath,
                         destinationPath,
@@ -303,7 +401,8 @@ public partial class ManualImportController
                     };
                 }
 
-                if (!string.IsNullOrWhiteSpace(audiobook.Asin))
+                if (registrationLease.SupportsMetadataWrite
+                    && !string.IsNullOrWhiteSpace(audiobook.Asin))
                 {
                     try
                     {
@@ -340,7 +439,15 @@ public partial class ManualImportController
                 Success = true,
                 SourcePath = item.FullPath,
                 DestinationPath = destinationPath,
-                Audiobook = audiobook
+                Audiobook = audiobook,
+                RequestedAction = action.ToString(),
+                EffectiveAction = publicationPlan.EffectiveAction.ToString(),
+                SourceDisposition = publicationPlan.SourceDisposition.ToString(),
+                WarningCode = publicationPlan.ReasonCode
+                    ?? (metadataEnrichmentDeferred ? "metadata_enrichment_deferred" : null),
+                Warning = metadataEnrichmentDeferred
+                    ? $"{publicationPlan.Message} ASIN tagging was deferred to preserve verified import recovery.".Trim()
+                    : publicationPlan.Message
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException

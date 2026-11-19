@@ -32,6 +32,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
 
             if (ffprobeData.TryGetProperty("streams", out var streams) && streams.ValueKind == JsonValueKind.Array)
             {
+                ApplyStreamPresence(metadata, streams);
                 ApplyAudioStream(metadata, streams);
             }
 
@@ -91,6 +92,39 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
                 metadata.Format = primary.ToUpperInvariant();
                 metadata.Container = primary.ToUpperInvariant();
             }
+        }
+
+        private static void ApplyStreamPresence(AudioMetadata metadata, JsonElement streams)
+        {
+            foreach (var s in streams.EnumerateArray())
+            {
+                if (!s.TryGetProperty("codec_type", out var codecType) || codecType.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                switch (codecType.GetString())
+                {
+                    case "audio":
+                        metadata.HasAudioStream = true;
+                        break;
+                    case "video" when !IsAttachedPicture(s):
+                        metadata.HasVideoStream = true;
+                        break;
+                }
+            }
+        }
+
+        // Cover art is carried as a video stream flagged disposition.attached_pic = 1. It is a
+        // still image, not playable video, so it must not count as a video stream when deciding
+        // whether an ambiguous container is an audiobook.
+        private static bool IsAttachedPicture(JsonElement stream)
+        {
+            return stream.TryGetProperty("disposition", out var disposition)
+                && disposition.ValueKind == JsonValueKind.Object
+                && disposition.TryGetProperty("attached_pic", out var attached)
+                && attached.ValueKind == JsonValueKind.Number
+                && attached.GetInt32() == 1;
         }
 
         private static void ApplyAudioStream(AudioMetadata metadata, JsonElement streams)

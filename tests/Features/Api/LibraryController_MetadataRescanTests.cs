@@ -17,7 +17,7 @@
  */
 using System.Net;
 using System.Text.Json;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -39,16 +39,14 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(service => service.GetMetadataAsync("B0MOVEFENC", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0MOVEFENC",
                         Title = "Provider Title"
                     },
-                    source = "Audible",
-                    sourceUrl = "https://audible.com"
-                });
+                    "Audible",
+                    "https://audible.com"));
             var factory = _factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureServices(services =>
@@ -123,14 +121,77 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_StoresContributorNamesWithoutTheirRoleSuffix()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B00EZAXAF8", "us", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B00EZAXAF8",
+                        Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                        Authors = new List<AudibleAuthor>
+                        {
+                            new() { Name = "Constance Garnett - translator" },
+                            new() { Name = "Fyodor Dostoevsky" }
+                        }
+                    },
+                    "Audible",
+                    "https://audible.com"));
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                });
+            });
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                    Authors = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" },
+                    Asin = "B00EZAXAF8",
+                    ExternalIdentifiers =
+                    [
+                        new AudiobookExternalIdentifier
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B00EZAXAF8",
+                            ValueNormalized = "B00EZAXAF8",
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    ]
+                };
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            using var client = factory.CreateClient();
+            var response = await PostRescanAsync(client, audiobookId);
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            using var verificationScope = factory.Services.CreateScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var updated = await verification.Audiobooks.SingleAsync(book => book.Id == audiobookId);
+            Assert.Equal(new[] { "Fyodor Dostoevsky", "Constance Garnett" }, updated.Authors);
+        }
+
+        [Fact]
         public async Task RescanMetadata_UsesIdentifiersAndUpdatesAudiobook()
         {
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync("B0TESTASIN", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0TESTASIN",
                         Title = "Fixed Metadata Title",
@@ -149,9 +210,8 @@ namespace Listenarr.Tests.Features.Api
                         Language = "English",
                         Isbn = "9781234567897"
                     },
-                    source = "Audible",
-                    sourceUrl = "https://audible.de"
-                });
+                    "Audible",
+                    "https://audible.de"));
 
             var asinLookupMock = new Mock<IAsinLookupService>();
 
@@ -252,6 +312,160 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_KeepsTheRegionOfTheImportedAsinIdentifier()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B077XZC72T", "fr", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B077XZC72T",
+                        Title = "Dragons et serpents",
+                        Subtitle = "Les cités des Anciens 1",
+                        Authors = new List<AudibleAuthor> { new() { Name = "Robin Hobb" } },
+                        Narrators = new List<AudibleNarrator> { new() { Name = "Raphaël Mathon" } },
+                        Language = "French",
+                        Isbn = "9782290000007"
+                    },
+                    "Audible",
+                    "https://api.audible.com"));
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                    services.RemoveAll<IAsinLookupService>();
+                    services.AddSingleton(new Mock<IAsinLookupService>().Object);
+                });
+            });
+
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Dragons et serpents",
+                    Authors = new List<string> { "Robin Hobb" },
+                    Monitored = true,
+                    Asin = "B077XZC72T",
+                    ExternalIdentifiers = new List<AudiobookExternalIdentifier>
+                    {
+                        new()
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B077XZC72T",
+                            ValueNormalized = "B077XZC72T",
+                            Region = "fr",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Imported
+                        }
+                    }
+                };
+
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            var response = await PostRescanAsync(factory.CreateClient(), audiobookId);
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var updated = await db.Audiobooks
+                    .Include(a => a.ExternalIdentifiers)
+                    .FirstAsync(a => a.Id == audiobookId);
+
+                // The ISBN proves the imported identifiers were rebuilt by this rescan.
+                Assert.Contains(updated.ExternalIdentifiers!, i =>
+                    i.Type == AudiobookExternalIdentifierType.Isbn && i.ValueNormalized == "9782290000007");
+                var asin = Assert.Single(updated.ExternalIdentifiers!, i => i.Type == AudiobookExternalIdentifierType.Asin);
+                Assert.Equal("fr", asin.Region);
+            }
+
+            metadataMock.Verify(m => m.GetMetadataAsync("B077XZC72T", "fr", false), Times.Once);
+            metadataMock.Verify(m => m.GetMetadataAsync("B077XZC72T", "us", false), Times.Never);
+        }
+
+        [Fact]
+        public async Task RescanMetadata_DoesNotSwitchCatalogueWhenTheAsinRegionHasNoRecord()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B008DFUGCQ", "fr", false))
+                .ReturnsAsync((AudiobookMetadataEnvelope?)null);
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B008DFUGCQ", "us", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse { Asin = "B008DFUGCQ", Title = "A Princess of Mars" },
+                    "Audible",
+                    "https://api.audible.com"));
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                    services.RemoveAll<IAsinLookupService>();
+                    services.AddSingleton(new Mock<IAsinLookupService>().Object);
+                });
+            });
+
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Une princesse de Mars",
+                    Authors = new List<string> { "Edgar Rice Burroughs" },
+                    Monitored = true,
+                    Asin = "B008DFUGCQ",
+                    ExternalIdentifiers = new List<AudiobookExternalIdentifier>
+                    {
+                        new()
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B008DFUGCQ",
+                            ValueNormalized = "B008DFUGCQ",
+                            Region = "fr",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    }
+                };
+
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            var response = await PostRescanAsync(factory.CreateClient(), audiobookId);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var unchanged = await db.Audiobooks
+                    .Include(a => a.ExternalIdentifiers)
+                    .FirstAsync(a => a.Id == audiobookId);
+
+                Assert.Equal("Une princesse de Mars", unchanged.Title);
+                var asin = Assert.Single(unchanged.ExternalIdentifiers!, i => i.Type == AudiobookExternalIdentifierType.Asin);
+                Assert.Equal("fr", asin.Region);
+            }
+
+            metadataMock.Verify(m => m.GetMetadataAsync("B008DFUGCQ", "us", false), Times.Never);
+            metadataMock.Verify(m => m.GetMetadataAsync("B008DFUGCQ", "uk", false), Times.Never);
+        }
+
+        [Fact]
         public async Task RescanMetadata_PublishesImageOnlyAfterMetadataCommit()
         {
             const string asin = "B0IMGORDER";
@@ -261,16 +475,15 @@ namespace Listenarr.Tests.Features.Api
                     asin,
                     "us",
                     false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = asin,
                         Title = "Committed Before Image",
                         ImageUrl = sourceImage
                     },
-                    source = "Audible"
-                });
+                    "Audible",
+                    "https://api.audible.com"));
             Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>?
                 configuredFactory = null;
             var imageCache = new Mock<IImageCacheService>();
@@ -357,15 +570,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = "B0PATHRACE",
                             Title = "Updated During Race"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -439,15 +651,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = "B0METARACE",
                             Title = "Provider Title"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -523,15 +734,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = asin,
                             Title = "Provider Title"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -596,15 +806,14 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync("B0COOLDWN1", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0COOLDWN1",
                         Title = "Cooldown Test"
                     },
-                    source = "Audible"
-                });
+                    "Audible",
+                    "https://api.audible.com"));
 
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -668,7 +877,7 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), false))
-                .ReturnsAsync((object?)null);
+                .ReturnsAsync((AudiobookMetadataEnvelope?)null);
 
             var factory = _factory.WithWebHostBuilder(builder =>
             {

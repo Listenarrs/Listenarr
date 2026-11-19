@@ -139,7 +139,8 @@ Never use `async void` in production code. Always use `async Task` — `async vo
 - Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
 - Call `Init()` (optionally with DI overrides) before adding test data. Only add repository data *after* `Init()`.
 - Use builder classes under `tests/Builders/` with fluent `.With...().Build()` chains for coherent test entities.
-- Structure tests as Given / When / Then. API mocks inherit `BaseMock`.
+- Structure tests as Given / When / Then. Download client and tracker API mocks (`tests/Mocks/{Category}/`) inherit `BaseApiMock`; metadata providers are answered by `tests/Listenarr.FakeProviders` fixtures, never hand-mocked.
+- Wall-clock assertions on Listenarr code take their limit from `CoverageInstrumentation.TimeLimitMilliseconds(typeof(TestedClass), ms)` (`tests/Common/`): coverage instrumentation (off by default; `tests/coverage.runsettings`, the `coverage` input of the `Run Tests` workflow) slows instrumented code several times.
 
 ### Pre-Push Checks
 The pre-push hook runs on `git push`:

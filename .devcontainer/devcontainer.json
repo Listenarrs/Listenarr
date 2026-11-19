@@ -1,0 +1,29 @@
+{
+  "name": "Listenarr",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    // Its own Docker daemon, not the host's: the backend integration runner mounts
+    // temporary directories of this container into the Listenarr container.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "remoteUser": "vscode",
+  "forwardPorts": [4545, 5173],
+  "portsAttributes": {
+    "4545": { "label": "Listenarr API" },
+    "5173": { "label": "Vite" }
+  },
+  "onCreateCommand": ".devcontainer/docker-iptables.sh",
+  "postCreateCommand": "npm ci --engine-strict && npm ci --prefix fe --engine-strict && dotnet restore listenarr.slnx",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "Vue.volar",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  }
+}

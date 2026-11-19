@@ -531,8 +531,8 @@ describe('AddLibraryModal relative path derivation', () => {
     vi.mocked(apiService.addToLibrary)
       .mockImplementationOnce(() => oldAdd.promise)
       .mockImplementationOnce(() => newAdd.promise)
-    const oldBook = { ...fakeBook, asin: 'OLD-ADD', title: 'Old Add Book' }
-    const newBook = { ...fakeBook, asin: 'NEW-ADD', title: 'New Add Book' }
+    const oldBook = { ...fakeBook, asin: 'B0OLDADD01', title: 'Old Add Book' }
+    const newBook = { ...fakeBook, asin: 'B0NEWADD01', title: 'New Add Book' }
     const wrapper = mount(AddLibraryModal, {
       props: { visible: false, book: oldBook },
       attachTo: document.body,

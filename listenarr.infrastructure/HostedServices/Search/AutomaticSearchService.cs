@@ -24,22 +24,39 @@ namespace Listenarr.Infrastructure.HostedServices.Search
     public class AutomaticSearchService(
         ILogger<AutomaticSearchService> logger,
         IAutomaticSearchProcessor processor,
-        IWorkerCycleRunner cycleRunner) : BackgroundService
+        IWorkerCycleRunner cycleRunner,
+        IServiceScopeFactory scopeFactory) : BackgroundService
     {
-        private static readonly TimeSpan SearchInterval = TimeSpan.FromHours(6);
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            logger.LogInformation("AutomaticSearchService started. Will search monitored audiobooks every {Hours} hours", SearchInterval.TotalHours);
+            logger.LogInformation("AutomaticSearchService started. Sweep interval and per-book cooldown are read from settings each cycle");
 
             await cycleRunner.RunPeriodicAsync(
                 nameof(AutomaticSearchService),
                 initialDelay: TimeSpan.FromMinutes(5),
-                intervalProvider: () => SearchInterval,
+                intervalProvider: GetSweepInterval,
                 runCycle: processor.RunCycleAsync,
                 stoppingToken);
 
             logger.LogInformation("AutomaticSearchService stopped");
+        }
+
+        // Read each cycle so a settings change takes effect without a restart. The sweep
+        // cadence only decides how often the worker looks; eligibility is the cooldown's job.
+        private TimeSpan GetSweepInterval()
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = configurationService.GetApplicationSettingsAsync().GetAwaiter().GetResult();
+                return AutomaticSearchTiming.FromSettings(settings).SweepInterval;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogWarning(ex, "Could not read automatic-search timing settings; sweeping every {Hours} hour(s)", AutomaticSearchTiming.Default.SweepInterval.TotalHours);
+                return AutomaticSearchTiming.Default.SweepInterval;
+            }
         }
     }
 
@@ -73,11 +90,14 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
-            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var automaticScoring = scope.ServiceProvider.GetRequiredService<IAutomaticSearchScoringService>();
 
-            // Get all monitored audiobooks that haven't been searched in the last 6 hours
-            var cutoffTime = DateTime.UtcNow.AddHours(-6);
+            var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
+
+            // A book is eligible once per cooldown, however often the sweep itself runs.
+            var cutoffTime = timing.EligibilityCutoff(DateTime.UtcNow);
             var monitoredAudiobooks = await audiobookRepository.GetMonitoredAudiobooksForSearchAsync(cutoffTime, stoppingToken);
 
             _logger.LogInformation("Found {Count} monitored audiobooks eligible for automatic search", monitoredAudiobooks.Count);
@@ -91,6 +111,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var processedCount = 0;
             var downloadsQueued = 0;
 
+            var isFirstBook = true;
             foreach (var audiobook in monitoredAudiobooks)
             {
                 if (stoppingToken.IsCancellationRequested)
@@ -98,8 +119,15 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
                 try
                 {
+                    // Pause between books so a large wanted list does not hammer the indexers.
+                    if (!isFirstBook && timing.BookDelay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(timing.BookDelay, stoppingToken);
+                    }
+                    isFirstBook = false;
+
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, downloadService, automaticScoring, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -132,8 +160,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         private async Task<int> ProcessAudiobookAsync(
             Audiobook audiobook,
             ISearchService searchService,
-            IQualityProfileService qualityProfileService,
             IDownloadService downloadService,
+            IAutomaticSearchScoringService automaticScoring,
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
@@ -182,6 +210,24 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
+            // Author-free fallback: release names often omit the author, so a full title+author
+            // query can return nothing even when the book is available. Retry without the author,
+            // then assess every broadened result with the same identity and quality policy.
+            if (searchResults.Count == 0)
+            {
+                var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
+                if (!string.IsNullOrWhiteSpace(fallbackQuery)
+                    && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
+                        audiobook.Title, fallbackQuery);
+                    var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                    searchResults = fallbackResults;
+                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
+                        audiobook.Title, fallbackResults.Count);
+                }
+            }
+
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
             try
             {
@@ -213,8 +259,20 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 return 0;
             }
 
-            // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+            // Drop releases already blocked for this book before they are assessed.
+            //
+            // This is the path that actually re-grabs: it selects here and calls StartDownloadAsync
+            // directly rather than going through SearchAndDownloadAsync, so without this a release
+            // could fail, be blocked, and be grabbed again by the next automatic pass.
+            using (var blocklistScope = _serviceScopeFactory.CreateScope())
+            {
+                var blocklistService = blocklistScope.ServiceProvider.GetRequiredService<IBlocklistService>();
+                searchResults = await BlockedReleaseFilter.ExcludeAsync(
+                    blocklistService, audiobook.Id, searchResults, _logger);
+            }
+
+            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile, stoppingToken);
+            var scoredResults = assessment.Candidates;
 
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
@@ -227,6 +285,12 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     title = s.SearchResult.Title,
                     asin = s.SearchResult.Asin,
                     totalScore = s.TotalScore,
+                    identityStatus = s.Identity.Status.ToString(),
+                    identityReason = s.Identity.Reason,
+                    compatibilityReasons = s.Compatibility.Reasons,
+                    languageEvidence = s.Compatibility.Languages,
+                    editionEvidence = s.Compatibility.Editions,
+                    policyVersion = AutomaticSearchAssessment.PolicyVersion,
                     isRejected = s.IsRejected,
                     rejectionReasons = s.RejectionReasons,
                     source = s.SearchResult.Source,
@@ -256,10 +320,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 }
             }
 
-            var topResult = scoredResults
-                .Where(s => !s.IsRejected) // Only non-rejected results
-                .OrderByDescending(s => s.TotalScore)
-                .FirstOrDefault(); // Pick only the top scoring result
+            var topResult = automaticScoring.SelectBest(assessment);
 
             if (topResult == null)
             {
@@ -305,6 +366,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     return 0;
                 }
 
+                if (!await automaticScoring.IsCurrentAsync(assessment, audiobook.Id, stoppingToken)) return 0;
                 await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
                 downloadsQueued++;
 

@@ -265,7 +265,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
 
             var identity = authorization.Identity!.Value;
-            var physicalIdentity = authorization.PhysicalIdentity!.Value;
             if (job.PathIdentity.HasValue)
             {
                 try
@@ -293,17 +292,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 }
             }
 
-            if (job.PhysicalIdentity.HasValue
-                && job.PhysicalIdentity.Value != physicalIdentity)
-            {
-                return await RejectScanAsync(
-                    historyRepository,
-                    job,
-                    audiobook,
-                    "The physical scan-root generation changed after the job was queued.",
-                    cancellationToken);
-            }
-
+            // Physical generation is reacquired for this live scan only.
+            // Queued physical observations are legacy diagnostics, not authority.
             if (!Directory.Exists(scanRoot))
             {
                 var error = usedBasePath
@@ -345,7 +335,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     audiobook.Id,
                     scanRoot,
                     identity,
-                    physicalIdentity,
                     MoveOwned: moveOwned,
                     AllowReconciliation: true,
                     IsAuthoritativeScope: job.AuthorizationMode switch
@@ -372,20 +361,17 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 ScanAuthorizationMode.ResolveCurrentAudiobookPath
                     when moveOwned
                         || !string.IsNullOrWhiteSpace(job.Path)
-                        || job.PathIdentity.HasValue
-                        || job.PhysicalIdentity.HasValue =>
+                        || job.PathIdentity.HasValue =>
                     "The current-path scan contains incompatible queued path authority.",
                 ScanAuthorizationMode.PreauthorizedPath
                     when moveOwned
                         || string.IsNullOrWhiteSpace(job.Path)
-                        || !job.PathIdentity.HasValue
-                        || !job.PhysicalIdentity.HasValue =>
+                        || !job.PathIdentity.HasValue =>
                     "The preauthorized scan has incomplete or incompatible queued path authority.",
                 ScanAuthorizationMode.MoveHandoff
                     when !moveOwned
                         || string.IsNullOrWhiteSpace(job.Path)
-                        || !job.PathIdentity.HasValue
-                        || !job.PhysicalIdentity.HasValue =>
+                        || !job.PathIdentity.HasValue =>
                     "The move scan handoff has incomplete or incompatible target filesystem authority.",
                 ScanAuthorizationMode.ResolveCurrentAudiobookPath
                     or ScanAuthorizationMode.PreauthorizedPath

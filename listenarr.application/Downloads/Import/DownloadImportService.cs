@@ -17,7 +17,6 @@
  */
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Application.Downloads.Import
 {
     public partial class DownloadImportService(
@@ -38,14 +37,18 @@ namespace Listenarr.Application.Downloads.Import
         IFileRegistrationRecoveryService fileRegistrationRecoveryService,
         IMoveQueueService moveQueueService,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
-        ILogger<DownloadImportService> logger) : IDownloadImportService
+        ILogger<DownloadImportService> logger,
+        IFilePublicationCapabilityResolver? filePublicationCapabilityResolver = null,
+        ICompatibilitySourceCleanupCoordinator? compatibilitySourceCleanupCoordinator = null)
+        : IDownloadImportService
     {
         private async Task<List<ImportResult>> ImportDownloadFilesCoreAsync(
             Audiobook audiobook,
             List<string> files,
             CancellationToken ct,
             DownloadImportOptions? options,
-            IReadOnlyList<FileRegistrationRecoveryReceipt> recoveryReceipts)
+            IReadOnlyList<FileRegistrationRecoveryReceipt> recoveryReceipts,
+            Guid compatibilityBatchId)
         {
             if (string.IsNullOrEmpty(audiobook.BasePath))
             {
@@ -55,6 +58,7 @@ namespace Listenarr.Application.Downloads.Import
             var (remainingFiles, recoveredResults) = await ConsumeRecoveredImportsAsync(
                 files,
                 recoveryReceipts,
+                options?.ForceCopyAndRetainSource == true,
                 ct);
             files = remainingFiles;
             if (files.Count == 0)
@@ -94,6 +98,9 @@ namespace Listenarr.Application.Downloads.Import
             try
             {
                 var completedFileAction = settings.CompletedFileAction;
+                var forceCopyAndRetainSource = options?.ForceCopyAndRetainSource == true;
+                var operationScope = forceCopyAndRetainSource
+                    ? "download-import-retain-source" : "download-import";
 
                 if (settings.ExtractArchives || options?.ForceArchiveExtraction == true)
                 {
@@ -125,7 +132,7 @@ namespace Listenarr.Application.Downloads.Import
                     sourcePathComparer = sourceSemantics.Value.Comparer;
                 }
                 var sourceFiles = candidateFiles.Distinct(sourcePathComparer).ToList();
-                sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
+                var companionSourceRoots = ImportCompanionDestinationResolver.ResolveRoots(sourceFiles, archiveImportExtractor.ExtractionRoots, sourceSemantics);
                 var plannedAudioFiles = MultiFileImportPlanner.BuildPlans(
                     sourceFiles.Where(FileUtils.IsAudioFile).Select(f => (f, (string?)null)),
                     sourcePathComparer);
@@ -137,30 +144,15 @@ namespace Listenarr.Application.Downloads.Import
                 var orderedFiles = plannedAudioFiles.Select(p => p.FullPath)
                     .Concat(sourceFiles.Where(f => !planByPath.ContainsKey(f)))
                     .ToList();
+                var compatibilityBatchManifest =
+                    completedFileAction == FileAction.Move && orderedFiles.Count > 0
+                        ? CompatibilityBatchManifest.Create(orderedFiles)
+                        : (CompatibilityBatchManifest?)null;
 
                 try
                 {
-                    string? bestExisting = null;
-                    QualityProfile? abProfile = audiobook.QualityProfile;
-                    if (audiobook.Files != null && audiobook.Files.Count != 0)
-                    {
-                        foreach (var f in audiobook.Files)
-                        {
-                            string q = string.Empty;
-                            if (!string.IsNullOrEmpty(f.Format)) q = f.Format;
-                            if (f.Bitrate.HasValue)
-                            {
-                                var kb = f.Bitrate.Value / 1000;
-                                if (kb >= 320) q = "MP3 320kbps";
-                                else if (kb >= 256) q = "MP3 256kbps";
-                                else if (kb >= 192) q = "MP3 192kbps";
-                                else if (kb >= 128) q = "MP3 128kbps";
-                            }
-                            if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = ImportQualityEvaluator.Determine(null, f.Path);
-                            if (string.IsNullOrEmpty(bestExisting)) bestExisting = q;
-                            else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null && ImportQualityEvaluator.IsAcceptable(q, bestExisting, abProfile)) bestExisting = q;
-                        }
-                    }
+                    var abProfile = audiobook.QualityProfile;
+                    var bestExisting = ResolveBestExistingQuality(audiobook, abProfile);
 
                     foreach (var file in orderedFiles)
                     {
@@ -174,18 +166,20 @@ namespace Listenarr.Application.Downloads.Import
                             var hasSuccessfulAudioImport = results.Any(r => r.Success && !string.IsNullOrWhiteSpace(r.FinalPath) && !string.IsNullOrWhiteSpace(r.SourcePath) && FileUtils.IsAudioFile(r.SourcePath!));
                             if (!hasSuccessfulAudioImport || string.IsNullOrWhiteSpace(audiobook.BasePath))
                             {
-                                results.Add(ImportResult.Skipped("No successful audio import in batch"));
+                                results.Add(ImportResult.Skipped(
+                                    "No successful audio import in batch",
+                                    file));
                                 logger.LogDebug("ImportFilesFromDirectory: Skipping companion file {File} because no successful audio import was recorded for the batch", file);
                                 continue;
                             }
 
                             try
                             {
-                                var relativePath = !string.IsNullOrWhiteSpace(sourceRootPath) ? Path.GetRelativePath(sourceRootPath, file) : Path.GetFileName(file);
-                                if (!destinationPlanner.TryResolve(audiobook.BasePath, relativePath, destinationSemantics, out var destination))
+                                var companionPlaced = ImportCompanionDestinationResolver.TryResolveRelativeDestination(companionSourceRoots, file, audiobook.BasePath, results, fileSourceSemantics, destinationSemantics, out var relativePath);
+                                if (!companionPlaced || !destinationPlanner.TryResolve(audiobook.BasePath, relativePath, destinationSemantics, out var destination))
                                 {
-                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
-                                    logger.LogWarning("Blocked companion import outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, Relative {Relative}, BasePath {BasePath}", audiobook.Id, file, relativePath, audiobook.BasePath);
+                                    results.Add(companionPlaced ? ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath) : ImportResult.Skipped($"Companion file {Path.GetFileName(file)} has no destination inside the audiobook folder: it came from neither the batch's source directory nor an archive, and no audio file was imported from its own directory"));
+                                    logger.LogWarning("Companion import not placed inside the audiobook base path. Audiobook {AudiobookId}, Source {Source}, Placed {Placed}, Relative {Relative}, BasePath {BasePath}", audiobook.Id, file, companionPlaced, relativePath, audiobook.BasePath);
                                     continue;
                                 }
 
@@ -205,14 +199,15 @@ namespace Listenarr.Application.Downloads.Import
                                     destinationSemantics,
                                     ct);
                                 destination = destinationReservation.Path;
-                                if (!await PerformOwnedFileActionAsync(
+                                var companionPublication =
+                                    await PerformOwnedFileActionAsync(
                                         completedFileAction,
                                         file,
                                         destination,
                                         destinationOwnershipBoundary,
                                         destinationSemantics,
                                         FileMoveOperationIdentity.CreateForPaths(
-                                            "download-import",
+                                            operationScope,
                                             audiobook.Id,
                                             completedFileAction,
                                             file,
@@ -222,14 +217,31 @@ namespace Listenarr.Application.Downloads.Import
                                             destinationSemantics),
                                         sourceProof.Value,
                                         audiobook.Id,
-                                        ct))
+                                        compatibilityBatchId,
+                                        compatibilityBatchManifest,
+                                        forceCopyAndRetainSource,
+                                        ct);
+                                if (companionPublication == null)
                                 {
                                     results.Add(ImportResult.ImportFailure(completedFileAction, file, destination));
                                     continue;
                                 }
 
                                 ImportDestinationPlanner.Commit(destinationReservation, usedDestinations);
-                                results.Add(ImportResult.ImportSuccess(completedFileAction, file, destination));
+                                results.Add(ImportResult.ImportSuccess(
+                                    completedFileAction,
+                                    companionPublication.EffectiveAction,
+                                    companionPublication.SourceDisposition
+                                        == FilePublicationSourceDisposition.Retained
+                                            ? ImportSourceDisposition.Retained
+                                            : companionPublication.SourceDisposition
+                                                == FilePublicationSourceDisposition.Retired
+                                                    ? ImportSourceDisposition.Retired
+                                                    : ImportSourceDisposition.Unchanged,
+                                    file,
+                                    destination,
+                                    warningCode: companionPublication.ReasonCode,
+                                    message: companionPublication.Message));
                             }
                             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                             {
@@ -263,7 +275,9 @@ namespace Listenarr.Application.Downloads.Import
                             {
                                 if (audiobook.Files != null && audiobook.Files.Count != 0 && !ImportQualityEvaluator.IsAcceptable(candidateQuality, bestExisting, abProfile))
                                 {
-                                    results.Add(ImportResult.Skipped($"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'"));
+                                    results.Add(ImportResult.Skipped(
+                                        $"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'",
+                                        file));
                                     logger.LogInformation($"Skipping import of file {file} for audiobook {audiobook.Id} because candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'");
                                     continue;
                                 }
@@ -360,6 +374,10 @@ namespace Listenarr.Application.Downloads.Import
                                     AudiobookFileOwnershipCheckOutcome.Available or
                                     AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook)
                                 {
+                                    // A byte-identical existing destination can be
+                                    // adopted by this audiobook when no other owner
+                                    // claims it. Content proof, not persisted kernel
+                                    // identity, establishes idempotent publication.
                                     break;
                                 }
 
@@ -392,7 +410,7 @@ namespace Listenarr.Application.Downloads.Import
                             }
 
                             var operationId = FileMoveOperationIdentity.CreateForPaths(
-                                "download-import",
+                                operationScope,
                                 audiobook.Id,
                                 completedFileAction,
                                 file,
@@ -400,59 +418,39 @@ namespace Listenarr.Application.Downloads.Import
                                 sourceProof.Value,
                                 destination,
                                 destinationSemantics);
-                            using var registrationLease =
-                                await PrepareOwnedFileActionForRegistrationAsync(
-                                    completedFileAction,
+                            var publicationPlan = await ResolvePublicationPlanAsync(
+                                completedFileAction,
+                                file,
+                                destination,
+                                sourceProof.Value,
+                                compatibilityBatchId,
+                                compatibilityBatchManifest,
+                                forceCopyAndRetainSource,
+                                ct);
+                            if (!publicationPlan.IsAllowed)
+                            {
+                                results.Add(CreateBlockedImportResult(
+                                    publicationPlan,
+                                    file,
+                                    destination));
+                                continue;
+                            }
+
+                            var publicationFailure = await PrepareRegisterAndCompletePublicationAsync(
+                                    publicationPlan,
                                     file,
                                     destination,
                                     destinationOwnershipBoundary,
                                     destinationSemantics,
                                     operationId,
-                                    ownership.ExistingFile?.PhysicalObjectIdentity,
                                     sourceProof.Value,
-                                    audiobook.Id,
-                                    ct);
-                            if (registrationLease == null
-                                || !await RegisterPublishedImportAsync(
                                     audiobook,
                                     ownership,
-                                    registrationLease,
-                                    "download",
-                                    ct))
+                                    ct);
+                            if (publicationFailure != null)
                             {
-                                results.Add(ImportResult.ImportFailure(
-                                    completedFileAction,
-                                    file,
-                                    destination));
+                                results.Add(publicationFailure);
                                 continue;
-                            }
-
-                            if (completedFileAction == FileAction.Move
-                                && !await fileMover.CompletePreparedMoveAsync(
-                                    file,
-                                    destination,
-                                    registrationLease,
-                                    operationId))
-                            {
-                                await audiobookFileService
-                                    .RollbackPublishedGenerationIfStaleAsync(
-                                        audiobook,
-                                        registrationLease);
-                                results.Add(ImportResult.ImportFailure(
-                                    completedFileAction,
-                                    file,
-                                    destination));
-                                continue;
-                            }
-
-                            var completion = registrationLease.CompletePublication();
-                            if (completion
-                                == RegistrationPublicationCompletion.CommittedCleanupPending)
-                            {
-                                logger.LogWarning(
-                                    "Download import committed for audiobook {AudiobookId}, but registration-publication cleanup remains pending for {Destination}",
-                                    audiobook.Id,
-                                    LogRedaction.SanitizeFilePath(destination));
                             }
 
                             ImportDestinationPlanner.Commit(
@@ -460,9 +458,14 @@ namespace Listenarr.Application.Downloads.Import
                                 usedDestinations);
                             results.Add(ImportResult.ImportSuccess(
                                 completedFileAction,
+                                publicationPlan.EffectiveAction,
+                                ToImportSourceDisposition(
+                                    publicationPlan.SourceDisposition),
                                 file,
                                 destination,
-                                wasRegisteredToAudiobook: true));
+                                wasRegisteredToAudiobook: true,
+                                publicationPlan.ReasonCode,
+                                publicationPlan.Message));
                         }
                         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                         {

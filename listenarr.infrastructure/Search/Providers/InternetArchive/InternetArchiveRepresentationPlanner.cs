@@ -35,10 +35,12 @@ internal static partial class InternetArchiveRepresentationPlanner
         AddGroupedRepresentation(files, identifier, ArchiveEncoding.Mp3_64, allowArchives, representations, issues);
         AddGroupedRepresentation(files, identifier, ArchiveEncoding.OggVorbis, allowArchives, representations, issues);
 
+        var language = ResolveLanguage(root, title, out var origin);
         return new InternetArchiveItemPlan(
-            ResolveLanguage(root, title),
+            language,
             representations,
-            issues);
+            issues)
+        { LanguageOrigin = origin };
     }
 
     private static List<ArchiveFile> ParseFiles(JsonElement root)
@@ -226,8 +228,9 @@ internal static partial class InternetArchiveRepresentationPlanner
             ? value.GetString() ?? string.Empty
             : string.Empty;
 
-    private static string? ResolveLanguage(JsonElement root, string title)
+    private static string? ResolveLanguage(JsonElement root, string title, out IdentityEvidenceOrigin origin)
     {
+        origin = IdentityEvidenceOrigin.ProviderSupplied;
         if (root.TryGetProperty("metadata", out var metadata) && metadata.TryGetProperty("language", out var language))
         {
             var values = language.ValueKind switch
@@ -240,13 +243,14 @@ internal static partial class InternetArchiveRepresentationPlanner
             };
             var normalized = values
                 .Select(NormalizeLanguage)
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-            if (normalized != null)
+                .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (normalized.Length > 0)
             {
-                return normalized;
+                return string.Join("; ", normalized);
             }
         }
 
+        origin = IdentityEvidenceOrigin.ReleaseNameDerived;
         var namedMatch = LanguageNameRegex().Match(title);
         return namedMatch.Success
             ? NormalizeLanguage(namedMatch.Value)
@@ -318,7 +322,10 @@ internal static partial class InternetArchiveRepresentationPlanner
 internal sealed record InternetArchiveItemPlan(
     string? Language,
     IReadOnlyList<InternetArchiveRepresentation> Representations,
-    IReadOnlyList<InternetArchivePlanIssue> Issues);
+    IReadOnlyList<InternetArchivePlanIssue> Issues)
+{
+    public IdentityEvidenceOrigin LanguageOrigin { get; init; }
+}
 
 internal sealed record InternetArchiveRepresentation(
     string Format,

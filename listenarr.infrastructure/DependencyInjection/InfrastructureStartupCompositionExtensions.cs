@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Domain.Common;
+using Listenarr.Infrastructure.Downloads.Blocklist;
+using Listenarr.Infrastructure.DependencyInjection.Workers;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Configuration;
@@ -50,6 +52,7 @@ public static class InfrastructureStartupCompositionExtensions
         services.AddListenarrHostedWorkers(configuration);
         services.AddListenarrExternalRequests(configuration);
         services.AddScoped<IDownloadHistoryService, DownloadHistoryService>();
+        services.AddScoped<IBlocklistService, BlocklistService>();
 
         return services;
     }
@@ -116,6 +119,12 @@ public static class InfrastructureStartupCompositionExtensions
         if (!disableHostedServices)
         {
             services.AddListenarrHostedServices(configuration);
+        }
+        else
+        {
+            // ManualImportController needs the scan queue even with the background workers off.
+            // A host that wants the unmatched scan to run (the test hosts) calls AddUnmatchedScanWorker itself.
+            services.AddScanQueueService();
         }
 
         services.AddHostedService<StartupDbNormalizer>();

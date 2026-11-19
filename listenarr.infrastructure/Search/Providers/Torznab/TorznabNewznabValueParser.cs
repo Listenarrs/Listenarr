@@ -56,44 +56,8 @@ internal static class TorznabNewznabValueParser
         };
     }
 
-    public static string? ParseLanguageFromText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-
-        // Normalize whitespace
-        var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
-
-        var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "ENG", "English" }, { "EN", "English" },
-            { "DUT", "Dutch" },    { "NL", "Dutch" },
-            { "GER", "German" },   { "DE", "German" },
-            { "FRE", "French" },   { "FR", "French" }
-        };
-
-        // Build a joined alternation like ENG|EN|DUT|NL|...
-        var alternation = string.Join("|", codes.Keys.Select(Regex.Escape));
-
-        // Bracketed or parenthesis forms: [ ENG / ... ] or (EN)
-        var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b";
-
-        // Standalone word boundary pattern: \b(ENG|EN|DUT|NL|...)\b
-        var standalonePattern = $@"\b(?:{alternation})\b";
-
-        // Try bracketed first (higher confidence)
-        var m = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase);
-        if (m.Success)
-        {
-            var captured = Regex.Match(m.Value, $@"(?:{alternation})", RegexOptions.IgnoreCase);
-            if (captured.Success && codes.TryGetValue(captured.Value, out var lang))
-                return lang;
-        }
-
-        // Try standalone word boundary
-        m = Regex.Match(normalized, standalonePattern, RegexOptions.IgnoreCase);
-        if (m.Success && codes.TryGetValue(m.Value, out var lang2))
-            return lang2;
-
-        return null;
-    }
+    // Delegates to the canonical language parser so release-language detection stays in one
+    // place (SearchResultAttributeParser), shared with the other indexer parsers.
+    public static string? ParseLanguageFromText(string text) =>
+        SearchResultAttributeParser.ParseLanguageFromText(text);
 }

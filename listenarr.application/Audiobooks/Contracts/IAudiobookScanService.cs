@@ -6,7 +6,6 @@ public sealed record AudiobookScanCommand(
     int AudiobookId,
     string ScanRoot,
     PathIdentitySnapshot ScanIdentity,
-    ScanPathPhysicalIdentity ScanPhysicalIdentity,
     bool MoveOwned = false,
     bool AllowReconciliation = true,
     bool IsAuthoritativeScope = true,

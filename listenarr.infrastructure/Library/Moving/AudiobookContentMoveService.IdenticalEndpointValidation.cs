@@ -14,6 +14,7 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
         await EnsureCurrentExecutionProtocolAsync(
             request.JobId,
+            request.LeaseToken,
             cancellationToken);
 
         var source = NormalizeMoveDirectoryEndpoint(request.Source);
@@ -34,7 +35,23 @@ internal sealed partial class AudiobookContentMoveService
         var manifestHasExecutionState = manifest.Any(entry =>
             entry.CopyState != MoveJobEntryCopyState.Pending
             || entry.CleanupState != MoveJobEntryCleanupState.Pending);
-        if (manifestHasExecutionState || scaffolding.Count > 0)
+        var scaffoldingHasExecutionState = false;
+        foreach (var directory in scaffolding)
+        {
+            ValidateMarkerlessTargetDirectoryLedgerPath(
+                directory.Path,
+                target,
+                request.TargetSemantics);
+            if (directory.State != MoveCreatedDirectoryState.Planned
+                || !string.IsNullOrWhiteSpace(directory.DirectoryObjectIdentity)
+                || TryGetMarkerlessPathAttributes(directory.Path, out _))
+            {
+                scaffoldingHasExecutionState = true;
+                break;
+            }
+        }
+
+        if (manifestHasExecutionState || scaffoldingHasExecutionState)
         {
             throw new MoveNeedsAttentionException(
                 "The identical-endpoint job has durable move execution state and cannot be superseded automatically.");

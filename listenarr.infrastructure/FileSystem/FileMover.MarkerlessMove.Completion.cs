@@ -9,7 +9,9 @@ public partial class FileMover
         ProbeMarkerlessMoveCompletionAsync(
             FileMoveGateLease pathLock,
             FileMutationJournal journal,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool requirePersistedParentIdentity = true,
+            bool requireTargetPhysicalIdentity = true)
     {
         try
         {
@@ -23,14 +25,15 @@ public partial class FileMover
             }
             if (sourceParentVisibility != RegistrationPublicationMatchOutcome.Match
                 || destinationParentVisibility != RegistrationPublicationMatchOutcome.Match
-                || string.IsNullOrWhiteSpace(
-                    journal.SourceParentDirectoryObjectIdentity)
-                || string.IsNullOrWhiteSpace(
-                    journal.DestinationParentDirectoryObjectIdentity)
-                || !pathLock.SourceParent.MatchesDirectoryObjectIdentity(
-                    journal.SourceParentDirectoryObjectIdentity)
-                || !pathLock.DestinationParent.MatchesDirectoryObjectIdentity(
-                    journal.DestinationParentDirectoryObjectIdentity))
+                || (requirePersistedParentIdentity
+                    && (string.IsNullOrWhiteSpace(
+                            journal.SourceParentDirectoryObjectIdentity)
+                        || string.IsNullOrWhiteSpace(
+                            journal.DestinationParentDirectoryObjectIdentity)
+                        || !pathLock.SourceParent.MatchesDirectoryObjectIdentity(
+                            journal.SourceParentDirectoryObjectIdentity)
+                        || !pathLock.DestinationParent.MatchesDirectoryObjectIdentity(
+                            journal.DestinationParentDirectoryObjectIdentity))))
             {
                 return RegistrationPublicationMatchOutcome.Mismatch;
             }
@@ -64,7 +67,106 @@ public partial class FileMover
                 }
                 if (targetOpenOutcome != PinnedFileOpenOutcome.Opened
                     || targetEntry == null
-                    || !TargetMatchesMarkerlessJournal(targetEntry, journal)
+                    || !TargetMatchesMarkerlessJournal(
+                        targetEntry,
+                        journal,
+                        requireTargetPhysicalIdentity)
+                    || !await MatchesMarkerlessTargetContentAsync(
+                        targetEntry,
+                        journal,
+                        cancellationToken))
+                {
+                    return RegistrationPublicationMatchOutcome.Mismatch;
+                }
+            }
+
+            return RegistrationPublicationMatchOutcome.Match;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            return RegistrationPublicationMatchOutcome.Unavailable;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
+        }
+    }
+
+    private static async Task<RegistrationPublicationMatchOutcome>
+        ProbeMarkerlessMoveRetainedCompletionAsync(
+            FileMoveGateLease pathLock,
+            FileMutationJournal journal,
+            CancellationToken cancellationToken,
+            bool requireTargetPhysicalIdentity)
+    {
+        try
+        {
+            var sourceParentVisibility =
+                pathLock.SourceParent.ProbeVisiblePathMatch();
+            var destinationParentVisibility =
+                pathLock.DestinationParent.ProbeVisiblePathMatch();
+            if (sourceParentVisibility == RegistrationPublicationMatchOutcome.Unavailable
+                || destinationParentVisibility
+                    == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                return RegistrationPublicationMatchOutcome.Unavailable;
+            }
+            if (sourceParentVisibility != RegistrationPublicationMatchOutcome.Match
+                || destinationParentVisibility
+                    != RegistrationPublicationMatchOutcome.Match)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+
+            var sourceOutcome =
+                pathLock.SourceParent.TryOpenExistingFileWithOutcome(
+                    pathLock.SourceName,
+                    requireDeleteAccess: false,
+                    out var sourceEntry);
+            using (sourceEntry)
+            {
+                if (sourceOutcome == PinnedFileOpenOutcome.Unavailable)
+                {
+                    return RegistrationPublicationMatchOutcome.Unavailable;
+                }
+                if (sourceOutcome != PinnedFileOpenOutcome.Opened
+                    || sourceEntry == null
+                    || !sourceEntry.VisiblePathMatches()
+                    || !await MatchesMarkerlessSourceProofAsync(
+                        sourceEntry,
+                        journal,
+                        cancellationToken))
+                {
+                    return RegistrationPublicationMatchOutcome.Mismatch;
+                }
+            }
+
+            var targetOutcome =
+                pathLock.DestinationParent.TryOpenExistingFileWithOutcome(
+                    pathLock.DestinationName,
+                    requireDeleteAccess: false,
+                    out var targetEntry);
+            using (targetEntry)
+            {
+                if (targetOutcome == PinnedFileOpenOutcome.Unavailable)
+                {
+                    return RegistrationPublicationMatchOutcome.Unavailable;
+                }
+                if (targetOutcome != PinnedFileOpenOutcome.Opened
+                    || targetEntry == null
+                    || !TargetMatchesMarkerlessJournal(
+                        targetEntry,
+                        journal,
+                        requireTargetPhysicalIdentity)
                     || !await MatchesMarkerlessTargetContentAsync(
                         targetEntry,
                         journal,

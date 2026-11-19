@@ -9,7 +9,7 @@ internal static class ListenarrDatabaseMigrationPreflight
     internal const string RootFoldersMigrationId =
         "20260101172733_AddRootFolders";
     internal const string AudiobookAddedDateMigrationId =
-        "20260820015101_AddAudiobookAddedDate";
+        "20261119022628_AddAudiobookAddedDate";
 
     public static ListenarrDatabaseMigrationPreflightResult RepairLegacyData(
         ListenArrDbContext context)

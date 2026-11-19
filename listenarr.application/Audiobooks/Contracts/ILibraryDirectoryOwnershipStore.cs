@@ -45,6 +45,20 @@ public interface ILibraryDirectoryOwnershipStore
         int? audiobookId = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates only missing directory components beneath an already managed
+    /// boundary. This additive-only operation deliberately records no cleanup
+    /// ownership and therefore never authorizes later directory deletion.
+    /// </summary>
+    Task EnsureAdditiveHierarchyAsync(
+        string destinationDirectory,
+        string managedBoundary,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException(
+            new InvalidOperationException(
+                "Additive-only directory publication is unavailable."));
+
     Task<LibraryDirectoryOwnershipResolution> ResolveOwnedAsync(
         string path,
         FileSystemPathSemantics semantics,
@@ -55,6 +69,8 @@ public interface ILibraryDirectoryOwnershipStore
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default);
 
+    // Persisted move diagnostics cannot establish that a path ownership claim is
+    // stale. Implementations without the original live proof retain the claim.
     Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
         string path,
         FileSystemPathSemantics semantics,

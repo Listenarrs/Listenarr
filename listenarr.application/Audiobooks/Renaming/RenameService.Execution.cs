@@ -10,6 +10,7 @@ public partial class RenameService
         FileRenameOperation fileOperation,
         IReadOnlyCollection<string> allowedRoots,
         FileSystemPathSemantics semantics,
+        RenameExecutionPlan executionPlan,
         CancellationToken cancellationToken)
     {
         var source = NormalizePath(fileOperation.CurrentPath);
@@ -97,18 +98,6 @@ public partial class RenameService
                 return item;
             }
 
-            var targetDirectory = Path.GetDirectoryName(destination);
-            if (!string.IsNullOrWhiteSpace(targetDirectory))
-            {
-                await EnsureOwnedRenameHierarchyAsync(
-                    targetDirectory,
-                    allowedRoots,
-                    semantics,
-                    audiobook.Id,
-                    Guid.NewGuid(),
-                    cancellationToken);
-            }
-
             if (!PathsEqual(source, destination, semantics))
             {
                 // Rename journals are owner-bound and discovered directly during startup
@@ -117,40 +106,33 @@ public partial class RenameService
                 // the same source/destination paths.
                 var operationId = Guid.NewGuid();
                 item.OperationId = operationId;
-                bool moved;
-                if (databaseFile != null)
+                var sourceProof = FindSourceProof(
+                    executionPlan,
+                    fileOperation.FileId);
+                if (!sourceProof.HasValue
+                    || !executionPlan.BatchManifest.HasValue)
                 {
-                    if (string.IsNullOrWhiteSpace(
-                            databaseFile.PhysicalObjectIdentity))
-                    {
-                        item.Error =
-                            "Tracked source physical identity is unavailable.";
-                        return item;
-                    }
-
-                    moved = await _fileMover
-                        .MoveFilePreservingPhysicalIdentityAsync(
-                            source,
-                            destination,
-                            databaseFile.PhysicalObjectIdentity,
-                            operationId,
-                            audiobook.Id,
-                            databaseFile.Id);
+                    item.Error =
+                        "Verified organize source proof is unavailable.";
+                    return item;
                 }
-                else
-                {
-                    moved = await _fileMover.PerformActionOn(
-                        FileAction.Move,
+
+                var preparation = await _verifiedFileRenameTransactionCoordinator
+                    .PrepareAsync(
                         source,
                         destination,
                         operationId,
+                        executionPlan.BatchId,
+                        executionPlan.BatchManifest.Value,
                         audiobook.Id,
-                        audiobookFileId: 0);
-                }
-
-                if (!moved)
+                        databaseFile?.Id ?? 0,
+                        sourceProof.Value,
+                        cancellationToken);
+                item.VerifiedRenameLease = preparation.Lease;
+                if (!preparation.Success || preparation.Lease == null)
                 {
-                    item.Error = "File move operation failed.";
+                    item.Error = preparation.Error
+                        ?? "Verified file organize operation failed.";
                     return item;
                 }
             }
@@ -158,6 +140,10 @@ public partial class RenameService
             if (databaseFile != null)
             {
                 databaseFile.ApplyPathIdentity(destination, destinationIdentity);
+                if (!PathsEqual(source, destination, semantics))
+                {
+                    databaseFile.ClearPhysicalObjectIdentity();
+                }
             }
             else if (fileOperation.FileId == 0
                 && !string.IsNullOrWhiteSpace(audiobook.FilePath))

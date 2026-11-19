@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backend coverage of the .NET test projects (CI runs with the coverage input; off by default):
+  Listenarr's own assemblies only, as Cobertura.
+  `dotnet test` given this file as its settings and a results directory writes one
+  <results directory>/<guid>/coverage.cobertura.xml per test project; scripts/test-coverage/aggregate.mjs
+  merges them with the other test jobs' coverage.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>[Listenarr.Api]*,[Listenarr.Application]*,[Listenarr.Domain]*,[Listenarr.Infrastructure]*</Include>
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

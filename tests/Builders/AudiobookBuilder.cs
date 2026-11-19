@@ -24,6 +24,11 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public AudiobookBuilder WithAsin(string value)
+        {
+            _audiobook.Asin = value;
+            return this;
+        }
         public AudiobookBuilder WithTitle(string value)
         {
             _audiobook.Title = value;

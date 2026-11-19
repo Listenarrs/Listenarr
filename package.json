@@ -1,10 +1,10 @@
 {
   "name": "listenarr",
-  "version": "1.3.2",
+  "version": "1.9.2",
   "private": true,
   "description": "Listenarr - Automated audiobook downloading and management",
   "engines": {
-    "node": "^24.15.0"
+    "node": "^26.12.1"
   },
   "scripts": {
     "version:sync": "node scripts/sync-fe-version-from-csproj.mjs",
@@ -23,6 +23,8 @@
     "lint:frontend": "cd fe && npm run lint:check",
     "validate:repository-paths": "node scripts/validate-repository-paths.mjs",
     "test:repository-paths": "node --test scripts/validate-repository-paths.test.mjs",
+    "test:e2e-gif": "node --test scripts/e2e/webm-to-gif.test.mjs",
+    "ci:fork": "node scripts/ci/run-tests.mjs",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",
     "format": "npm run format:backend && npm run format:frontend",
@@ -38,7 +40,7 @@
   },
   "dependencies": {
     "concurrently": "^10.0.3",
-    "wait-on": "^9.0.10"
+    "wait-on": "^9.5.1"
   },
   "devDependencies": {
     "husky": "^9.1.7"

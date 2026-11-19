@@ -27,10 +27,10 @@ COPY . .
 WORKDIR "/src/listenarr.api"
 # Ensure Node.js is available in the build image so MSBuild targets that run
 # the frontend (npm/vite) can execute during `dotnet publish`.
-# Use NodeSource to install Node 24 (Active LTS as of 2026; Node 20/22 are EOL).
+# Use the same Node.js major as CI and the Discord bot runtime.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg \
-	&& curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+	&& curl -fsSL https://deb.nodesource.com/setup_26.x | bash - \
 	&& apt-get install -y --no-install-recommends nodejs \
 	&& node --version \
 	&& npm --version \
@@ -38,6 +38,9 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
 	&& dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+# Trim and set the mode of the packaged ffprobe here, so the final image's COPY carries only
+# this platform's binaries, already executable, and no later layer has to copy them again.
+RUN sh /src/docker/runtime/prepare-ffprobe.sh /app/publish
 
 FROM base AS final
 WORKDIR /app

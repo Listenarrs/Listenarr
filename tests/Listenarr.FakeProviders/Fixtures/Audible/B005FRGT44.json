@@ -1,0 +1,12 @@
+{
+  "product": {
+    "asin": "B005FRGT44",
+    "title": "Ready Player One",
+    "language": "english",
+    "authors": [{ "name": "Ernest Cline", "asin": "B004XRR8Z6" }],
+    "sku": "sku1",
+    "merchandising_summary": "desc1",
+    "publisher_name": "Random House Audio",
+    "runtime_length_min": 960
+  }
+}

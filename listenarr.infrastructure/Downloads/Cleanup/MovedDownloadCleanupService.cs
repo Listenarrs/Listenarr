@@ -22,70 +22,7 @@ using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Cleanup
 {
-    /// <summary>
-    /// Background service that handles moved downloads to remove them from client
-    /// Runs every 10 seconds to check for moved downloads
-    /// </summary>
-    public class MovedDownloadCleanupService(
-        IMovedDownloadCleanupProcessor processor,
-        ILogger<MovedDownloadCleanupService> logger,
-        IWorkerCycleRunner cycleRunner,
-        IServiceScopeFactory scopeFactory) : BackgroundService
-    {
-        private TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
-
-        public override async Task StartAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService starting");
-
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configurationService.GetApplicationSettingsAsync();
-                if (settings.PollingIntervalSeconds > 0)
-                {
-                    _pollingInterval = TimeSpan.FromSeconds(settings.PollingIntervalSeconds);
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                logger.LogInformation("MovedDownloadCleanupService startup canceled");
-            }
-            catch (OperationCanceledException ex)
-            {
-                logger.LogWarning(ex, "MovedDownloadCleanupService settings load canceled/timed out during startup; using default interval");
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(ex, "Failed to load polling interval from settings, using default");
-            }
-
-            await base.StartAsync(cancellationToken);
-        }
-
-        public override async Task StopAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService stopping");
-            await base.StopAsync(cancellationToken);
-        }
-
-        protected override async Task ExecuteAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService background task started");
-
-            await cycleRunner.RunPeriodicAsync(
-                nameof(MovedDownloadCleanupService),
-                initialDelay: null,
-                intervalProvider: () => _pollingInterval,
-                runCycle: processor.RunCycleAsync,
-                cancellationToken);
-
-            logger.LogInformation("MovedDownloadCleanupService background task stopped");
-        }
-    }
-
-    public class MovedDownloadCleanupProcessor(
+    public partial class MovedDownloadCleanupProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
     {
@@ -107,9 +44,12 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             ImportProofKind Kind,
             string CorrelationId,
             string? ProcessingJobId,
-            DateTime? ProvenAt)
+            DateTime? ProvenAt,
+            bool? SourceRetained = null)
         {
-            public bool AllowsDestructiveCleanup => Kind is not ImportProofKind.LegacyMovedState;
+            public bool AllowsDestructiveCleanup =>
+                Kind is not ImportProofKind.LegacyMovedState
+                && SourceRetained is false;
         }
 
         /// <summary>
@@ -191,6 +131,14 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                         continue;
                     }
 
+                    var clientRetained = bool.TryParse(download.GetMetadataString(
+                        Download.ImportSourceRetentionRequiredMetadataKey), out var required) && required;
+                    if (clientRetained && !await CanReleaseClientOwnedSourceAsync(
+                            downloadClientGateway, clientConfig, download, cancellationToken))
+                    {
+                        continue;
+                    }
+
                     var hasCanBeRemoved = false;
                     var canBeRemoved = false;
                     if (download.Metadata != null && download.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
@@ -225,13 +173,18 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     }
 
                     var deleteFiles = removalPolicy == "remove_and_delete";
-                    if (deleteFiles && !proof.AllowsDestructiveCleanup)
+                    if (deleteFiles && (clientRetained || !proof.AllowsDestructiveCleanup))
                     {
-                        // Legacy Moved alone is enough to clean stale client/DB state, but not
-                        // enough to prove it is safe to delete files from the external client.
+                        var reason = proof.Kind == ImportProofKind.LegacyMovedState
+                            ? "only legacy Moved-state import proof is available"
+                            : clientRetained || proof.SourceRetained is true
+                                ? "the import retained its source"
+                                : "the source-retention disposition is unavailable";
                         logger.LogWarning(
-                            "Deferred removal: Download {DownloadId} has only legacy Moved-state import proof; remove_and_delete was downgraded to remove",
-                            download.Id);
+                            "Deferred removal: Download {DownloadId} cannot be deleted because {Reason}; " +
+                            "remove_and_delete was downgraded to remove",
+                            download.Id,
+                            reason);
                         deleteFiles = false;
                     }
 
@@ -282,7 +235,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     // If the primary client did not remove a torrent, try other enabled torrent
                     // clients by hash. This keeps cleanup resilient to older records assigned to
                     // the wrong DownloadClientId.
-                    if (!removed && !string.IsNullOrEmpty(torrentHash))
+                    if (!removed && !clientRetained && !string.IsNullOrEmpty(torrentHash))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                             { "qbittorrent", "transmission" };
@@ -376,6 +329,11 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             IDownloadHistoryRepository downloadHistoryRepository,
             CancellationToken cancellationToken)
         {
+            var persistedSourceRetained = bool.TryParse(
+                download.GetMetadataString(Download.SourceRetainedMetadataKey),
+                out var parsedPersistedSourceRetained)
+                    ? parsedPersistedSourceRetained
+                    : (bool?)null;
             var completedJob = (await processingJobRepository.GetByDownloadIdAsync(download.Id))
                 .Where(job => job.Status == ProcessingJobStatus.Completed)
                 .OrderByDescending(job => job.CompletedAt ?? job.CreatedAt)
@@ -386,16 +344,13 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     ImportProofKind.CompletedProcessingJob,
                     completedJob.GetOrCreateCorrelationId(),
                     completedJob.Id,
-                    completedJob.CompletedAt);
-            }
-
-            if (download.LastImportedAt.HasValue)
-            {
-                return new ImportProof(
-                    ImportProofKind.LastImportedAt,
-                    download.Id.ToUpperInvariant(),
-                    null,
-                    download.LastImportedAt.Value);
+                    completedJob.CompletedAt,
+                    completedJob.TryGetJobDataString(
+                            Download.SourceRetainedMetadataKey,
+                            out var retainedValue)
+                        && bool.TryParse(retainedValue, out var sourceRetained)
+                            ? sourceRetained
+                            : persistedSourceRetained);
             }
 
             var importedHistory = await historyRepository.GetSucceededImportedByDownloadIdAsync(
@@ -407,7 +362,18 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     ImportProofKind.ImportedHistory,
                     importedHistory.CorrelationId ?? download.Id.ToUpperInvariant(),
                     null,
-                    importedHistory.Timestamp);
+                    importedHistory.Timestamp,
+                    persistedSourceRetained ?? ReadSourceRetained(importedHistory.Data));
+            }
+
+            if (download.LastImportedAt.HasValue)
+            {
+                return new ImportProof(
+                    ImportProofKind.LastImportedAt,
+                    download.Id.ToUpperInvariant(),
+                    null,
+                    download.LastImportedAt.Value,
+                    persistedSourceRetained);
             }
 
             var legacyDownloadHistory = await downloadHistoryRepository.GetImportedByDownloadIdAsync(
@@ -452,8 +418,14 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             {
                 ["ImportProof"] = proof.Kind.ToString(),
                 ["RemovalPolicy"] = removalPolicy,
-                ["DeleteFiles"] = deleteFiles
+                ["DeleteFiles"] = deleteFiles,
+                ["SourceRetentionKnown"] = proof.SourceRetained.HasValue
             };
+
+            if (proof.SourceRetained.HasValue)
+            {
+                details[Download.SourceRetainedMetadataKey] = proof.SourceRetained.Value;
+            }
 
             if (!string.IsNullOrWhiteSpace(proof.ProcessingJobId))
             {
@@ -466,6 +438,34 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             }
 
             return details;
+        }
+
+        private static bool? ReadSourceRetained(string? data)
+        {
+            if (string.IsNullOrWhiteSpace(data)) return null;
+
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                if (!document.RootElement.TryGetProperty(
+                        Download.SourceRetainedMetadataKey,
+                        out var value))
+                {
+                    return null;
+                }
+
+                return value.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+                    _ => null
+                };
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
 
         private static Task AddCleanupHistoryAsync(

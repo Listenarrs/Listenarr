@@ -17,8 +17,18 @@
  */
 
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Domain.Downloads
 {
+    public enum ImportSourceDisposition
+    {
+        Unknown,
+        Unchanged,
+        Retained,
+        Retired
+    }
+
     public class ImportResult
     {
         public bool Success { get; set; }
@@ -26,6 +36,10 @@ namespace Listenarr.Domain.Downloads
         public string? FinalPath { get; set; }
         public string? Message { get; set; }
         public FileAction Action { get; set; }
+        public FileAction RequestedAction { get; set; }
+        public FileAction EffectiveAction { get; set; }
+        public ImportSourceDisposition SourceDisposition { get; set; }
+        public string? WarningCode { get; set; }
         public bool WasRegisteredToAudiobook { get; set; }
         public DateTime? Timestamp { get; set; } = DateTime.UtcNow;
 
@@ -40,9 +54,39 @@ namespace Listenarr.Domain.Downloads
             {
                 Success = true,
                 Action = action,
+                RequestedAction = action,
+                EffectiveAction = action,
+                SourceDisposition = action == FileAction.Move
+                    ? ImportSourceDisposition.Retired
+                    : ImportSourceDisposition.Unchanged,
                 SourcePath = sourcePath,
                 FinalPath = finalPath,
                 WasRegisteredToAudiobook = wasRegisteredToAudiobook
+            };
+        }
+
+        public static ImportResult ImportSuccess(
+            FileAction requestedAction,
+            FileAction effectiveAction,
+            ImportSourceDisposition sourceDisposition,
+            string sourcePath,
+            string finalPath,
+            bool wasRegisteredToAudiobook = false,
+            string? warningCode = null,
+            string? message = null)
+        {
+            return new ImportResult
+            {
+                Success = true,
+                Action = effectiveAction,
+                RequestedAction = requestedAction,
+                EffectiveAction = effectiveAction,
+                SourceDisposition = sourceDisposition,
+                SourcePath = sourcePath,
+                FinalPath = finalPath,
+                WasRegisteredToAudiobook = wasRegisteredToAudiobook,
+                WarningCode = warningCode,
+                Message = message
             };
         }
 
@@ -52,6 +96,8 @@ namespace Listenarr.Domain.Downloads
             {
                 Success = false,
                 Action = action,
+                RequestedAction = action,
+                EffectiveAction = action,
                 SourcePath = sourcePath,
                 FinalPath = finalPath,
                 Message = $"Unable to perform {action} on {sourcePath} to {finalPath}"
@@ -63,17 +109,28 @@ namespace Listenarr.Domain.Downloads
             return new ImportResult
             {
                 Success = false,
-                Message = exception.Message,
+                // A file mutation failure arrives here already wrapped, so the outer message
+                // names the operation and not the reason. This row outlives the application log
+                // and it is what an operator reads when a download is blocked, so the reason has
+                // to survive into it. The formatting is ExceptionCause's rather than this type's
+                // because the publication capability gate has to write the same thing.
+                Message = ExceptionCause.Describe(exception),
                 SourcePath = sourcePath
             };
         }
 
-        public static ImportResult Skipped(string message)
+        public static ImportResult Skipped(
+            string message,
+            string? sourcePath = null)
         {
             return new ImportResult
             {
                 Success = true,
-                Message = message
+                Message = message,
+                SourcePath = sourcePath,
+                SourceDisposition = string.IsNullOrWhiteSpace(sourcePath)
+                    ? ImportSourceDisposition.Unchanged
+                    : ImportSourceDisposition.Retained
             };
         }
     }

@@ -61,18 +61,27 @@
               : ''
           }}
         </span>
-        <div class="group-dropdown" v-if="audiobooks.length > 0">
+        <div class="group-dropdown" v-if="rawAudiobooksLength > 0">
           <button class="toolbar-btn group-btn" @click="showGroupMenu = !showGroupMenu">
-            <PhBook v-if="groupBy === 'books'" />
+            <PhWarning v-if="brokenOnly" />
+            <PhBook v-else-if="groupBy === 'books'" />
             <PhUser v-else-if="groupBy === 'authors'" />
             <PhBooks v-else />
-            {{ groupBy === 'books' ? 'Books' : groupBy === 'authors' ? 'Authors' : 'Series' }}
+            {{
+              brokenOnly
+                ? 'Broken books'
+                : groupBy === 'books'
+                  ? 'Books'
+                  : groupBy === 'authors'
+                    ? 'Authors'
+                    : 'Series'
+            }}
             <PhCaretDown />
           </button>
           <div v-if="showGroupMenu" class="group-menu">
             <button
               class="menu-item"
-              :class="{ active: groupBy === 'books' }"
+              :class="{ active: groupBy === 'books' && !brokenOnly }"
               @click="setGroupBy('books')"
             >
               <PhBook />
@@ -94,6 +103,18 @@
               <PhBooks />
               Series
             </button>
+            <!-- Temporary help until the Issues page: books Audible can't fetch metadata for, to
+                 repair -->
+            <button
+              class="menu-item"
+              :class="{ active: brokenOnly }"
+              title="Books Audible can't fetch metadata for (no title, no author, no ASIN or one that isn't an ASIN, or no region), each with its reasons. A temporary shortcut until the Issues page."
+              data-testid="group-broken"
+              @click="setGroupBy('books', { brokenOnly: true })"
+            >
+              <PhWarning />
+              Broken books
+            </button>
           </div>
         </div>
         <button class="toolbar-btn" @click="refreshLibrary">
@@ -107,7 +128,8 @@
         <button
           v-if="audiobooks.length > 0 && selectedCount === 0"
           class="toolbar-btn"
-          @click="libraryStore.selectAll()"
+          data-testid="select-all-audiobooks"
+          @click="selectAllBooks"
         >
           <PhCheckSquare />
           Select All
@@ -119,6 +141,10 @@
         <button v-if="selectedCount > 0" class="toolbar-btn" @click="showOrganize">
           <PhFolderOpen />
           Organize Selected
+        </button>
+        <button v-if="selectedCount > 0" class="toolbar-btn repair-btn" @click="showRepair">
+          <PhWrench />
+          Repair Selected ({{ selectedCount }})
         </button>
         <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
@@ -189,6 +215,20 @@
           <PhPlus v-else />
           {{ !hasRootFolderConfigured ? 'Go to Settings' : 'Add Audiobooks' }}
         </router-link>
+      </template>
+    </EmptyState>
+
+    <!-- Broken books: none left to repair (in the current search and filters) -->
+    <EmptyState
+      v-else-if="audiobooks.length === 0 && brokenOnly"
+      title="No broken books"
+      message="Every book shown has a title and a valid ASIN."
+    >
+      <template #icon>
+        <PhCheckCircle :size="48" />
+      </template>
+      <template #action>
+        <button class="btn btn-primary" @click="setGroupBy('books')">Show all books</button>
       </template>
     </EmptyState>
 
@@ -495,6 +535,17 @@
                   </button>
                 </div>
               </div>
+              <!-- Why the server considers the book broken: always shown under the cover, in the
+                   "Broken books" group (the overlay only appears on hover) -->
+              <div
+                v-if="brokenOnly && audiobook.brokenReasons?.length"
+                class="broken-reasons grid-broken-reasons"
+                data-testid="broken-reasons"
+              >
+                <span v-for="reason in audiobook.brokenReasons" :key="reason" class="broken-reason">
+                  {{ brokenReasonLabel(reason) }}
+                </span>
+              </div>
               <!-- Extra details shown physically under poster when toggle is enabled -->
               <div v-if="showItemDetails" class="grid-bottom-details">
                 <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
@@ -588,6 +639,15 @@
                   audiobook.authors?.map((author) => safeText(author)).join(', ') ||
                   'Unknown Author'
                 }}
+              </div>
+              <div
+                v-if="brokenOnly && audiobook.brokenReasons?.length"
+                class="broken-reasons"
+                data-testid="broken-reasons"
+              >
+                <span v-for="reason in audiobook.brokenReasons" :key="reason" class="broken-reason">
+                  {{ brokenReasonLabel(reason) }}
+                </span>
               </div>
               <div v-if="showItemDetails" class="list-extra-details">
                 <div v-if="formatSeriesMemberships(audiobook)" class="detail-line small">
@@ -703,8 +763,20 @@
     <RenamePreviewModal
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
+      :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+      :can-go-back="isOrganizeFromRepair"
+      @back="backToRepair"
       @close="closeOrganize"
       @done="handleOrganizeDone"
+    />
+
+    <RepairBooksModal
+      :visible="showRepairModal"
+      :audiobook-ids="repairAudiobookIds"
+      :is-resumed="isRepairResumed"
+      @close="showRepairModal = false"
+      @done="handleRepairDone"
+      @organize="organizeRepaired"
     />
 
     <!-- Custom Filter Modal -->
@@ -747,7 +819,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteTrackedFiles === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -768,7 +843,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteFolder === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -779,6 +857,12 @@
               </div>
             </label>
           </div>
+          <p v-if="deleteCapabilities?.reason" class="warning-text">
+            {{ deleteCapabilities.reason }}
+            <span v-if="deleteCapabilities.canRemoveFromLibrary">
+              The audiobook can still be removed from the library.
+            </span>
+          </p>
         </div>
       </template>
     </DeleteConfirmationModal>
@@ -811,6 +895,9 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhWrench,
+  PhWarning,
+  PhCheckCircle,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -821,17 +908,24 @@ import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
 import { logger } from '@/utils/logger'
+import { brokenReasonLabel } from '@/utils/brokenBookReasons'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { REPAIR_ORGANIZE_TITLE } from '@/utils/repair'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
 import CustomFilterModal from '@/components/domain/collection/CustomFilterModal.vue'
 import { EmptyState } from '@/components/base'
 import { showConfirm } from '@/composables/useConfirm'
-import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
-import type { Audiobook, AudiobookStatus, QualityProfile } from '@/types'
+import type {
+  Audiobook,
+  AudiobookDeleteCapabilities,
+  AudiobookStatus,
+  QualityProfile,
+} from '@/types'
 import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { computeAudiobookStatus, formatAudiobookStatus } from '@/utils/audiobookStatus'
@@ -1048,6 +1142,9 @@ const filteredAndSortedAudiobooks = computed(() => {
     )
   })
 
+  // "Broken books": the books the server gives reasons for
+  if (brokenOnly.value) filtered = filtered.filter((b) => (b.brokenReasons?.length ?? 0) > 0)
+
   // Apply selected filter (built-in or custom)
   if (selectedFilterId.value) {
     const sid = selectedFilterId.value
@@ -1058,10 +1155,9 @@ const filteredAndSortedAudiobooks = computed(() => {
     } else if (sid === 'missing') {
       filtered = filtered.filter((b) => getAudiobookStatus(b) === 'no-file')
     } else if (sid === 'recent') {
-      // For now: approximate by publishYear being this year or last year
       const thisYear = new Date().getFullYear()
       filtered = filtered.filter((b) => {
-        const y = Number(b.publishYear || 0)
+        const y = new Date(b.added ?? '').getFullYear()
         return !isNaN(y) && (y === thisYear || y === thisYear - 1)
       })
     } else {
@@ -1328,12 +1424,21 @@ const GROUP_BY_MODES = ['books', 'authors', 'series'] as const
 type GroupByMode = (typeof GROUP_BY_MODES)[number]
 const DEFAULT_VISIBLE_RANGE_END = 20
 const groupBy = ref<'books' | 'authors' | 'series'>('books')
+// "Broken books": the Books group showing only the books to repair (group=broken in the address)
+const BROKEN_GROUP = 'broken'
+const brokenOnly = ref(false)
 const showGroupMenu = ref(false)
 
 function normalizeGroupBy(value: unknown): GroupByMode | null {
+  if (value === BROKEN_GROUP) return 'books'
   return typeof value === 'string' && GROUP_BY_MODES.includes(value as GroupByMode)
     ? (value as GroupByMode)
     : null
+}
+
+// The group as the address and the saved preference name it
+function groupQueryValue(): string {
+  return brokenOnly.value ? BROKEN_GROUP : groupBy.value
 }
 
 // --- GroupBy and SortKey Initialization ---
@@ -1343,22 +1448,33 @@ try {
   const storedGroup = normalizeGroupBy(stored)
   if (storedGroup) {
     groupBy.value = storedGroup
+    brokenOnly.value = stored === BROKEN_GROUP
   }
   const initialGroup = normalizeGroupBy(route.query.group)
-  if (initialGroup && initialGroup !== groupBy.value) {
+  if (initialGroup) {
     groupBy.value = initialGroup
+    brokenOnly.value = route.query.group === BROKEN_GROUP
   }
   // No need to set sortKey/order here; handled per-group below
   if (!initialGroup) {
-    router.replace({ path: '/audiobooks', query: { group: groupBy.value } })
-  } else if (route.query.group !== initialGroup) {
-    router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: initialGroup } })
+    router.replace({ path: '/audiobooks', query: { group: groupQueryValue() } })
+  } else if (route.query.group !== groupQueryValue()) {
+    router.replace({
+      path: '/audiobooks',
+      query: { ...(route.query || {}), group: groupQueryValue() },
+    })
   }
 } catch {}
 
+watch(brokenOnly, () => {
+  try {
+    localStorage.setItem(GROUP_BY_KEY, groupQueryValue())
+  } catch {}
+})
+
 watch(groupBy, (v) => {
   try {
-    localStorage.setItem(GROUP_BY_KEY, v)
+    localStorage.setItem(GROUP_BY_KEY, groupQueryValue())
   } catch {}
 
   // Ensure selected sort key is valid for the new grouping; reset to sensible defaults if needed
@@ -1703,12 +1819,16 @@ watch(
   (g) => {
     try {
       const mode = normalizeGroupBy(g) ?? 'books'
+      const broken = g === BROKEN_GROUP
       // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
-      if (mode !== groupBy.value) {
+      if (mode !== groupBy.value || broken !== brokenOnly.value) {
         // fire-and-forget async to avoid blocking the router navigation
-        void setGroupBy(mode)
-      } else if (g !== mode) {
-        void router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
+        void setGroupBy(mode, { brokenOnly: broken })
+      } else if (g !== groupQueryValue()) {
+        void router.replace({
+          path: '/audiobooks',
+          query: { ...(route.query || {}), group: groupQueryValue() },
+        })
       }
     } catch {}
   },
@@ -1814,10 +1934,17 @@ const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
+const deleteCapabilities = ref<AudiobookDeleteCapabilities | null>(null)
 const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
+// Organize opened by Repair, as its last step
+const isOrganizeFromRepair = ref(false)
+const showRepairModal = ref(false)
+const repairAudiobookIds = ref<number[]>([])
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const isRepairResumed = ref(false)
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2028,9 +2155,11 @@ function resetVirtualScroller() {
   }
 }
 
-async function setGroupBy(mode: GroupByMode) {
-  const changed = mode !== groupBy.value
+async function setGroupBy(mode: GroupByMode, options: { brokenOnly?: boolean } = {}) {
+  const broken = mode === 'books' && !!options.brokenOnly
+  const changed = mode !== groupBy.value || broken !== brokenOnly.value
   groupBy.value = mode
+  brokenOnly.value = broken
   showGroupMenu.value = false
   if (changed) {
     resetVirtualScroller()
@@ -2052,7 +2181,10 @@ async function setGroupBy(mode: GroupByMode) {
   }
   try {
     // update route query so sidebar subnav and URL stay in sync
-    router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
+    router.replace({
+      path: '/audiobooks',
+      query: { ...(route.query || {}), group: groupQueryValue() },
+    })
   } catch (err) {
     logger.debug('Failed to update route query for group:', err)
   }
@@ -2220,12 +2352,33 @@ async function refreshLibrary() {
 async function confirmDelete(audiobook: Audiobook) {
   deleteTarget.value = audiobook
   resetDeleteOptions()
+  deleteCapabilities.value = null
+  const targetId = audiobook.id
+  let capabilities: AudiobookDeleteCapabilities
+  try {
+    capabilities = await apiService.getAudiobookDeleteCapabilities(targetId)
+  } catch {
+    capabilities = unavailableDeleteCapabilities()
+  }
+  if (deleteTarget.value?.id !== targetId) return
+  deleteCapabilities.value = capabilities
   showDeleteDialog.value = true
+}
+
+function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
+  return {
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: false,
+    canDeleteFolder: false,
+    reason: 'Filesystem delete capability could not be checked.',
+    fallbackAction: 'RemoveFromLibraryOnly',
+  }
 }
 
 function cancelDelete() {
   resetDeleteOptions()
   deleteTarget.value = null
+  deleteCapabilities.value = null
   showDeleteDialog.value = false
 }
 
@@ -2239,10 +2392,6 @@ async function executeDelete() {
     await libraryStore.removeFromLibrary(deleteTarget.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
-      retryAfterBlockedMutation: shouldDeleteFiles
-        ? (error) =>
-            preparePhysicalDeleteRetry(error, deleteTarget.value!.id, deleteTarget.value?.basePath)
-        : undefined,
     })
   } catch (err) {
     errorTracking.captureException(err as Error, {
@@ -2254,6 +2403,7 @@ async function executeDelete() {
     deleting.value = false
     resetDeleteOptions()
     deleteTarget.value = null
+    deleteCapabilities.value = null
     showDeleteDialog.value = false
   }
 }
@@ -2311,11 +2461,40 @@ function closeBulkEdit() {
 
 function showOrganize() {
   organizeAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  isOrganizeFromRepair.value = false
   showOrganizeModal.value = true
 }
 
 function closeOrganize() {
   showOrganizeModal.value = false
+}
+
+function showRepair() {
+  repairAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  isRepairResumed.value = false
+  showRepairModal.value = true
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await libraryStore.fetchLibrary()
+}
+
+async function organizeRepaired(audiobookIds: number[]) {
+  showRepairModal.value = false
+  organizeAudiobookIds.value = audiobookIds
+  isOrganizeFromRepair.value = true
+  showOrganizeModal.value = true
+  // Organize reads its previews from the server: the library behind is refreshed meanwhile, so
+  // no moment passes without a dialog
+  await libraryStore.fetchLibrary()
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  isRepairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {
@@ -2356,6 +2535,17 @@ async function handleEditSaved() {
       editAudiobook.value = updated
     }
   }
+}
+
+// In "Broken books", Select All takes only the broken books shown, so Repair and Delete
+// can't reach healthy books hidden by the group
+function selectAllBooks() {
+  if (!brokenOnly.value) {
+    libraryStore.selectAll()
+    return
+  }
+  libraryStore.clearSelection()
+  for (const book of audiobooks.value) libraryStore.toggleSelection(book.id)
 }
 
 function applyCheckboxSelection(audiobook: Audiobook, shiftKey: boolean) {
@@ -2527,6 +2717,17 @@ defineExpose({
 
 .toolbar-btn.edit-btn:hover {
   background-color: #1976d2;
+}
+
+/* Orange, like the problems Repair fixes; dark text stays readable on it */
+.toolbar-btn.repair-btn {
+  background-color: var(--warning-500);
+  border-color: var(--warning-600);
+  color: #1a1a1a;
+}
+
+.toolbar-btn.repair-btn:hover {
+  background-color: var(--warning-600);
 }
 
 .toolbar-btn.delete-btn {
@@ -3041,19 +3242,19 @@ defineExpose({
 }
 
 .legend-dot.status-downloading {
-  background-color: #3498db;
+  background-color: var(--status-progress);
 }
 
 .legend-dot.status-no-file {
-  background-color: #e74c3c;
+  background-color: var(--status-error);
 }
 
 .legend-dot.status-quality-mismatch {
-  background-color: #f39c12;
+  background-color: var(--status-warning);
 }
 
 .legend-dot.status-quality-match {
-  background-color: #2ecc71;
+  background-color: var(--status-success);
 }
 
 @media (max-width: 768px) {
@@ -3139,48 +3340,48 @@ defineExpose({
 }
 
 .audiobook-item.status-no-file .audiobook-poster-container {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-item.status-downloading .audiobook-poster-container {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    border-bottom-color: #3498db;
+    border-bottom-color: var(--status-progress);
   }
   50% {
-    border-bottom-color: #5dade2;
+    border-bottom-color: var(--status-progress-light);
   }
 }
 
 .audiobook-item.status-quality-mismatch .audiobook-poster-container {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-item.status-quality-match .audiobook-poster-container {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 /* List view status borders */
 .audiobook-list-item.status-no-file .list-thumb {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-list-item.status-downloading .list-thumb {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 .audiobook-list-item.status-quality-mismatch .list-thumb {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-list-item.status-quality-match .list-thumb {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 .selection-checkbox {
@@ -3468,6 +3669,29 @@ defineExpose({
 .audiobook-poster-container:hover .status-overlay {
   padding: 80px 8px 8px;
   opacity: 1;
+}
+
+/* Why a book is broken, as orange tags (the warning color, like the problems Repair fixes) */
+.broken-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.grid-broken-reasons {
+  padding: 0.35rem 0.25rem 0;
+}
+
+.broken-reason {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--warning-600);
+  border-radius: 4px;
+  background: rgba(255, 165, 0, 0.15);
+  color: var(--warning-500);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* When 'show-details' class is present, render overlay expanded */

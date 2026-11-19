@@ -1,0 +1,17 @@
+{
+  "products": [
+    {
+      "asin": "B0096QR7Z0",
+      "title": "Allan Quatermain",
+      "language": "english",
+      "authors": [{ "name": "H. Rider Haggard", "asin": "B000AQ0B6S" }],
+      "narrators": [{ "name": "Bill Homewood" }],
+      "series": [{ "asin": "B01F5TL5K4", "title": "Allan Quatermain", "sequence": "15" }],
+      "content_type": "Product",
+      "content_delivery_type": "SinglePartBook",
+      "release_date": "2012-09-07",
+      "runtime_length_min": 300
+    }
+  ],
+  "total_results": 1
+}

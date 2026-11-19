@@ -63,7 +63,6 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         FileSystemPathSemantics semantics,
         string boundaryPath,
-        string boundaryObjectIdentity,
         CancellationToken cancellationToken)
     {
         foreach (var entry in manifest)
@@ -73,8 +72,7 @@ internal sealed partial class AudiobookContentMoveService
                 using var root = OpenPinnedPublishedManifestDirectory(
                     boundaryPath,
                     destinationRoot,
-                    semantics,
-                    boundaryObjectIdentity);
+                    semantics);
                 ValidatePublishedManifestDirectory(root, entry);
                 continue;
             }
@@ -94,8 +92,7 @@ internal sealed partial class AudiobookContentMoveService
                 using var directory = OpenPinnedPublishedManifestDirectory(
                     boundaryPath,
                     destinationPath,
-                    semantics,
-                    boundaryObjectIdentity);
+                    semantics);
                 ValidatePublishedManifestDirectory(directory, entry);
                 continue;
             }
@@ -106,31 +103,23 @@ internal sealed partial class AudiobookContentMoveService
             using var parent = OpenPinnedPublishedManifestDirectory(
                 boundaryPath,
                 parentPath,
-                semantics,
-                boundaryObjectIdentity);
+                semantics);
             using var file = parent.OpenExistingFile(
                 Path.GetFileName(destinationPath),
                 requireDeleteAccess: false);
             if (!PinnedFileVisibleOrThrowUnavailable(
                     file,
-                    $"Published file is temporarily unavailable: {entry.RelativePath}")
-                || (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-                    && !file.MatchesObjectIdentity(
-                        entry.TargetPhysicalObjectIdentity)))
+                    $"Published file is temporarily unavailable: {entry.RelativePath}"))
             {
                 throw new MoveNeedsAttentionException(
-                    $"Published file generation changed: {entry.RelativePath}");
+                    $"Published file changed while it was being verified: {entry.RelativePath}");
             }
 
             var verified = !string.IsNullOrWhiteSpace(entry.Sha256)
-                ? await PinnedFileMatchesManifestAsync(
+                && await PinnedFileMatchesManifestAsync(
                     file,
                     entry,
-                    cancellationToken)
-                : IsVerifiedMarkerlessNativeRenameEntry(entry)
-                    && file.MatchesMetadata(
-                        entry.Length,
-                        entry.LastWriteTimeUtc);
+                    cancellationToken);
             if (!verified)
             {
                 throw new MoveNeedsAttentionException(
@@ -143,8 +132,7 @@ internal sealed partial class AudiobookContentMoveService
         OpenPinnedPublishedManifestDirectory(
             string boundaryPath,
             string directoryPath,
-            FileSystemPathSemantics semantics,
-            string boundaryObjectIdentity)
+            FileSystemPathSemantics semantics)
     {
         if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
                 boundaryPath,
@@ -159,13 +147,12 @@ internal sealed partial class AudiobookContentMoveService
         var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
         try
         {
-            if (!current.MatchesDirectoryObjectIdentity(boundaryObjectIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     current,
                     "The published manifest scan boundary is temporarily unavailable."))
             {
                 throw new MoveNeedsAttentionException(
-                    "The published manifest scan boundary changed physical generation.");
+                    "The published manifest scan boundary changed while it was being pinned.");
             }
 
             foreach (var segment in SplitMovePathSegments(relativePath, semantics))
@@ -196,12 +183,13 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
         MoveJobEntry entry)
     {
-        if (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-            && !directory.MatchesDirectoryObjectIdentity(
-                entry.TargetPhysicalObjectIdentity))
+        _ = entry.TargetPhysicalObjectIdentity; // Legacy diagnostic only.
+        if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                directory,
+                $"Published directory is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
-                $"Published directory generation changed: {entry.RelativePath}");
+                $"Published directory changed while it was being pinned: {entry.RelativePath}");
         }
     }
 }

@@ -7,6 +7,42 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 [Trait("Category", "Infrastructure")]
 public sealed class FileRegistrationRecoveryProbeTests : BaseTests
 {
+    [Theory]
+    [InlineData(FileAction.Move)]
+    [InlineData(FileAction.Copy)]
+    [InlineData(FileAction.HardlinkCopy)]
+    public async Task HasBlockingAsync_AllRegistrationPublicationActions_Block(
+        FileAction action)
+    {
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using (var db = new ListenArrDbContext(options))
+        {
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = Guid.NewGuid(),
+                ProtocolVersion = FileMutationProtocol.Current,
+                Action = action,
+                SourcePath = Path.Join(Path.GetTempPath(), "incoming.m4b"),
+                DestinationPath = Path.Join(Path.GetTempPath(), "library.m4b"),
+                SourceParentDirectoryObjectIdentity = "source-parent",
+                DestinationParentDirectoryObjectIdentity = "destination-parent",
+                SourcePhysicalObjectIdentity = "source-generation",
+                TargetPhysicalObjectIdentity = "target-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.RegistrationCommitted,
+                AudiobookId = 42,
+                AudiobookFileId = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var probe = new FileRegistrationRecoveryProbe(new TestDbFactory(options));
+
+        Assert.True(await probe.HasBlockingAsync(42));
+    }
+
     [Fact]
     public async Task HasBlockingBoundaryAsync_AnonymousVerifiedPublicationUnderBoundary_Blocks()
     {
@@ -42,13 +78,22 @@ public sealed class FileRegistrationRecoveryProbeTests : BaseTests
 
         var probe = new FileRegistrationRecoveryProbe(new TestDbFactory(options));
 
-        Assert.True(await probe.HasBlockingBoundaryAsync(
+        var blockers = await probe.GetBlockingBoundaryAsync(
             root,
-            FileSystemPathSemantics.CurrentHostDefault));
+            FileSystemPathSemantics.CurrentHostDefault);
+
+        var blocker = Assert.Single(blockers);
+        Assert.Equal(FileMutationJournalState.TargetVerified, blocker.JournalState);
+        Assert.Equal(FileRegistrationRecoveryDisposition.AutomaticRecovery, blocker.Recoverability);
+        Assert.False(blocker.SourceTouchesBoundary);
+        Assert.True(blocker.DestinationTouchesBoundary);
     }
 
-    [Fact]
-    public async Task HasBlockingBoundaryAsync_CompletedAnonymousPublication_DoesNotBlock()
+    [Theory]
+    [InlineData(FileMutationJournalState.Completed)]
+    [InlineData(FileMutationJournalState.RolledBack)]
+    public async Task HasBlockingBoundaryAsync_TerminalAnonymousPublication_DoesNotBlock(
+        FileMutationJournalState state)
     {
         var options = new DbContextOptionsBuilder<ListenArrDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -72,7 +117,7 @@ public sealed class FileRegistrationRecoveryProbeTests : BaseTests
                 SourcePhysicalObjectIdentity = "source-generation",
                 TargetPhysicalObjectIdentity = "target-generation",
                 SourceLength = 5,
-                State = FileMutationJournalState.Completed,
+                State = state,
                 AudiobookId = 42,
                 AudiobookFileId = null
             });

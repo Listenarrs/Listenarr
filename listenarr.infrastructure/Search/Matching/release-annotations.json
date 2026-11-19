@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "labels": [
+    {
+      "id": "group.nmr",
+      "name": "NMR",
+      "kind": "Group",
+      "placements": "Suffix, DelimitedPrefix"
+    },
+    {
+      "id": "group.pof",
+      "name": "PoF",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.bob",
+      "name": "BoB",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.bbtv",
+      "name": "BBtv",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.miok",
+      "name": "miok",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.jd07",
+      "name": "JD07",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.ferrabit",
+      "name": "FerraBit",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.cravings",
+      "name": "CRAViNGS",
+      "kind": "Group",
+      "placements": "Suffix"
+    },
+    {
+      "id": "group.zeke23",
+      "name": "zeke23",
+      "kind": "Group",
+      "placements": "TechnicalSuffix, BracketedSuffix"
+    },
+    {
+      "id": "group.earreaders",
+      "name": "EarReaders",
+      "kind": "Group",
+      "placements": "BracketedSuffix"
+    },
+    {
+      "id": "group.dwg",
+      "name": "dwg",
+      "kind": "Group",
+      "placements": "BracketedSuffix"
+    },
+    {
+      "id": "source.audible",
+      "name": "Audible",
+      "kind": "Source",
+      "placements": "BracketedSuffix"
+    },
+    {
+      "id": "source.retail",
+      "name": "retail",
+      "kind": "Source",
+      "placements": "BracketedSuffix"
+    },
+    {
+      "id": "source.graphicaudio",
+      "name": "GraphicAudio",
+      "kind": "Source",
+      "placements": "BracketedSuffix"
+    }
+  ],
+  "seriesAliases": [
+    {
+      "canonical": "The First Law Trilogy",
+      "alias": "The First Law"
+    },
+    {
+      "canonical": "Presidential Agent",
+      "alias": "Presidential Agents"
+    },
+    {
+      "canonical": "The Boxcar Children Mysteries",
+      "alias": "Boxcar Children"
+    },
+    {
+      "canonical": "Apprentice Adept Series",
+      "alias": "Apprentice Adept"
+    },
+    {
+      "canonical": "Alex Cross Adventures",
+      "alias": "Alex Cross"
+    },
+    {
+      "canonical": "Women's Murder Club",
+      "alias": "Womans Murder Club"
+    }
+  ],
+  "seriesDescriptors": [
+    "Series",
+    "Trilogy",
+    "Mysteries",
+    "Saga",
+    "Novels",
+    "Collection"
+  ],
+  "seriesWordPairs": [
+    {
+      "singular": "Agent",
+      "plural": "Agents"
+    }
+  ],
+  "nameParticles": [
+    "de",
+    "del",
+    "da",
+    "dos",
+    "van",
+    "von",
+    "der",
+    "den",
+    "la",
+    "le",
+    "st",
+    "saint"
+  ],
+  "nameSuffixes": [
+    "Jr",
+    "Sr",
+    "II",
+    "III",
+    "IV"
+  ],
+  "collectiveCredits": [
+    "Full Cast",
+    "Various Readers",
+    "Virtual Voice"
+  ]
+}

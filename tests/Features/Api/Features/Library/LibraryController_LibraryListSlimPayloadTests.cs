@@ -27,13 +27,15 @@ namespace Listenarr.Tests.Features.Api.Features.Library
     [Trait("Category", "LibraryController")]
     public class LibraryController_LibraryListSlimPayloadTests : BaseTests
     {
-        [Fact]
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
         [Trait("Method", "GetAll")]
         [Trait("Scenario", "ReturnsSlimPayload_WithServerComputedStatus")]
-        public async Task GetAll_ReturnsSlimPayload_WithServerComputedStatus()
+        public async Task GetAll_ReturnsSlimPayload_WithServerComputedStatus(bool hasAddedDate)
         {
             // Given
-            var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            var book = new AudiobookBuilder()
                 .WithTitle("Slim Book")
                 .WithAuthor("Author One")
                 .WithGenre("Fantasy")
@@ -46,7 +48,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithFileSize(12345)
                 .WithOpenLibraryId("OL123")
                 .WithAuthorAsin("AUTHORASIN1")
-                .Build());
+                .Build();
+            var expectedAdded = hasAddedDate ? new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc) : (DateTime?)null;
+            book.Added = expectedAdded;
+            await _audiobookRepository.AddAsync(book);
 
             await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
                 .WithAudiobook(book)
@@ -88,9 +93,15 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal(book.FileSize, item.GetProperty("fileSize").GetInt64());
             Assert.Equal(1, item.GetProperty("fileCount").GetInt32());
             Assert.True(item.TryGetProperty("added", out var added));
-            Assert.NotNull(book.Added);
-            Assert.Equal(book.Added.Value, added.GetDateTime());
-            Assert.EndsWith("Z", added.GetString(), StringComparison.Ordinal);
+            if (hasAddedDate)
+            {
+                Assert.Equal(expectedAdded, added.GetDateTime());
+                Assert.EndsWith("Z", added.GetString(), StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.Equal(JsonValueKind.Null, added.ValueKind);
+            }
 
             Assert.False(item.TryGetProperty("files", out _));
             Assert.False(item.TryGetProperty("description", out _));

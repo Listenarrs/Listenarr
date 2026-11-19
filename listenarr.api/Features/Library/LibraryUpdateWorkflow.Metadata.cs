@@ -10,6 +10,7 @@ public sealed partial class LibraryUpdateWorkflow
         bool basePathRewritten,
         bool suppressStaleImageUrl,
         bool metadataUpdateRequested,
+        int? resolvedQualityProfileId,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -70,10 +71,12 @@ public sealed partial class LibraryUpdateWorkflow
         if (request.FileSize.HasValue) existingAudiobook.FileSize = request.FileSize;
         if (request.Quality != null) existingAudiobook.Quality = request.Quality;
 
-        await ApplyQualityProfileAsync(
-            existingAudiobook,
-            request,
-            cancellationToken);
+        if (resolvedQualityProfileId.HasValue)
+        {
+            existingAudiobook.QualityProfileId = resolvedQualityProfileId.Value;
+            _logger.LogInformation("Updated quality profile for audiobook '{Title}' to ID {ProfileId}",
+                LogRedaction.SanitizeText(existingAudiobook.Title), resolvedQualityProfileId.Value);
+        }
 
         if (legacyIdentifierFieldsTouched)
         {

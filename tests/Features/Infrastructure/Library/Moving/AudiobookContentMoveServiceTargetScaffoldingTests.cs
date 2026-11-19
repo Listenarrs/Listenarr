@@ -37,7 +37,7 @@ public partial class AudiobookContentMoveServiceTests
     }
 
     [Fact]
-    public async Task MoveContentsAsync_TargetDirectoryCreationIoFailure_RemainsTransientAndPlanned()
+    public async Task MoveContentsAsync_TargetDirectoryCreationIoFailure_RemainsRetryableWhenPlannedPathIsMissing()
     {
         var source = FileService.GetTempDirectory("content-move-scaffold-transient-src");
         var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
@@ -74,6 +74,51 @@ public partial class AudiobookContentMoveServiceTests
                 && directory.Path == target);
         Assert.Equal(MoveCreatedDirectoryState.Planned, planned.State);
         Assert.Null(planned.DirectoryObjectIdentity);
+
+        await service.VerifyNoFilesystemMoveStartedAsync(
+            request,
+            CancellationToken.None);
+
+        var result = await service.MoveContentsAsync(request, CancellationToken.None);
+
+        Assert.True(result.SourceCleanupCompleted);
+        Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
+    public async Task VerifyNoFilesystemMoveStartedAsync_PlannedScaffoldThatExists_IsExecutionEvidence()
+    {
+        var source = FileService.GetTempDirectory("content-move-planned-existing-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var targetParent = FileService.GetTempDirectory("content-move-planned-existing-dst");
+        var target = Path.Join(targetParent, "Book");
+        var request = await CreateLeasedMoveRequestAsync(source, target);
+        await using (var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync())
+        {
+            db.MoveJobCreatedDirectories.Add(new MoveJobCreatedDirectory
+            {
+                MoveJobId = request.JobId,
+                Path = target,
+                State = MoveCreatedDirectoryState.Planned
+            });
+            await db.SaveChangesAsync();
+        }
+        Directory.CreateDirectory(target);
+        var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+
+        var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            service.VerifyNoFilesystemMoveStartedAsync(
+                request,
+                CancellationToken.None));
+
+        Assert.Contains(
+            "durable move execution state",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Join(source, "book.m4b")));
+        Assert.True(Directory.Exists(target));
     }
 
     [LinuxFact]

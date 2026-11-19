@@ -142,9 +142,9 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             .GetRequiredService<IAudiobookFileService>();
                         cancellationToken.ThrowIfCancellationRequested();
                         using var registrationLease =
-                            PinnedAudiobookFileRegistrationLease.Open(
+                            PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
                                 resolvedIdentity.CanonicalPath,
-                                file.PhysicalObjectIdentity);
+                                expectedPhysicalObjectIdentity: null);
                         if (!registrationLease.MatchesCurrentPublication())
                         {
                             logger.LogDebug(
@@ -153,13 +153,12 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             return;
                         }
 
-                        if (await taskFileService.RefreshPhysicalGenerationAsync(
-                                new Audiobook { Id = file.AudiobookId },
-                                file.Id,
-                                file.PhysicalObjectIdentity,
-                                registrationLease,
-                                "MetadataRescan",
-                                cancellationToken))
+                        var updated = await taskFileService.RefreshMetadataAsync(
+                            new Audiobook { Id = file.AudiobookId },
+                            file.Id,
+                            registrationLease,
+                            cancellationToken);
+                        if (updated)
                         {
                             logger.LogInformation(
                                 "Updated metadata for file id={Id}",
@@ -214,11 +213,10 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             applyScope.ServiceProvider
                                 .GetRequiredService<IRootFolderService>(),
                             token);
-                    if (!await fileRepository.DeletePhysicalGenerationAsync(
+                    if (!await fileRepository.DeletePathStateAsync(
                             currentFile.Id,
                             currentFile.AudiobookId,
-                            currentFile.Path,
-                            currentFile.PhysicalObjectIdentity,
+                            currentFile.CapturePathState(),
                             token))
                     {
                         logger.LogInformation(

@@ -84,6 +84,7 @@ internal sealed partial class AudiobookContentMoveService
             PinnedDirectoryCreation.PinnedDirectoryAnchor sourceParent,
             PinnedDirectoryCreation.PinnedDirectoryAnchor targetParent,
             string targetName,
+            string liveSourceIdentity,
             CancellationToken cancellationToken)
     {
         sourceParent.FlushDirectoryEntry();
@@ -98,12 +99,12 @@ internal sealed partial class AudiobookContentMoveService
         var verificationLease = targetParent.OpenExistingFileForVerificationLease(targetName);
         try
         {
-            if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                || !verificationLease.MatchesObjectIdentity(
-                    entry.SourcePhysicalObjectIdentity)
-                || !verificationLease.MatchesMetadata(
-                    entry.Length,
-                    entry.LastWriteTimeUtc)
+            if (!verificationLease.MatchesObjectIdentity(
+                    liveSourceIdentity)
+                || !await PinnedFileMatchesManifestAsync(
+                    verificationLease,
+                    entry,
+                    cancellationToken)
                 || !PinnedFileVisibleOrThrowUnavailable(
                     verificationLease,
                     $"The observed native-rename target is temporarily unavailable: {entry.RelativePath}"))
@@ -120,10 +121,10 @@ internal sealed partial class AudiobookContentMoveService
                 request.LeaseToken,
                 entry.RelativePath,
                 MoveJobEntryCopyState.Verified,
-                entry.SourcePhysicalObjectIdentity,
+                liveSourceIdentity,
                 cancellationToken);
             entry.CopyState = MoveJobEntryCopyState.Verified;
-            entry.TargetPhysicalObjectIdentity = entry.SourcePhysicalObjectIdentity;
+            entry.TargetPhysicalObjectIdentity = liveSourceIdentity;
             var result = (Published: true, VerificationLease: verificationLease);
             verificationLease = null;
             return result;

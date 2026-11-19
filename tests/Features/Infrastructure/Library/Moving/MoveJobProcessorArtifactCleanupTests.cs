@@ -50,8 +50,10 @@ public partial class MoveJobProcessorTests
             .ProcessJobAsync(retryJob, CancellationToken.None);
 
         Assert.Equal(MoveJobStatus.Completed, (await queue.GetJobAsync(job.Id))?.Status);
-        Assert.False(Directory.Exists(sourceParent));
+        // Retry has no original ancestor handles; completing the move retains scaffolding.
+        Assert.True(Directory.Exists(sourceParent));
         Assert.True(Directory.Exists(sourceRoot));
+        Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
     }
 
     [Fact]
@@ -191,6 +193,15 @@ public partial class MoveJobProcessorTests
 
     private sealed class AlwaysFailMoveFinalization : IMoveFaultInjector
     {
+        // Recovery verifies publication even though it cannot resume ancestor deletion.
+        public void OnFinalizedVerification(Guid jobId, FinalizedVerificationFaultPoint faultPoint)
+        {
+            if (faultPoint == FinalizedVerificationFaultPoint.BeforeManifestVerification)
+            {
+                throw new IOException("Simulated persistent publication verification failure.");
+            }
+        }
+
         public void OnMoveFinalization(
             Guid jobId,
             MoveFinalizationFaultPoint faultPoint)

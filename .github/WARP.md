@@ -16,7 +16,7 @@ Listenarr is an automated audiobook collection management system built as a full
 
 ### Prerequisites
 - .NET 10.0 SDK or later
-- Node.js 24.x or later (specified in `fe/package.json` engines)
+- Node.js 26.x (26.12.1 or later) (specified in `fe/package.json` engines)
 
 ### Common Development Tasks
 
@@ -79,13 +79,12 @@ dotnet ef database update
 cd fe
 npm run test:unit
 
-# Run E2E tests with Cypress
-cd fe  
-npm run test:e2e
-
-# Open Cypress interactively for debugging
+# Run frontend integration tests with Playwright (browser, stubbed API)
 cd fe
-npm run test:e2e:dev
+npm run test:frontend-integration
+
+# Run backend integration tests (whole app in process, API only; needs ffprobe)
+dotnet test tests/Listenarr.BackendIntegrationTests
 ```
 
 ## Architecture Overview
@@ -259,7 +258,7 @@ This produces a single deployment artifact containing both backend and frontend.
 - Automatic migrations on startup
 
 ### External Dependencies
-- FFprobe binary required for audio metadata extraction (auto-installed by `FfmpegInstallerService`)
+- FFprobe binary required for audio metadata extraction (shipped via the `Openur.FFprobeStatic` NuGet package and resolved by `FfmpegService`)
 - Playwright browsers for web scraping (downloaded on first use)
 
 ### CI/CD Integration  
@@ -291,6 +290,6 @@ This produces a single deployment artifact containing both backend and frontend.
 - Check that files actually exist on disk, not just in database
 
 ### Build Errors
-- Ensure running .NET 10.0 SDK and Node.js 24.x or later
+- Ensure running .NET 10.0 SDK and Node.js 26.x (26.12.1 or later)
 - Clear node_modules and run `npm install` in `fe/` directory
 - Clean solution: `dotnet clean` then `dotnet build`

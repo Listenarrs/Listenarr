@@ -14,19 +14,37 @@ internal sealed partial class AudiobookContentMoveService
         long totalUnits,
         CancellationToken cancellationToken)
     {
-        var currentIdentity = targetEntry.GetObjectIdentity();
-        if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
-        {
-            if (entry.CopyState != MoveJobEntryCopyState.Pending
-                || !await PinnedFileMatchesManifestAsync(
-                    targetEntry,
-                    entry,
-                    cancellationToken))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"An existing final target file has no persisted markerless ownership proof: {entry.RelativePath}");
-            }
+        _ = sourceEntry;
+        _ = completedUnitsBeforeFile;
+        _ = totalUnits;
 
+        ValidateMarkerlessTargetEntry(entry, targetEntry);
+        if (entry.CopyState is not (
+            MoveJobEntryCopyState.Pending
+                or MoveJobEntryCopyState.Staged
+                or MoveJobEntryCopyState.Published
+                or MoveJobEntryCopyState.Verified))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The persisted markerless target-file state is inconsistent: {entry.RelativePath}");
+        }
+
+        // Reaching this method means the final-name target already existed before
+        // this publication attempt. Persisted state can identify recovery work,
+        // but cannot authorize mutating that pathname after a process boundary.
+        // Recovery may only adopt bytes that match the durable content proof.
+        if (!await PinnedFileMatchesManifestAsync(
+                targetEntry,
+                entry,
+                cancellationToken))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The existing target does not match the move's verified content proof and was preserved: {entry.RelativePath}");
+        }
+
+        if (entry.CopyState != MoveJobEntryCopyState.Verified)
+        {
+            var currentIdentity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(targetEntry.GetObjectIdentity);
             await UpdateTargetEntryStateAsync(
                 request.JobId,
                 request.LeaseToken,
@@ -36,38 +54,7 @@ internal sealed partial class AudiobookContentMoveService
                 cancellationToken);
             entry.CopyState = MoveJobEntryCopyState.Verified;
             entry.TargetPhysicalObjectIdentity = currentIdentity;
-            return;
         }
-
-        ValidateMarkerlessTargetEntry(entry, targetEntry);
-        if (entry.CopyState == MoveJobEntryCopyState.Verified)
-        {
-            if (!await PinnedFileMatchesManifestAsync(
-                    targetEntry,
-                    entry,
-                    cancellationToken))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A verified markerless target file changed: {entry.RelativePath}");
-            }
-            return;
-        }
-
-        if (entry.CopyState is not (
-            MoveJobEntryCopyState.Staged or MoveJobEntryCopyState.Published))
-        {
-            throw new MoveNeedsAttentionException(
-                $"The persisted markerless target-file state is inconsistent: {entry.RelativePath}");
-        }
-
-        await WriteMarkerlessTargetAsync(
-            request,
-            entry,
-            sourceEntry,
-            targetEntry,
-            completedUnitsBeforeFile,
-            totalUnits,
-            cancellationToken);
     }
 
     private async Task WriteMarkerlessTargetAsync(

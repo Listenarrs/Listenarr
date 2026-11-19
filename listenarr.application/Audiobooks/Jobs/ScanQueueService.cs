@@ -41,13 +41,11 @@ public partial class ScanQueueService : IScanQueueService
         ArgumentNullException.ThrowIfNull(command.Audiobook);
 
         var pathIdentity = command.PathIdentity;
-        var physicalIdentity = command.PhysicalIdentity;
         switch (command.AuthorizationMode)
         {
             case ScanAuthorizationMode.ResolveCurrentAudiobookPath:
                 if (!string.IsNullOrWhiteSpace(command.Path)
-                    || pathIdentity.HasValue
-                    || physicalIdentity.HasValue)
+                    || pathIdentity.HasValue)
                 {
                     throw new ArgumentException(
                         "A current-path scan cannot carry a queued path or queued path identities.",
@@ -57,12 +55,10 @@ public partial class ScanQueueService : IScanQueueService
 
             case ScanAuthorizationMode.PreauthorizedPath:
                 if (string.IsNullOrWhiteSpace(command.Path)
-                    || !pathIdentity.HasValue
-                    || !physicalIdentity.HasValue
-                    || !IsUsablePhysicalProof(physicalIdentity.Value))
+                    || !pathIdentity.HasValue)
                 {
                     throw new InvalidOperationException(
-                        "A preauthorized path scan must carry its path plus lexical and physical authorization before queue publication.");
+                        "A preauthorized path scan must carry its path and lexical authorization before queue publication.");
                 }
 
                 pathIdentity.Value.ValidateForPath(command.Path);
@@ -85,7 +81,6 @@ public partial class ScanQueueService : IScanQueueService
             AudiobookId = command.Audiobook.Id,
             Path = command.Path,
             PathIdentity = pathIdentity,
-            PhysicalIdentity = physicalIdentity,
             CorrelationId = command.CorrelationId,
             DownloadId = command.DownloadId,
             IsAuthoritativeScope = command.IsAuthoritativeScope,
@@ -106,7 +101,6 @@ public partial class ScanQueueService : IScanQueueService
             audiobook,
             Path: null,
             PathIdentity: null,
-            PhysicalIdentity: null,
             correlationId,
             downloadId,
             IsAuthoritativeScope: true,
@@ -114,8 +108,7 @@ public partial class ScanQueueService : IScanQueueService
 
     public async Task<Guid?> EnqueueMoveHandoffScanAsync(
         Audiobook audiobook,
-        MoveScanHandoffClaim claim,
-        ScanPathPhysicalIdentity physicalIdentity)
+        MoveScanHandoffClaim claim)
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(claim);
@@ -126,19 +119,12 @@ public partial class ScanQueueService : IScanQueueService
         }
 
         claim.TargetIdentity.ValidateForPath(claim.TargetPath);
-        if (!physicalIdentity.HasDurableGenerationProof)
-        {
-            throw new ArgumentException(
-                "Move handoff physical authority requires durable generation proof.",
-                nameof(physicalIdentity));
-        }
 
         var job = new ScanJob
         {
             AudiobookId = audiobook.Id,
             Path = claim.TargetPath,
             PathIdentity = claim.TargetIdentity,
-            PhysicalIdentity = physicalIdentity,
             CorrelationId = $"move:{claim.MoveJobId:N}",
             MoveScanHandoffId = claim.HandoffId,
             MoveScanAttemptGeneration = claim.AttemptGeneration,
@@ -367,11 +353,6 @@ public partial class ScanQueueService : IScanQueueService
             await pendingDispatch!;
         }
     }
-
-    private static bool IsUsablePhysicalProof(
-        ScanPathPhysicalIdentity physicalIdentity) =>
-        physicalIdentity.HasDurableGenerationProof
-        || physicalIdentity.ProofKind == ScanPathPhysicalProofKind.PinnedPathOnly;
 
     public bool TryGetJob(Guid id, out ScanJob? job) => _jobs.TryGetValue(id, out job);
 

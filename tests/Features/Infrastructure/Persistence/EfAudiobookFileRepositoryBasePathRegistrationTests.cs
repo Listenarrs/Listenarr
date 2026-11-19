@@ -48,6 +48,86 @@ public sealed class EfAudiobookFileRepositoryBasePathRegistrationTests : BaseTes
     }
 
     [Fact]
+    public async Task RestorePhysicalGenerationAsync_RestoresRawPredecessorTimestamp()
+    {
+        await using var connection = await OpenDatabaseAsync();
+        var options = CreateOptions(connection);
+        var boundary = Path.GetFullPath(Path.Join("library", "PhysicalGenerationRestore"));
+        var filePath = Path.Join(boundary, "Book.m4b");
+        await SeedAudiobooksAsync(options, new Audiobook { Id = 1, Title = "Book", BasePath = boundary });
+        AudiobookFile persisted;
+        await using (var seed = new ListenArrDbContext(options))
+        {
+            persisted = CreateFile(1, filePath, boundary, "generation-two");
+            seed.AudiobookFiles.Add(persisted);
+            await seed.SaveChangesAsync();
+        }
+        var observedAt = DateTime.SpecifyKind(
+            new DateTime(2026, 9, 16, 12, 34, 56),
+            DateTimeKind.Unspecified);
+        var predecessor = new AudiobookFilePhysicalGenerationSnapshot(
+            123, 45.5, "m4b", "mp4", "aac", 64_000, 44_100, 2,
+            "scan", "generation-one", 1, observedAt);
+        await using var context = new ListenArrDbContext(options);
+        var repository = new EfAudiobookFileRepository(context);
+
+        var restored = await repository.RestorePhysicalGenerationAsync(
+            persisted.Id,
+            1,
+            filePath,
+            "generation-two",
+            predecessor);
+
+        Assert.True(restored);
+        await using var verification = new ListenArrDbContext(options);
+        var file = await verification.AudiobookFiles.AsNoTracking().SingleAsync();
+        Assert.Equal("generation-one", file.PhysicalObjectIdentity);
+        Assert.Equal(observedAt, file.PhysicalIdentityObservedAtUtc);
+        Assert.Equal(123, file.Size);
+        Assert.Equal("scan", file.Source);
+    }
+
+    [Fact]
+    public async Task RestorePhysicalGenerationWithBasePathAsync_WrongCurrentGeneration_RollsBackBasePath()
+    {
+        await using var connection = await OpenDatabaseAsync();
+        var options = CreateOptions(connection);
+        var originalBasePath = Path.GetFullPath(Path.Join("library", "RestoreOriginal"));
+        var destination = Path.GetFullPath(Path.Join("library", "RestoreDestination"));
+        var filePath = Path.Join(destination, "Book.m4b");
+        await SeedAudiobooksAsync(
+            options,
+            new Audiobook { Id = 1, Title = "Book", BasePath = destination });
+        AudiobookFile persisted;
+        await using (var seed = new ListenArrDbContext(options))
+        {
+            persisted = CreateFile(1, filePath, destination, "replacement-generation");
+            seed.AudiobookFiles.Add(persisted);
+            await seed.SaveChangesAsync();
+        }
+        var predecessor = new AudiobookFilePhysicalGenerationSnapshot(
+            123, null, null, null, null, null, null, null, null,
+            "generation-one", 1, DateTime.UtcNow);
+        await using var context = new ListenArrDbContext(options);
+        var repository = new EfAudiobookFileRepository(context);
+
+        var restored = await repository.RestorePhysicalGenerationWithBasePathAsync(
+            persisted.Id,
+            1,
+            filePath,
+            "wrong-generation",
+            predecessor,
+            new AudiobookBasePathMutation(1, destination, originalBasePath));
+
+        Assert.False(restored);
+        await using var verification = new ListenArrDbContext(options);
+        Assert.Equal(destination, (await verification.Audiobooks.AsNoTracking().SingleAsync()).BasePath);
+        Assert.Equal(
+            "replacement-generation",
+            (await verification.AudiobookFiles.AsNoTracking().SingleAsync()).PhysicalObjectIdentity);
+    }
+
+    [Fact]
     public async Task DeletePhysicalGenerationAsync_CancelledAtMutationCommand_CommitsUnambiguously()
     {
         await using var connection = await OpenDatabaseAsync();

@@ -21,19 +21,20 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
 {
-    public class DownloadService(
+    public partial class DownloadService(
         IAudiobookRepository audiobookRepository,
         IConfigurationService configurationService,
         IDownloadRepository downloadRepository,
         ILogger<DownloadService> logger,
-        IQualityProfileService qualityProfileService,
         ISearchService searchService,
+        IAutomaticSearchScoringService automaticScoring,
         IDownloadClientGateway clientGateway,
         IDownloadQueueService downloadQueueService,
         INotificationService notificationService,
         IHubBroadcaster hubBroadcaster,
         IDownloadHistoryService downloadHistoryService,
         DownloadClientSelector downloadClientSelector,
+        IBlocklistService blocklistService,
         DownloadCachedTorrentStore cachedTorrentStore,
         IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
@@ -117,113 +118,6 @@ namespace Listenarr.Application.Downloads.Submission
             return await Task.FromResult(new List<ReprocessResult>());
         }
 
-        public async Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId)
-        {
-            // Get the audiobook
-            var audiobook = await audiobookRepository.GetByIdAsync(audiobookId);
-            if (audiobook == null)
-            {
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "Audiobook not found"
-                };
-            }
-
-            if (audiobook.QualityProfile == null)
-            {
-                logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "Audiobook has no quality profile assigned"
-                };
-            }
-
-            // Build search query from audiobook metadata
-            var searchQuery = DownloadSearchQueryBuilder.Build(audiobook);
-            logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(searchQuery));
-
-            // Search using the working search service. This is an automatic search (triggered
-            // by the background/manual 'search-and-download' endpoint), so set isAutomaticSearch
-            // to true to ensure only indexers are queried (no Amazon/Audible scraping).
-            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
-
-            if (searchResults == null || !searchResults.Any())
-            {
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "No search results found"
-                };
-            }
-
-            // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
-
-            // Log all scored results for debugging
-            logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, LogRedaction.SanitizeText(audiobook.Title));
-            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
-            {
-                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
-                logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
-                    status, scoredResult.TotalScore, LogRedaction.SanitizeText(scoredResult.SearchResult.Title), LogRedaction.SanitizeText(scoredResult.SearchResult.Source),
-                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
-                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
-                {
-                    logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
-                }
-            }
-
-            // Only consider non-rejected, score > 0 results
-            var topResult = scoredResults
-                .Where(s => !s.IsRejected && s.TotalScore > 0)
-                .OrderByDescending(s => s.TotalScore)
-                .FirstOrDefault();
-
-            if (topResult == null)
-            {
-                logger.LogWarning("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "No acceptable search results found"
-                };
-            }
-
-            // Assign score to SearchResult
-            topResult.SearchResult.Score = topResult.TotalScore;
-
-            var candidate = TrustedDownloadCandidateFactory.Create(topResult.SearchResult);
-            var isTorrent = candidate.SourceDescriptor.Protocol == DownloadProtocol.Torrent;
-            var downloadClientId = await downloadClientSelector.GetAppropriateDownloadClientAsync(isTorrent);
-
-            if (downloadClientId == null)
-            {
-                logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = $"No suitable download client found for {(isTorrent ? "torrent" : "NZB")} results"
-                };
-            }
-
-            // Send to download client with audiobookId for proper metadata linking
-            var downloadId2 = await SendToDownloadClientAsync(candidate, downloadClientId, audiobookId);
-
-            // Log to history
-            await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
-
-            return new SearchAndDownloadResult
-            {
-                Success = true,
-                Message = $"Successfully sent to download client",
-                DownloadId = downloadId2,
-                IndexerUsed = "Search",
-                DownloadClientUsed = downloadClientId,
-                SearchResult = topResult.SearchResult
-            };
-        }
 
         public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
@@ -250,9 +144,7 @@ namespace Listenarr.Application.Downloads.Submission
                 try
                 {
                     if (await DownloadDuplicateGuard.HasActiveDownloadAsync(
-                            audiobookIdValue,
-                            configurationService,
-                            downloadRepository))
+                            audiobookIdValue, configurationService, downloadRepository))
                     {
                         logger.LogInformation(
                             "Skipping duplicate download for audiobook {AudiobookId} — an active download already exists. Title: '{Title}'",
@@ -263,10 +155,8 @@ namespace Listenarr.Application.Downloads.Submission
                 }
                 catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    logger.LogDebug(
-                        exception,
-                        "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)",
-                        audiobookIdValue);
+                    logger.LogDebug(exception,
+                        "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)", audiobookIdValue);
                 }
             }
 
@@ -274,7 +164,7 @@ namespace Listenarr.Application.Downloads.Submission
             if (prepared is PreparedDirectDownloadSubmission directDownload)
             {
                 logger.LogInformation("Processing trusted direct download for: {Title}", candidate.Title);
-                return await directDownloadWorkflow.CreateTrackedDownloadAsync(directDownload, audiobookId);
+                return await directDownloadWorkflow.CreateTrackedDownloadAsync(directDownload, audiobookId, candidate.ReleaseIdentifier);
             }
 
             var isTorrent = prepared.Protocol == DownloadProtocol.Torrent;
@@ -342,12 +232,14 @@ namespace Listenarr.Application.Downloads.Submission
             }
             catch (OperationCanceledException)
             {
-                await RemoveProvisionalDownloadAsync(downloadId);
+                await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
                 throw;
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                await RemoveProvisionalDownloadAsync(downloadId);
+                await DownloadSubmissionFailureHandler.RecordRejectedSubmissionAsync(
+                    downloadId, downloadClientIdForModel, candidate.Title, exception, downloadHistoryService, logger);
+                await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
 
                 if (exception is DownloadClientSubmissionException)
                 {
@@ -384,7 +276,6 @@ namespace Listenarr.Application.Downloads.Submission
                 }
             }
 
-            var settings = await configurationService.GetApplicationSettingsAsync();
             var notificationData = await DownloadNotificationPayloadBuilder.BuildBookDownloadingPayloadAsync(
                 audiobookRepository,
                 audiobookId,
@@ -392,7 +283,7 @@ namespace Listenarr.Application.Downloads.Submission
                 ToSearchResult(candidate, prepared),
                 downloadClient);
 
-            await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+            await notificationService.SendNotificationAsync(NotificationTriggers.BookDownloading, notificationData);
 
             // Trigger an immediate realtime queue update so the UI shows the new download right away
             // Add a small delay to allow the download client to process and index the new download
@@ -412,19 +303,6 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             return downloadId;
-        }
-
-        private async Task RemoveProvisionalDownloadAsync(string downloadId)
-        {
-            try
-            {
-                await downloadRepository.RemoveAsync(downloadId);
-                logger.LogInformation("Removed provisional download {DownloadId} after client submission failed", downloadId);
-            }
-            catch (Exception cleanupException) when (cleanupException is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                logger.LogError(cleanupException, "Failed to remove provisional download {DownloadId} after client submission failure", downloadId);
-            }
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)

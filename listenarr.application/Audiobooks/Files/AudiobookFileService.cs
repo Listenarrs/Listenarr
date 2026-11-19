@@ -177,7 +177,7 @@ namespace Listenarr.Application.Audiobooks.Files
                     return false;
                 }
 
-                if (!FileUtils.IsAudioFile(filePath))
+                if (!FileUtils.MayBeAudioPendingProbe(filePath))
                 {
                     logger.LogInformation("Skipping non-audio audiobook file registration for audiobook {AudiobookId}: {Path}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
                     return false;
@@ -327,10 +327,14 @@ namespace Listenarr.Application.Audiobooks.Files
                     cacheIdentity,
                     filePath);
 
-                var fi = new FileInfo(metadataPath);
+                if (!QualifiesAsAudioContent(filePath, meta, audiobook.Id))
+                {
+                    return false;
+                }
+
                 var fileRecord = AudiobookFile.CreateUnresolved(filePath);
                 fileRecord.AudiobookId = audiobook.Id;
-                fileRecord.Size = fi.Exists ? fi.Length : null;
+                fileRecord.Size = TryGetRegisteredFileLength(metadataPath);
                 fileRecord.Source = source;
                 fileRecord.CreatedAt = DateTime.UtcNow;
                 fileRecord.DurationSeconds = meta?.Duration.TotalSeconds;
@@ -340,7 +344,8 @@ namespace Listenarr.Application.Audiobooks.Files
                 fileRecord.Bitrate = meta?.BitRate;
                 fileRecord.SampleRate = meta?.SampleRate;
                 fileRecord.Channels = meta?.Channels;
-                if (registrationLease?.HasDurablePhysicalObjectIdentity == true)
+                if (registrationLease?.HasDurablePhysicalObjectIdentity == true
+                    && !IsScanOrMetadataSource(source))
                 {
                     fileRecord.ApplyPhysicalObjectIdentity(
                         registrationLease.PhysicalObjectIdentity,
@@ -436,6 +441,11 @@ namespace Listenarr.Application.Audiobooks.Files
                 return false;
             }
         }
+
+        private static bool IsScanOrMetadataSource(string? source) =>
+            !string.IsNullOrWhiteSpace(source)
+            && (source.Contains("scan", StringComparison.OrdinalIgnoreCase)
+                || source.Contains("metadata", StringComparison.OrdinalIgnoreCase));
 
         private static string ResolveAbsolutePath(string? path) =>
             string.IsNullOrWhiteSpace(path)

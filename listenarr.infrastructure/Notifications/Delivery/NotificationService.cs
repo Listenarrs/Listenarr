@@ -43,49 +43,27 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
             _httpSender = new NotificationHttpSender(httpClient, httpClient, logger, AllowPrivateWebhookTargetsForCurrentRequest);
         }
 
-        // INotificationService interface stubs — webhook dispatch goes through SendNotificationAsync;
-        // these typed convenience methods delegate to the main webhook loop or no-op.
-        public async Task OnDownloadImportedAsync(Download download)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Imported")))
-                    await SendNotificationAsync("Imported", new { AudiobookTitle = download.Title, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendDownloadCompletedNotificationAsync failed for {Id}", download.Id);
-            }
-        }
+        // Typed convenience methods. Each names the event it stands for in the shared trigger
+        // vocabulary and hands it to the dispatcher, which decides which targets subscribe.
+        // A download reaching Moved is the point where its files have been imported into the
+        // library, so it is what the settings screen offers as "Processing Complete".
+        public Task OnDownloadImportedAsync(Download download)
+            => SendNotificationSafelyAsync(
+                NotificationTriggers.BookCompleted,
+                new { AudiobookTitle = download.Title, Timestamp = DateTime.UtcNow },
+                $"download {download.Id}");
 
-        public async Task OnDownloadFailedAsync(Download download)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Failed")))
-                    await SendNotificationAsync("Failed", new { AudiobookTitle = download.Title, Error = download.ErrorMessage, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendDownloadFailedNotificationAsync failed for {Id}", download.Id);
-            }
-        }
+        public Task OnDownloadFailedAsync(Download download)
+            => SendNotificationSafelyAsync(
+                NotificationTriggers.DownloadFailed,
+                new { AudiobookTitle = download.Title, Error = download.ErrorMessage, Timestamp = DateTime.UtcNow },
+                $"download {download.Id}");
 
-        public async Task SendSystemNotificationAsync(string title, string message)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("System")))
-                    await SendNotificationAsync("System", new { Title = title, Message = message, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendSystemNotificationAsync failed");
-            }
-        }
+        public Task SendSystemNotificationAsync(string title, string message)
+            => SendNotificationSafelyAsync(
+                NotificationTriggers.SystemMessage,
+                new { Title = title, Message = message, Timestamp = DateTime.UtcNow },
+                "a system message");
 
         // Compatibility shims removed — callers/tests should use NotificationPayloadBuilder directly.
 

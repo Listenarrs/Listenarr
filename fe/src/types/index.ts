@@ -125,6 +125,7 @@ export interface SearchResult extends BaseSearchResult {
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
+  region?: string // Audible region the result was found in (e.g. 'fr', 'us')
   // Audible-style fields
   authors?: AudibleAuthor[]
   narrators?: AudibleNarrator[]
@@ -262,9 +263,6 @@ export interface DownloadClientSettings {
   category?: string
   tags?: string
   recentPriority?: string
-  olderPriority?: string
-  removeCompleted?: boolean
-  removeFailed?: boolean
   initialState?: string
   sequentialOrder?: boolean
   firstAndLastFirst?: boolean
@@ -328,9 +326,36 @@ export interface RootFolder {
   canChangePath?: boolean
   canReadFilesystem?: boolean
   canScanFilesystem?: boolean
+  canPublishNewFiles?: boolean
   canMutateFilesystem?: boolean
+  canRetireSource?: boolean
+  canRetireAfterVerifiedCopy?: boolean
+  /** @deprecated Compatibility value only; use current storage capability fields. */
+  weakStorageSourceCleanupPolicy?: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy'
+  /** @deprecated Revision of the legacy setting; does not authorize source deletion. */
+  weakStoragePolicyRevision?: number
   confirmationToken?: string | null
   activeRelocation?: RootFolderPathChangeResult | null
+}
+
+export interface AudiobookDeleteCapabilities {
+  canRemoveFromLibrary: boolean
+  canDeleteTrackedFiles: boolean
+  canDeleteFolder: boolean
+  reason?: string | null
+  fallbackAction: 'RemoveFromLibraryOnly'
+}
+
+export interface WeakStorageMissingFileCandidate {
+  id: string
+  audiobookFileId: number
+  path: string
+}
+
+export interface WeakStorageMissingFilesResponse {
+  scanToken?: string | null
+  expiresAt?: string | null
+  items: WeakStorageMissingFileCandidate[]
 }
 
 export type RootFolderRelocationSkipReasonCode =
@@ -720,6 +745,10 @@ export interface Audiobook {
   narrators?: string[]
   isbn?: string
   asin?: string
+  // Server-computed in the library list: why Audible can't be asked for this book (missing_title,
+  // missing_author, missing_asin, invalid_asin, missing_region); the "Broken books" group lists the
+  // books that have some
+  brokenReasons?: string[]
   openLibraryId?: string
   publisher?: string
   language?: string
@@ -753,6 +782,8 @@ export interface Audiobook {
   // Optional list of author ASINs (populated by backend when available)
   authorAsins?: string[]
   identifiers?: AudiobookExternalIdentifier[]
+  // The library's list: the region of asin, when the book's identifiers say it
+  asinRegion?: string | null
   // Server-computed flag indicating if this audiobook is wanted (monitored and missing files)
   wanted?: boolean
   // Server-computed list status used by slim /library responses.
@@ -1084,6 +1115,11 @@ export interface ManualImportResult {
   error?: string
   skipped?: boolean
   skipReason?: string
+  requestedAction?: string
+  effectiveAction?: string
+  sourceDisposition?: string
+  warningCode?: string
+  warning?: string
 }
 
 // Audible API Types
@@ -1185,11 +1221,13 @@ export interface UnmatchedFilesResponse {
   jobId: string
   status: 'Queued' | 'Processing' | 'Completed' | 'Failed'
   error?: string
+  warnings?: string[]
   items: UnmatchedFileItem[]
 }
 
 export interface SavedUnmatchedResponse {
   lastScannedAt?: string
+  warnings?: string[]
   items: UnmatchedFileItem[]
 }
 
@@ -1248,6 +1286,7 @@ export interface FileRenameResultItem {
   newPath?: string
   success: boolean
   rolledBack: boolean
+  sourceRetained?: boolean
   error?: string
 }
 

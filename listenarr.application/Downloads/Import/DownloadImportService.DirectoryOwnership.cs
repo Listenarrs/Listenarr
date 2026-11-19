@@ -5,61 +5,146 @@ namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
 {
-    private async Task<bool> PerformOwnedFileActionAsync(
-        FileAction action,
+    private async Task<FilePublicationPlan> ResolvePublicationPlanAsync(
+        FileAction requestedAction,
         string source,
         string destination,
-        string managedBoundary,
-        FileSystemPathSemantics semantics,
-        Guid operationId,
-        FilePublicationSourceProof expectedSourceProof,
-        int audiobookId,
+        FilePublicationSourceProof sourceProof,
+        Guid compatibilityBatchId,
+        CompatibilityBatchManifest? compatibilityBatchManifest,
+        bool forceCopyAndRetainSource,
         CancellationToken cancellationToken)
     {
-        expectedSourceProof.Validate();
-        if (!await EnsureOwnedImportDestinationAsync(
-                source,
-                destination,
-                managedBoundary,
-                semantics,
-                operationId,
-                audiobookId,
-                cancellationToken))
+        if (forceCopyAndRetainSource && requestedAction == FileAction.Move)
         {
-            return false;
+            // Client ownership is stricter than filesystem cleanup capability.
+            // Additive publication persists retain-only recovery before copying bytes.
+            return FilePublicationPlan.Additive(requestedAction) with
+            {
+                ReasonCode = "download_client_source_retained",
+                Message = "Destination verified; original files retained because the download client has not released source ownership."
+            };
         }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        return action == FileAction.Move
-            ? await fileMover.PerformActionOn(
-                action,
+        var plan = filePublicationCapabilityResolver == null
+            ? FilePublicationPlan.Durable(requestedAction)
+            : await filePublicationCapabilityResolver.ResolveAsync(
+                requestedAction,
                 source,
                 destination,
-                operationId,
-                audiobookId,
-                FileMutationOwner.CompanionFile,
-                expectedSourceProof)
-            : await fileMover.PerformActionOn(
-                action,
-                source,
-                destination,
-                operationId,
-                expectedSourceProof);
+                sourceProof,
+                cancellationToken,
+                compatibilityBatchId,
+                CompatibilityCleanupOwner.DownloadClient);
+        if (compatibilityBatchManifest.HasValue)
+        {
+            plan = plan.WithCompatibilityBatchManifest(
+                compatibilityBatchManifest.Value);
+        }
+        return plan;
     }
 
-    private async Task<IAudiobookFileRegistrationLease?> PrepareOwnedFileActionForRegistrationAsync(
+    private static ImportResult CreateBlockedImportResult(
+        FilePublicationPlan publicationPlan,
+        string source,
+        string destination) =>
+        CreatePublicationFailureResult(
+            publicationPlan.RequestedAction,
+            publicationPlan.EffectiveAction,
+            publicationPlan.SourceDisposition,
+            source,
+            destination,
+            publicationPlan.ReasonCode,
+            publicationPlan.Message);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FilePublicationPreparationResult preparation,
+        string source,
+        string destination) =>
+        CreatePublicationFailureResult(
+            preparation.RequestedAction,
+            preparation.EffectiveAction,
+            preparation.SourceDisposition,
+            source,
+            destination,
+            preparation.ReasonCode,
+            preparation.Message);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FilePublicationPlan publicationPlan,
+        string source,
+        string destination) =>
+        CreatePublicationFailureResult(
+            publicationPlan.RequestedAction,
+            publicationPlan.EffectiveAction,
+            publicationPlan.SourceDisposition,
+            source,
+            destination,
+            publicationPlan.ReasonCode,
+            message: null);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FileAction requestedAction,
+        FileAction effectiveAction,
+        FilePublicationSourceDisposition sourceDisposition,
+        string source,
+        string destination,
+        string? reasonCode,
+        string? message)
+    {
+        var failed = ImportResult.ImportFailure(
+            effectiveAction,
+            source,
+            destination);
+        failed.RequestedAction = requestedAction;
+        failed.EffectiveAction = effectiveAction;
+        failed.SourceDisposition = ToImportSourceDisposition(sourceDisposition);
+        failed.WarningCode = reasonCode;
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            failed.Message = message;
+        }
+
+        return failed;
+    }
+
+    private static ImportSourceDisposition ToImportSourceDisposition(
+        FilePublicationSourceDisposition sourceDisposition) =>
+        sourceDisposition switch
+        {
+            FilePublicationSourceDisposition.Retained =>
+                ImportSourceDisposition.Retained,
+            FilePublicationSourceDisposition.Retired =>
+                ImportSourceDisposition.Retired,
+            _ => ImportSourceDisposition.Unchanged
+        };
+
+    private async Task<FilePublicationPlan?> PerformOwnedFileActionAsync(
         FileAction action,
         string source,
         string destination,
         string managedBoundary,
         FileSystemPathSemantics semantics,
         Guid operationId,
-        string? expectedRegisteredPhysicalObjectIdentity,
         FilePublicationSourceProof expectedSourceProof,
         int audiobookId,
+        Guid compatibilityBatchId,
+        CompatibilityBatchManifest? compatibilityBatchManifest,
+        bool forceCopyAndRetainSource,
         CancellationToken cancellationToken)
     {
         expectedSourceProof.Validate();
+        var publicationPlan = await ResolvePublicationPlanAsync(
+            action, source, destination, expectedSourceProof, compatibilityBatchId,
+            compatibilityBatchManifest, forceCopyAndRetainSource, cancellationToken);
+        if (!publicationPlan.IsAllowed)
+        {
+            logger.LogWarning(
+                "Blocked companion publication for {Source}: {Reason}",
+                LogRedaction.SanitizeFilePath(source),
+                LogRedaction.SanitizeText(publicationPlan.Message));
+            return null;
+        }
+
         if (!await EnsureOwnedImportDestinationAsync(
                 source,
                 destination,
@@ -67,27 +152,104 @@ public partial class DownloadImportService
                 semantics,
                 operationId,
                 audiobookId,
+                publicationPlan,
                 cancellationToken))
         {
             return null;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (action == FileAction.HardlinkCopy
-            && !string.IsNullOrWhiteSpace(
-                expectedRegisteredPhysicalObjectIdentity))
-        {
-            return await fileMover.PrepareActionForRegistrationAsync(
-                action,
+        var preparation = await fileMover
+            .PrepareActionForRegistrationDetailedAsync(
+                publicationPlan,
                 source,
                 destination,
                 operationId,
-                expectedRegisteredPhysicalObjectIdentity,
-                expectedSourceProof);
+                expectedRegisteredPhysicalObjectIdentity: null,
+                expectedSourceProof,
+                isCompanionFile: true,
+                companionAudiobookId: audiobookId);
+        using var lease = preparation.RegistrationLease;
+        if (lease == null || !lease.PrepareCleanupRecovery(audiobookId))
+        {
+            return null;
         }
 
-        return await fileMover.PrepareActionForRegistrationAsync(
-            action,
+        var completion = lease.CompletePublication();
+        if (completion
+            == RegistrationPublicationCompletion.CommittedCleanupPending)
+        {
+            logger.LogWarning(
+                "Companion publication committed, but cleanup remains pending for {Path}",
+                LogRedaction.SanitizeFilePath(destination));
+        }
+
+        if (publicationPlan.EffectiveAction == FileAction.Move
+            && !await fileMover.CompletePreparedMoveAsync(
+                source,
+                destination,
+                lease,
+                operationId))
+        {
+            return null;
+        }
+
+        return publicationPlan;
+    }
+
+    private async Task<FilePublicationPreparationResult> PrepareOwnedFileActionForRegistrationAsync(
+        FilePublicationPlan publicationPlan,
+        string source,
+        string destination,
+        string managedBoundary,
+        FileSystemPathSemantics semantics,
+        Guid operationId,
+        FilePublicationSourceProof expectedSourceProof,
+        int audiobookId,
+        CancellationToken cancellationToken)
+    {
+        expectedSourceProof.Validate();
+        if (!await EnsureOwnedImportDestinationAsync(
+                source,
+                destination,
+                managedBoundary,
+                semantics,
+                operationId,
+                audiobookId,
+                publicationPlan,
+                cancellationToken))
+        {
+            return new FilePublicationPreparationResult(
+                FilePublicationOutcome.Blocked,
+                publicationPlan.RequestedAction,
+                publicationPlan.EffectiveAction,
+                publicationPlan.SourceDisposition,
+                ReasonCode: "destination_ownership_unavailable",
+                Message: "The import destination could not be prepared safely.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (publicationPlan.Mode == FilePublicationExecutionMode.Durable)
+        {
+            var lease = await fileMover.PrepareActionForRegistrationAsync(
+                publicationPlan.EffectiveAction,
+                source,
+                destination,
+                operationId,
+                expectedRegisteredPhysicalObjectIdentity: null,
+                expectedSourceProof);
+            return new FilePublicationPreparationResult(
+                lease == null
+                    ? FilePublicationOutcome.Blocked
+                    : FilePublicationOutcome.Success,
+                publicationPlan.RequestedAction,
+                publicationPlan.EffectiveAction,
+                publicationPlan.SourceDisposition,
+                lease);
+        }
+
+        return await fileMover.PrepareActionForRegistrationDetailedAsync(
+            publicationPlan,
             source,
             destination,
             operationId,
@@ -121,6 +283,7 @@ public partial class DownloadImportService
         FileSystemPathSemantics semantics,
         Guid operationId,
         int audiobookId,
+        FilePublicationPlan? publicationPlan,
         CancellationToken cancellationToken)
     {
         var destinationDirectory = Path.GetDirectoryName(destination)
@@ -156,14 +319,27 @@ public partial class DownloadImportService
             return false;
         }
 
-        await directoryOwnershipStore.EnsureCreatedHierarchyAsync(
-            destinationDirectory,
-            managedBoundary,
-            semantics,
-            "download-import",
-            operationId,
-            audiobookId,
-            cancellationToken);
+        if (publicationPlan?.Mode is
+            FilePublicationExecutionMode.AdditiveCopyRetainSource or
+            FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
+        {
+            await directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
+                destinationDirectory,
+                managedBoundary,
+                semantics,
+                cancellationToken);
+        }
+        else
+        {
+            await directoryOwnershipStore.EnsureCreatedHierarchyAsync(
+                destinationDirectory,
+                managedBoundary,
+                semantics,
+                "download-import",
+                operationId,
+                audiobookId,
+                cancellationToken);
+        }
         return true;
     }
 }

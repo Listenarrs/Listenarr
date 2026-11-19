@@ -21,17 +21,19 @@ namespace Listenarr.Application.SystemDiagnostics.Contracts
     public interface IFfmpegService
     {
         /// <summary>
-        /// Return the full path to ffprobe if present in the application's configured directory.
-        /// This method will NOT attempt to download or install ffprobe when called. It only
-        /// checks for an existing bundled binary and returns the path or null.
+        /// Return the full path to ffprobe: the binary shipped with the application for this
+        /// platform, or failing that one placed in the configured ffmpeg directory. Null when
+        /// neither exists, or when the one that would be used fails its <c>-version</c> check; a
+        /// failing packaged binary does not fall back to the configured one. Never downloads
+        /// anything.
         /// </summary>
         Task<string?> GetFfprobePathAsync();
 
         /// <summary>
-        /// Ensure that ffprobe is installed into the application's bundled directory. This
-        /// performs the download/extract/install flow when a binary is not already present.
-        /// Intended to be called once at program startup
-        /// Returns the installed path or null if not available.
+        /// Resolve ffprobe as <see cref="GetFfprobePathAsync"/> does and, on Unix, restore its
+        /// execute permission where this process can. Intended to be called once at startup.
+        /// Never downloads anything. Returns the path, or null when no binary exists or the one
+        /// resolved fails its <c>-version</c> check.
         /// </summary>
         Task<string?> EnsureFfprobeInstalledAsync();
 

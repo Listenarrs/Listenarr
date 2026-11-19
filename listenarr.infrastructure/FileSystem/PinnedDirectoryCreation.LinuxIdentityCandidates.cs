@@ -9,6 +9,34 @@ internal sealed partial class PinnedDirectoryCreation
     private static IReadOnlyList<string> GetLinuxObjectIdentityCandidates(
         SafeFileHandle handle)
     {
+        var evidence = ReadLinuxObjectIdentityEvidence(handle);
+        return CreateLinuxObjectIdentityCandidatesFromEvidence(
+            evidence.DeviceMajor,
+            evidence.DeviceMinor,
+            evidence.Inode,
+            evidence.HasBirthTime,
+            evidence.BirthTimeSeconds,
+            evidence.BirthTimeNanoseconds,
+            evidence.GenerationIdentities);
+    }
+
+    private static IReadOnlyList<string> GetLinuxLegacyWeakObjectIdentityCandidates(
+        SafeFileHandle handle)
+    {
+        var evidence = ReadLinuxObjectIdentityEvidence(handle);
+        return CreateLinuxLegacyWeakObjectIdentityCandidatesFromEvidence(
+            evidence.DeviceMajor,
+            evidence.DeviceMinor,
+            evidence.Inode,
+            evidence.HasBirthTime,
+            evidence.BirthTimeSeconds,
+            evidence.BirthTimeNanoseconds,
+            evidence.GenerationIdentities);
+    }
+
+    private static LinuxObjectIdentityEvidence ReadLinuxObjectIdentityEvidence(
+        SafeFileHandle handle)
+    {
         const uint statxInode = 0x00000100;
         const uint statxBirthTime = 0x00000800;
         const uint requestedMask = statxInode | statxBirthTime;
@@ -27,16 +55,24 @@ internal sealed partial class PinnedDirectoryCreation
                 "The filesystem does not expose an inode for durable object identity.");
         }
 
-        var generationIdentities = GetLinuxGenerationIdentityCandidates(handle);
-        return CreateLinuxObjectIdentityCandidatesFromEvidence(
+        return new LinuxObjectIdentityEvidence(
             information.DeviceMajor,
             information.DeviceMinor,
             information.Inode,
-            hasBirthTime: (information.Mask & statxBirthTime) != 0,
+            (information.Mask & statxBirthTime) != 0,
             information.BirthTime.Seconds,
             information.BirthTime.Nanoseconds,
-            generationIdentities);
+            GetLinuxGenerationIdentityCandidates(handle));
     }
+
+    private sealed record LinuxObjectIdentityEvidence(
+        uint DeviceMajor,
+        uint DeviceMinor,
+        ulong Inode,
+        bool HasBirthTime,
+        long BirthTimeSeconds,
+        uint BirthTimeNanoseconds,
+        IReadOnlyList<string> GenerationIdentities);
 
     internal static string CreateLinuxObjectIdentityFromEvidence(
         uint deviceMajor,
@@ -68,7 +104,7 @@ internal sealed partial class PinnedDirectoryCreation
     {
         ArgumentNullException.ThrowIfNull(generationIdentities);
         var strongGenerations = generationIdentities
-            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Where(IsDurableLinuxGenerationIdentity)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         if (strongGenerations.Length == 0)
@@ -114,6 +150,11 @@ internal sealed partial class PinnedDirectoryCreation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(left);
         ArgumentException.ThrowIfNullOrWhiteSpace(right);
+        if (PhysicalObjectIdentitySafety.IsKnownWeak(left)
+            || PhysicalObjectIdentitySafety.IsKnownWeak(right))
+        {
+            return false;
+        }
         if (string.Equals(left, right, StringComparison.Ordinal))
         {
             return true;
@@ -203,6 +244,75 @@ internal sealed partial class PinnedDirectoryCreation
         return false;
     }
 
+    internal static IReadOnlyList<string> CreateLinuxLegacyWeakObjectIdentityCandidatesFromEvidence(
+        uint deviceMajor,
+        uint deviceMinor,
+        ulong inode,
+        bool hasBirthTime,
+        long birthTimeSeconds,
+        uint birthTimeNanoseconds,
+        IReadOnlyList<string> generationIdentities)
+    {
+        ArgumentNullException.ThrowIfNull(generationIdentities);
+        var weakGenerations = generationIdentities
+            .Where(IsLegacyWeakLinuxGenerationIdentity)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (weakGenerations.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var candidates = new List<string>(weakGenerations.Length * 2);
+        foreach (var generationIdentity in weakGenerations)
+        {
+            candidates.Add(FormattableString.Invariant(
+                $"linux-generation:{deviceMajor:x8}:{deviceMinor:x8}:{inode:x16}:{generationIdentity}"));
+        }
+
+        if (hasBirthTime)
+        {
+            var legacyIdentity = FormattableString.Invariant(
+                $"linux:{deviceMajor:x8}:{deviceMinor:x8}:{inode:x16}:{birthTimeSeconds:x16}:{birthTimeNanoseconds:x8}");
+            foreach (var generationIdentity in weakGenerations)
+            {
+                candidates.Add($"{legacyIdentity}:{generationIdentity}");
+            }
+        }
+
+        return candidates.ToArray();
+    }
+
+    private static bool IsDurableLinuxGenerationIdentity(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        var parts = candidate.Split(':');
+        return parts[0] switch
+        {
+            "gen" => parts.Length == 2 && IsFixedHex(parts[1], 8),
+            "fh" => TryValidateLinuxFileHandle(parts, 0, requireDurable: true),
+            _ => false
+        };
+    }
+
+    private static bool IsLegacyWeakLinuxGenerationIdentity(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        var parts = candidate.Split(':');
+        return parts.Length == 3
+            && string.Equals(parts[0], "fh", StringComparison.Ordinal)
+            && TryValidateLinuxFileHandle(parts, 0, requireDurable: false)
+            && string.Equals(parts[1], "00000081", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool TryValidateLinuxGenerationSuffix(
         string[] parts,
         int suffixIndex) =>
@@ -210,13 +320,31 @@ internal sealed partial class PinnedDirectoryCreation
         {
             "gen" => parts.Length == suffixIndex + 2
                 && IsFixedHex(parts[suffixIndex + 1], 8),
-            "fh" => parts.Length == suffixIndex + 3
-                && IsFixedHex(parts[suffixIndex + 1], 8)
-                && parts[suffixIndex + 2].Length > 0
-                && parts[suffixIndex + 2].Length % 2 == 0
-                && parts[suffixIndex + 2].All(Uri.IsHexDigit),
+            "fh" => TryValidateLinuxFileHandle(parts, suffixIndex, requireDurable: true),
             _ => false
         };
+
+    private static bool TryValidateLinuxFileHandle(
+        string[] parts,
+        int prefixIndex,
+        bool requireDurable)
+    {
+        if (parts.Length != prefixIndex + 3
+            || !string.Equals(parts[prefixIndex], "fh", StringComparison.Ordinal)
+            || !IsFixedHex(parts[prefixIndex + 1], 8)
+            || parts[prefixIndex + 2].Length == 0
+            || parts[prefixIndex + 2].Length % 2 != 0
+            || !parts[prefixIndex + 2].All(Uri.IsHexDigit))
+        {
+            return false;
+        }
+
+        return !requireDurable
+            || !string.Equals(
+                parts[prefixIndex + 1],
+                "00000081",
+                StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsFixedHex(string value, int length) =>
         value.Length == length && value.All(Uri.IsHexDigit);

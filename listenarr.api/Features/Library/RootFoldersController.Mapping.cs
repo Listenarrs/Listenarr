@@ -1,9 +1,31 @@
 using Listenarr.Domain.Common;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
 
 public partial class RootFoldersController
 {
+    private ConflictObjectResult RegistrationRecoveryConflict(
+        FileRegistrationRecoveryBlocker blocker)
+    {
+        var canRetry = blocker.Recoverability is
+            FileRegistrationRecoveryDisposition.AutomaticRecovery
+            or FileRegistrationRecoveryDisposition.WaitingForOwnerRetry;
+        return Conflict(new
+        {
+            message = blocker.PublicReason,
+            code = "registration_recovery_pending",
+            operationId = blocker.OperationId,
+            audiobookId = blocker.AudiobookId,
+            journalState = blocker.JournalState.ToString(),
+            ownerKind = blocker.OwnerKind,
+            recoverability = blocker.Recoverability.ToString(),
+            canRetry,
+            canAbandon = false,
+            retryOperationId = canRetry ? blocker.OperationId : (Guid?)null
+        });
+    }
+
     private async Task<RootFolderDto> MapAsync(RootFolder root)
     {
         RootFolderPathChangeResult? active = null;
@@ -44,7 +66,12 @@ public partial class RootFoldersController
                 CanChangePath: false,
                 CanReadFilesystem: false,
                 CanScanFilesystem: false,
+                CanPublishNewFiles: false,
                 CanMutateFilesystem: false,
+                CanRetireSource: false,
+                CanRetireAfterVerifiedCopy: false,
+                root.WeakStorageSourceCleanupPolicy.ToString(),
+                root.WeakStoragePolicyRevision,
                 ConfirmationToken: null,
                 root.CreatedAt,
                 root.UpdatedAt,
@@ -74,7 +101,12 @@ public partial class RootFoldersController
             storage.CanChangePath && active == null,
             storage.CanReadFilesystem,
             storage.CanScanFilesystem,
+            storage.CanPublishNewFiles,
             storage.CanMutateFilesystem,
+            storage.CanRetireSource,
+            storage.CanRetireAfterVerifiedCopy,
+            root.WeakStorageSourceCleanupPolicy.ToString(),
+            root.WeakStoragePolicyRevision,
             storage.ConfirmationToken,
             root.CreatedAt,
             root.UpdatedAt,

@@ -14,7 +14,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Listenarr.Infrastructure.Downloads.Import
 {
     public sealed class ImportFinalizationService(
-        IDbContextFactory<ListenArrDbContext> dbFactory) : IImportFinalizationService
+        IDbContextFactory<ListenArrDbContext> dbFactory,
+        INotificationService notificationService) : IImportFinalizationService
     {
         public async Task FinalizeAsync(
             string jobId,
@@ -23,6 +24,7 @@ namespace Listenarr.Infrastructure.Downloads.Import
             string title,
             string downloadClientId,
             string correlationId,
+            bool? sourceRetained,
             Dictionary<string, object>? details = null,
             CancellationToken ct = default)
         {
@@ -42,6 +44,15 @@ namespace Listenarr.Infrastructure.Downloads.Import
                 !job.HasCheckpoint("ScanEnqueued"))
             {
                 throw new InvalidOperationException($"Import job {jobId} cannot be finalized before all checkpoints complete");
+            }
+
+            var durableDetails = details == null
+                ? new Dictionary<string, object>()
+                : new Dictionary<string, object>(details);
+            durableDetails["SourceRetentionKnown"] = sourceRetained.HasValue;
+            if (sourceRetained.HasValue)
+            {
+                durableDetails[Download.SourceRetainedMetadataKey] = sourceRetained.Value;
             }
 
             var alreadyRecorded = await db.History.AnyAsync(
@@ -64,18 +75,31 @@ namespace Listenarr.Infrastructure.Downloads.Import
                     Message = "Download import committed",
                     Timestamp = DateTime.UtcNow,
                     CorrelationId = correlationId,
-                    Data = details == null ? null : JsonSerializer.Serialize(details)
+                    Data = JsonSerializer.Serialize(durableDetails)
                 });
             }
 
             download.Imported();
             download.ActiveAudiobookDeduplicationKey = null;
             download.LastImportedAt = DateTime.UtcNow;
+            if (sourceRetained.HasValue)
+            {
+                download.SetMetadata(Download.SourceRetainedMetadataKey, sourceRetained.Value);
+            }
+            else
+            {
+                download.Metadata.Remove(Download.SourceRetainedMetadataKey);
+            }
             job.MarkAsCompleted();
             job.ActiveDeduplicationKey = null;
             job.SetCheckpoint("ImportCommitted");
 
             await db.SaveChangesAsync(ct);
+
+            // The Moved status is written here rather than through the download service, so its
+            // status-change hook never sees this transition. Announce completion only once the
+            // files and library records are committed; a repeat call returns above and stays quiet.
+            await notificationService.OnDownloadImportedAsync(download);
         }
     }
 }

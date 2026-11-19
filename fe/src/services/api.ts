@@ -285,22 +285,7 @@ class ApiService {
   }
 
   // Search API
-  // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
-
-  async intelligentSearch(
-    query: string,
-    category?: string,
-    signal?: AbortSignal,
-  ): Promise<SearchResult[]> {
-    const body: Record<string, unknown> = { mode: 'Simple', query }
-    if (category) body['category'] = category
-    const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
-      '/search',
-      { method: 'POST', body: JSON.stringify(body), signal },
-    )
-    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
-    return results
-  }
+  // Deprecated compatibility shim removed. Use `searchIndexers` or `searchByApi`.
 
   async searchIndexers(
     query: string,
@@ -563,17 +548,20 @@ class ApiService {
     return results
   }
 
-  async advancedSearch(params: {
-    title?: string
-    author?: string
-    isbn?: string
-    series?: string
-    asin?: string
-    region?: string
-    language?: string
-    pagination?: { page?: number; limit?: number }
-    cap?: number
-  }): Promise<SearchResult[]> {
+  async advancedSearch(
+    params: {
+      title?: string
+      author?: string
+      isbn?: string
+      series?: string
+      asin?: string
+      region?: string
+      language?: string
+      pagination?: { page?: number; limit?: number }
+      cap?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
     const body: Record<string, unknown> = { mode: 'Advanced' }
     const hasAsin = !!params.asin
     if (params.title) (body as Record<string, unknown>).title = params.title
@@ -591,7 +579,7 @@ class ApiService {
     if (typeof params.cap === 'number') (body as Record<string, unknown>).cap = params.cap
     const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
       '/search',
-      { method: 'POST', body: JSON.stringify(body) },
+      { method: 'POST', body: JSON.stringify(body), signal },
     )
     let results = Array.isArray(resp) ? resp : (resp?.results ?? [])
 
@@ -1298,6 +1286,23 @@ class ApiService {
     return this.request(`/library/scan/${encodeURIComponent(jobId)}`)
   }
 
+  async getWeakStorageMissingFiles(
+    audiobookId: number,
+  ): Promise<import('@/types').WeakStorageMissingFilesResponse> {
+    return this.request(`/library/${audiobookId}/weak-storage-missing-files`)
+  }
+
+  async confirmWeakStorageMissingFiles(
+    audiobookId: number,
+    scanToken: string,
+    candidateIds: string[],
+  ): Promise<{ removedCount: number; preservedCount: number; preservedPaths: string[] }> {
+    return this.request(`/library/${audiobookId}/weak-storage-missing-files/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ scanToken, candidateIds }),
+    })
+  }
+
   async updateAudiobook(
     id: number,
     audiobook: AudiobookUpdateRequest,
@@ -1339,6 +1344,7 @@ class ApiService {
       error?: string
       recoveryDisposition?: string
       canRetry?: boolean
+      sourceRetained?: boolean
     }>
   > {
     const jobs = await this.request<
@@ -1352,6 +1358,7 @@ class ApiService {
         error?: string
         recoveryDisposition?: string
         canRetry?: boolean
+        sourceRetained?: boolean
       }>
     >('/library/move')
 
@@ -1365,6 +1372,7 @@ class ApiService {
       error: job.error,
       recoveryDisposition: job.recoveryDisposition,
       canRetry: job.canRetry,
+      sourceRetained: job.sourceRetained,
     }))
   }
 
@@ -1378,6 +1386,7 @@ class ApiService {
     error?: string
     recoveryDisposition?: string
     canRetry?: boolean
+    sourceRetained?: boolean
   }> {
     const job = await this.request<{
       id: string
@@ -1393,6 +1402,7 @@ class ApiService {
       nextAttemptAt?: string
       recoveryDisposition?: string
       canRetry?: boolean
+      sourceRetained?: boolean
     }>('/library/move/' + encodeURIComponent(jobId))
 
     return {
@@ -1405,6 +1415,7 @@ class ApiService {
       error: job.error,
       recoveryDisposition: job.recoveryDisposition,
       canRetry: job.canRetry,
+      sourceRetained: job.sourceRetained,
     }
   }
 
@@ -1440,6 +1451,14 @@ class ApiService {
     return this.request<{ message: string; id: number }>(`/library/${id}${suffix}`, {
       method: 'DELETE',
     })
+  }
+
+  async getAudiobookDeleteCapabilities(
+    id: number,
+  ): Promise<import('@/types').AudiobookDeleteCapabilities> {
+    return this.request<import('@/types').AudiobookDeleteCapabilities>(
+      `/library/${id}/delete-capabilities`,
+    )
   }
 
   async bulkRemoveFromLibrary(
@@ -1549,6 +1568,10 @@ class ApiService {
     sourceVolume?: string
     destVolume?: string
     message?: string
+    verifiedSourceDeletionEnabled: boolean
+    forceCopyAndRetainSource?: boolean
+    sourceIsManagedRoot: boolean
+    sourceCleanupMessage?: string
   }> {
     return this.request(
       `/filesystem/check-volume?sourcePath=${encodeURIComponent(sourcePath)}&destPath=${encodeURIComponent(destPath)}`,
@@ -2216,9 +2239,6 @@ class ApiService {
 }
 
 export const apiService = new ApiService()
-
-// Compatibility export for legacy code expecting apiService.search
-export const search = apiService.advancedSearch.bind(apiService)
 
 // Export individual indexer functions for convenience
 export const getIndexers = () => apiService.getIndexers()

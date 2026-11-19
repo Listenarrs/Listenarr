@@ -22,7 +22,7 @@ namespace Listenarr.Application.Downloads.Queue
     internal static class DownloadQueueDiagnostics
     {
         public static void ObserveFaultedPollTask(
-            Task<List<QueueItem>> pollTask,
+            Task<DownloadClientQueueSnapshot> pollTask,
             DownloadClientConfiguration client,
             ILogger logger)
         {

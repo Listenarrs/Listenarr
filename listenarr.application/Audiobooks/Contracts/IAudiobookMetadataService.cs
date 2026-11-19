@@ -18,6 +18,11 @@
 
 namespace Listenarr.Application.Audiobooks.Contracts
 {
+    public sealed record AudiobookMetadataEnvelope(
+        AudibleBookResponse Metadata,
+        string Source,
+        string SourceUrl);
+
     /// <summary>
     /// Provides audiobook metadata lookup across configured providers (Audible, Audnexus, etc.).
     /// </summary>
@@ -29,8 +34,11 @@ namespace Listenarr.Application.Audiobooks.Contracts
         /// <param name="asin">ASIN identifier.</param>
         /// <param name="region">Region code (default: us).</param>
         /// <param name="cache">Whether provider caching should be used.</param>
-        /// <returns>Metadata payload (provider-specific shape) or null when unavailable.</returns>
-        Task<object?> GetMetadataAsync(string asin, string region = "us", bool cache = true);
+        /// <returns>Metadata and provider details, or null when unavailable.</returns>
+        Task<AudiobookMetadataEnvelope?> GetMetadataAsync(
+            string asin,
+            string region = "us",
+            bool cache = true);
 
         /// <summary>
         /// Gets audiobook metadata directly from Audible.

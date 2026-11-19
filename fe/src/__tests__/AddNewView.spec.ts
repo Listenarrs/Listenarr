@@ -38,6 +38,7 @@ describe('AddNewView pagination', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    window.sessionStorage.clear()
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as {
       getApplicationSettings?: Mock
@@ -263,6 +264,419 @@ describe('AddNewView pagination', () => {
     expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('de')
   })
 
+  it('shows the parameters of a search of this session with its results, and restores them only on demand', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+      titleResults?: unknown[]
+    }
+    expect(vm.titleResults?.length).toBe(1)
+    // The results say what they were found with; the form is left alone (the defaults here)
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for “Dune” · France (FR) · French',
+    )
+    expect(vm.searchQuery).toBe('')
+    expect(vm.searchLanguage).toBe('de')
+    expect(vm.preferredSearchLanguage).toBe('german')
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
+    expect(vm.searchQuery).toBe('Dune')
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+    expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('fr')
+  })
+
+  it('does not show results an earlier version left in localStorage, and drops them', async () => {
+    window.localStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Old Search' }] }),
+    )
+    window.localStorage.setItem('listenarr.addNewTitleResultsCount', '16')
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 16 Books')
+    expect(window.localStorage.getItem('listenarr.addNewResults')).toBeNull()
+    expect(window.localStorage.getItem('listenarr.addNewTitleResultsCount')).toBeNull()
+  })
+
+  it('keeps the query, region and language of a search for this session only', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([])
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+    }
+
+    vm.searchQuery = 'Dune'
+    await vm.performSearch?.()
+    await flushPromises()
+
+    expect(
+      JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? '{}'),
+    ).toEqual({
+      query: 'Dune',
+      region: 'fr',
+      language: 'french',
+    })
+    expect(window.localStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+  })
+
+  // A successful Dune search of this session, as the page saved it
+  const seedDuneSearch = () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'us', language: 'english' }),
+    )
+  }
+
+  it.each([
+    ['the search box', false, 'Foundation'],
+    ['the advanced form', true, ''],
+  ])(
+    'clears the previous results when a search from %s fails, and keeps nothing of it',
+    async (_label, advanced, typedQuery) => {
+      seedDuneSearch()
+      const apiModule = await import('@/services/api')
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockRejectedValue(new Error('Network error'))
+      const router = createTestRouter()
+      const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const vm = first.vm as unknown as {
+        searchQuery?: string
+        titleResults?: unknown[]
+        showAdvancedSearch?: boolean
+        advancedSearchParams?: Record<string, unknown>
+        performSearch?: () => Promise<unknown>
+        performAdvancedSearch?: () => Promise<void>
+      }
+      expect(vm.titleResults?.length).toBe(1)
+
+      if (advanced) {
+        vm.showAdvancedSearch = true
+        vm.advancedSearchParams = { title: 'Foundation' }
+        await vm.performAdvancedSearch?.()
+      } else {
+        vm.searchQuery = 'Foundation'
+        await vm.performSearch?.().catch(() => undefined)
+      }
+      await flushPromises()
+
+      // The failed search shows nothing, not the Dune books under the new query
+      expect(vm.titleResults?.length).toBe(0)
+      expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+      first.unmount()
+
+      const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const backVm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+      // Nothing of the failed search comes back; what the user typed stays theirs
+      expect(backVm.titleResults?.length).toBe(0)
+      expect(backVm.searchQuery).toBe(typedQuery)
+    },
+  )
+
+  it('empties the previous results as soon as a new search starts', async () => {
+    seedDuneSearch()
+    const apiModule = await import('@/services/api')
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(() => new Promise(() => {}))
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      titleResults?: unknown[]
+      performSearch?: () => Promise<unknown>
+    }
+    expect(vm.titleResults?.length).toBe(1)
+
+    vm.searchQuery = 'Foundation'
+    void vm.performSearch?.()
+    await flushPromises()
+
+    expect(vm.titleResults?.length).toBe(0)
+    expect(JSON.parse(window.sessionStorage.getItem('listenarr.addNewResults') ?? '{}')).toEqual(
+      expect.objectContaining({ titleResults: [] }),
+    )
+  })
+
+  // Navigation within the app keeps the same Pinia: the search store outlives the page
+  describe('a search that keeps running while the page is away', () => {
+    type Deferred = { query: string; resolve: (r: SearchResult[]) => void }
+    const book = (title: string, asin: string) =>
+      ({
+        asin,
+        title,
+        authors: [{ name: 'Someone' }],
+        language: 'english',
+      }) as unknown as SearchResult
+
+    async function setup() {
+      const apiModule = await import('@/services/api')
+      const pending: Deferred[] = []
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(
+        (params: { title?: string }) =>
+          new Promise<SearchResult[]>((resolve) =>
+            pending.push({ query: params.title ?? '', resolve }),
+          ),
+      )
+      const pinia = createPinia()
+      const router = createTestRouter()
+      const visit = async () => {
+        const wrapper = mount(AddNewView, { global: { plugins: [pinia, router] } })
+        await flushPromises()
+        return {
+          wrapper,
+          vm: wrapper.vm as unknown as {
+            searchQuery?: string
+            isSearching?: boolean
+            titleResults?: Array<{ title?: string }>
+            performSearch?: () => Promise<unknown>
+          },
+        }
+      }
+      const answer = async (query: string, results: SearchResult[]) => {
+        pending.find((p) => p.query === query)!.resolve(results)
+        await flushPromises()
+      }
+      const savedQuery = () =>
+        JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? 'null')?.query
+      return { visit, answer, savedQuery }
+    }
+
+    it('shows the running search when coming back, then its results', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      const back = await visit()
+      expect(back.vm.isSearching).toBe(true)
+      expect(back.vm.searchQuery).toBe('Dune')
+      // What is being searched is said while it runs, whatever the form now holds
+      expect(back.wrapper.get('[data-testid="running-search-for"]').text()).toContain('for “Dune”')
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.isSearching).toBe(false)
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('ignores an older search that answers after the search that replaced it', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      // Back on the page, a new search replaces the one still running
+      const back = await visit()
+      back.vm.searchQuery = 'Foundation'
+      void back.vm.performSearch?.()
+      await flushPromises()
+      await answer('Foundation', [book('Foundation', 'B000000002')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+      expect(savedQuery()).toBe('Foundation')
+      back.wrapper.unmount()
+
+      const again = await visit()
+      expect(again.vm.searchQuery).toBe('Foundation')
+      expect(again.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+    })
+
+    it('keeps what is typed during a search: the search still ends, and the text stays', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      // Typing the next search, not submitted: it neither stops Dune nor is replaced by it
+      await page.wrapper.get('#unified-search-input').setValue('Foundation')
+      expect(page.vm.isSearching).toBe(true)
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(page.vm.searchQuery).toBe('Foundation')
+      // The saved context is still the search the results come from
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('keeps the results type of the search when an ASIN is typed during it', async () => {
+      const { visit, answer } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      await page.wrapper.get('#unified-search-input').setValue('B0BK9W82PQ')
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      const vm = page.wrapper.vm as unknown as { searchType?: string; inputType?: string }
+      expect(vm.searchType).toBe('title')
+      expect(vm.inputType).toBe('asin')
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+    })
+
+    it('ignores the answer of a cancelled search', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+      ;(page.wrapper.vm as unknown as { cancelSearch: () => void }).cancelSearch()
+      expect(page.vm.isSearching).toBe(false)
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(page.vm.titleResults?.length).toBe(0)
+      expect(savedQuery()).toBeUndefined()
+    })
+  })
+
+  it("keeps what was typed after a search when coming back, next to that search's results", async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    // Typed but not submitted, then the user goes to another page
+    await first.find('input#unified-search-input').setValue('Foundation')
+    await flushPromises()
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(1)
+    expect(vm.searchQuery).toBe('Foundation')
+    expect(back.get('[data-testid="search-results-for"]').text()).toContain('for “Dune”')
+  })
+
+  it('restores an advanced search into the advanced form', async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({
+        advanced: { title: 'Dune', author: 'Frank Herbert' },
+        region: 'us',
+        language: 'english',
+      }),
+    )
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for Title: Dune, Author: Frank Herbert · United States (US) · English',
+    )
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+    }
+    expect(vm.showAdvancedSearch).toBe(true)
+    expect(vm.advancedSearchParams).toEqual(
+      expect.objectContaining({ title: 'Dune', author: 'Frank Herbert' }),
+    )
+  })
+
+  it('keeps the region and language the user chose when coming back, not the defaults', async () => {
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    await first.get('select#region-select').setValue('fr')
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+  })
+
+  it('uses the new defaults after a visit without a search', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    first.unmount()
+    expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+
+    // The defaults change in Settings before coming back
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'fr',
+      defaultSearchLanguage: 'french',
+    })
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+  })
+
   it('defaults language to the region primary language when no language is configured', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
@@ -461,8 +875,11 @@ describe('AddNewView pagination', () => {
       await vi.advanceTimersByTimeAsync(1100)
       await flushPromises()
 
-      const vm = wrapper.vm as unknown as { searchType?: string }
-      expect(vm.searchType).toBe('title')
+      // The hint follows the text typed; the type of the results on screen doesn't change
+      const vm = wrapper.vm as unknown as { inputType?: string; searchType?: string | null }
+      expect(vm.inputType).toBe('title')
+      expect(wrapper.get('#unified-search-hint').text()).toContain('Searching by title')
+      expect(vm.searchType).toBeNull()
       expect(advancedSearchSpy).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
@@ -606,6 +1023,47 @@ describe('AddNewView pagination', () => {
     // Scroll behavior is executed in the browser and can be environment-dependent in jsdom;
     // assert the user-facing toast is shown which signals the empty-state handling.
     scrollSpy.mockRestore()
+  })
+
+  it('clears the previous results when a new search returns nothing', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudibleByTitleAndAuthor?: Mock }
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000999',
+          title: 'Dune Simple',
+          authors: [{ name: 'Frank Herbert' }],
+          language: 'english',
+        },
+      ],
+    })
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+      titleResults?: unknown[]
+    }
+
+    vm.searchQuery = 'Dune Simple'
+    await vm.performSearch()
+    await flushPromises()
+    expect(vm.titleResults.length).toBe(1)
+    expect(wrapper.text()).toContain('Found 1 Book')
+
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 0,
+      results: [],
+    })
+    vm.searchQuery = 'testwkledjhfg'
+    await vm.performSearch()
+    await flushPromises()
+
+    expect(vm.titleResults.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 1 Book')
   })
 
   it('maps runtime from runtimeLengthMin (minutes) and keeps as minutes', async () => {

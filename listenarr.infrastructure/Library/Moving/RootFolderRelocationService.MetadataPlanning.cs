@@ -323,4 +323,23 @@ public sealed partial class RootFolderRelocationService
         reason = string.Empty;
         return true;
     }
+
+    private static string GetTargetRelativeDisplayPath(
+        string? storedPath,
+        string targetRoot,
+        FileSystemPathSemantics targetSemantics)
+    {
+        if (!string.IsNullOrWhiteSpace(storedPath)
+            && FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                targetRoot,
+                storedPath,
+                targetSemantics,
+                out var relativePath))
+        {
+            return relativePath.Length == 0 ? "." : relativePath;
+        }
+
+        return "Tracked file";
+    }
+
 }

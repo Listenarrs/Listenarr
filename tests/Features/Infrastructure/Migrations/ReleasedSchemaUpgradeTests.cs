@@ -34,7 +34,7 @@ public sealed class ReleasedSchemaUpgradeTests
             await using (var db = new ListenArrDbContext(options))
             {
                 var migrator = db.GetService<IMigrator>();
-                await migrator.MigrateAsync("20260818132300_AddFileMutationParentGenerationProofs");
+                await migrator.MigrateAsync("20261029020400_AddReleaseBlocklist");
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO "Audiobooks" ("Id", "Title", "Explicit", "Abridged", "Monitored")
                     VALUES ({legacyBookId}, {"Legacy Book"}, {false}, {false}, {true});

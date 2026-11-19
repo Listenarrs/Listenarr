@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using Listenarr.Domain.Audiobooks.Enumerations;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Persistence;
@@ -14,9 +14,12 @@ public sealed partial class FileRegistrationRecoveryService
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var completedJournals = await db.FileMutationJournals
             .AsNoTracking()
-            .Where(RegistrationMoveOwnerPredicate)
-            .Where(journal => journal.AudiobookId == audiobookId
-                && journal.State == FileMutationJournalState.Completed)
+            .Where(RegistrationPublicationOwnerPredicate)
+            .Where(journal => journal.Action == FileAction.Move
+                && journal.AudiobookId == audiobookId
+                && (journal.State == FileMutationJournalState.Completed
+                    || journal.State
+                        == FileMutationJournalState.CompletedSourceRetained))
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .ToListAsync(cancellationToken);
@@ -46,69 +49,26 @@ public sealed partial class FileRegistrationRecoveryService
 
             var matchingFiles = trackedFiles
                 .Where(file =>
-                    RegisteredPathMatches(file, journal.DestinationPath)
-                    && RegisteredGenerationMatches(
-                        file,
-                        journal.TargetPhysicalObjectIdentity))
+                    RegisteredPathMatches(file, journal.DestinationPath))
                 .ToList();
             if (matchingFiles.Count != 1
-                || !CompletedReceiptTargetIsStillPublished(
-                    journal,
-                    matchingFiles[0]))
+                || await ProbeRestartedPublicationTargetAsync(journal, cancellationToken)
+                    != RestartTargetProbe.Match)
             {
                 continue;
             }
 
+            var sourceRetained = journal.State
+                == FileMutationJournalState.CompletedSourceRetained;
             receipts.Add(new FileRegistrationRecoveryReceipt(
                 journal.OperationId,
                 audiobookId,
                 journal.SourcePath,
-                journal.DestinationPath));
-            includedOperationIds.Add(journal.OperationId);
-        }
-    }
-
-    private static bool CompletedReceiptTargetIsStillPublished(
-        FileMutationJournal journal,
-        AudiobookFile trackedFile)
-    {
-        try
-        {
-            using var lease = PinnedAudiobookFileRegistrationLease.Open(
                 journal.DestinationPath,
-                trackedFile.PhysicalObjectIdentity);
-            if (lease.ProbeCurrentPublication()
-                != RegistrationPublicationMatchOutcome.Match)
-            {
-                return false;
-            }
-
-            using var stream = lease.OpenMetadataReadStream();
-            if (stream.Length != journal.SourceLength)
-            {
-                return false;
-            }
-            if (string.IsNullOrWhiteSpace(journal.SourceSha256))
-            {
-                return true;
-            }
-
-            stream.Position = 0;
-            var hash = Convert.ToHexString(SHA256.HashData(stream));
-            return string.Equals(
-                hash,
-                journal.SourceSha256,
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception exception) when (exception is
-            FileNotFoundException or DirectoryNotFoundException
-                or IOException or UnauthorizedAccessException
-                or ArgumentException or InvalidOperationException or NotSupportedException
-                or PlatformNotSupportedException or PathTooLongException
-                or System.ComponentModel.Win32Exception
-                or System.Security.SecurityException)
-        {
-            return false;
+                SourceRetained: sourceRetained,
+                SourceLength: sourceRetained ? journal.SourceLength : null,
+                SourceSha256: sourceRetained ? journal.SourceSha256 : null));
+            includedOperationIds.Add(journal.OperationId);
         }
     }
 

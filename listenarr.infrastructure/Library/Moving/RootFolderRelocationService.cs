@@ -45,10 +45,6 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot verify the new root folder path. Make sure the destination is mounted and accessible, or choose an explicit filesystem case-sensitivity setting, then try again.",
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
-        EnsureRelocationTargetMutationSemanticsAuthority(
-            command.Mode,
-            command.TargetCaseSensitivityMode,
-            targetResolution);
         EnsureRelocationTargetMutationCapability(command.Mode, targetPath);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -102,10 +98,6 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot access or verify the current root folder, so its files cannot be moved safely. Restore access to the current folder, or change the path without moving files to repair the stored location.",
                 "The current root folder path is invalid or unavailable; use metadata-only path change to repair it before relocating files.");
         }
-        EnsureRelocationSourceMutationSemanticsAuthority(
-            command.Mode,
-            root.CaseSensitivityMode,
-            sourceResolution);
 
         var sourcePathSemantics = ResolveStartSourcePathSemantics(
             root,
@@ -134,12 +126,6 @@ public sealed partial class RootFolderRelocationService(
             targetPath,
             targetResolution,
             cancellationToken);
-
-        var sourceObjectIdentity =
-            await ResolveRelocationSourceObjectIdentityAsync(
-                root,
-                command,
-                cancellationToken);
 
         var storedSourcePathSemantics = sourcePathSemantics.StoredSourcePathSemantics;
         var metadataSourcePathSemantics = sourcePathSemantics.MetadataSourcePathSemantics;
@@ -258,14 +244,16 @@ public sealed partial class RootFolderRelocationService(
 
         if (command.Mode == RootFolderRelocationMode.Relocate
             && !targetObjectIdentity.IsAvailable
-            && targetObjectIdentity.FailureKind
-                != DirectoryObjectIdentityFailureKind.Missing)
+            && targetObjectIdentity.FailureKind is not
+                (DirectoryObjectIdentityFailureKind.Missing
+                    or DirectoryObjectIdentityFailureKind.IdentityUnsupported
+                    or DirectoryObjectIdentityFailureKind.LegacyWeakIdentity))
         {
             throw new RootFolderPathChangeRejectedException(
                 "root_folder_target_unavailable",
-                "Listenarr cannot verify the new root folder's physical directory identity. Make sure the destination is mounted and accessible, then try again.",
+                "The new root folder is not currently accessible for relocation. Make sure the destination is mounted and readable, then try again.",
                 targetObjectIdentity.UnavailableReason
-                    ?? "Target physical directory identity is unavailable.");
+                    ?? "The target directory is currently unavailable.");
         }
 
         RootFolderRelocation? relocation = null;
@@ -275,7 +263,9 @@ public sealed partial class RootFolderRelocationService(
         try
         {
             if (command.Mode == RootFolderRelocationMode.Relocate
-                && !targetObjectIdentity.IsAvailable)
+                && !targetObjectIdentity.IsAvailable
+                && targetObjectIdentity.FailureKind
+                    == DirectoryObjectIdentityFailureKind.Missing)
             {
                 var reservationNow = timeProvider.GetUtcNow().UtcDateTime;
                 relocation = new RootFolderRelocation
@@ -318,9 +308,7 @@ public sealed partial class RootFolderRelocationService(
                 relocation.TargetDirectoryObjectIdentityUnavailableReason =
                     targetObjectIdentity.UnavailableReason;
                 relocation.TargetIdentityEnrollmentState =
-                    targetObjectIdentity.IsAvailable
-                        ? TargetIdentityEnrollmentState.Authorized
-                        : TargetIdentityEnrollmentState.Unavailable;
+                    GetTargetIdentityEnrollmentState(targetObjectIdentity);
             }
             await using var continuationTransaction = relocationWasPrecommitted
                 ? await db.Database.BeginTransactionAsync(cancellationToken)
@@ -360,9 +348,8 @@ public sealed partial class RootFolderRelocationService(
                 TargetDirectoryObjectIdentityVersion = targetObjectIdentity.Version,
                 TargetDirectoryObjectIdentity = targetObjectIdentity.Value,
                 TargetDirectoryObjectIdentityUnavailableReason = targetObjectIdentity.UnavailableReason,
-                TargetIdentityEnrollmentState = targetObjectIdentity.IsAvailable
-                    ? TargetIdentityEnrollmentState.Authorized
-                    : TargetIdentityEnrollmentState.Unavailable,
+                TargetIdentityEnrollmentState =
+                    GetTargetIdentityEnrollmentState(targetObjectIdentity),
                 Mode = command.Mode,
                 Status = RootFolderRelocationStatus.Pending,
                 DeleteEmptySource = command.DeleteEmptySource,
@@ -382,14 +369,6 @@ public sealed partial class RootFolderRelocationService(
             foreach (var plan in movePlans)
             {
                 var audiobook = plan.Candidate.Audiobook;
-                if (sourceObjectIdentity == null
-                    || !sourceObjectIdentity.IsAvailable
-                    || !targetObjectIdentity.IsAvailable)
-                {
-                    throw new InvalidOperationException(
-                        "Relocation move jobs require durable source- and target-boundary generation authorization.");
-                }
-
                 var entries = plan.Manifest.Entries
                     .Select(entry => new MoveJobEntry
                     {
@@ -402,14 +381,6 @@ public sealed partial class RootFolderRelocationService(
                         CleanupState = MoveJobEntryCleanupState.Pending
                     })
                     .ToList();
-                entries.Add(
-                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
-                        sourceObjectIdentity.Version!.Value,
-                        sourceObjectIdentity.Value!));
-                entries.Add(
-                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
-                        targetObjectIdentity.Version!.Value,
-                        targetObjectIdentity.Value!));
                 var moveJob = new MoveJob
                 {
                     AudiobookId = audiobook.Id,

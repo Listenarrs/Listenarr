@@ -1,7 +1,7 @@
 using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.DownloadClients;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Common
 {
@@ -33,6 +33,45 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
                 .WithRemotePath(FileUtils.GetAbsolutePath("downloads"))
                 .WithLocalPath(localMapping)
                 .Build());
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        [InlineData(null)]
+        public async Task GetQueueItemAsync_UsesFreshExactClientMovementPermission(bool? permission)
+        {
+            var adapter = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+            adapter.Items = [new DownloadClientItem { DownloadId = "unrelated", CanMoveFiles = true, Status = DownloadItemStatus.Completed }];
+            if (permission.HasValue)
+                adapter.Items.Add(new DownloadClientItem { DownloadId = "EXACT", CanMoveFiles = permission.Value, Status = DownloadItemStatus.Completed });
+            var download = new DownloadBuilder().WithExternalId("exact").Build();
+            var item = await downloadClientGateway.GetQueueItemAsync(client, download, new QueueItem { CanMoveFiles = true });
+            Assert.Equal(permission, item.CanMoveFiles);
+        }
+
+        [Fact]
+        public async Task GetQueueItemAsync_ClientFailureRevokesMovementPermission()
+        {
+            var adapter = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+            adapter.ItemsException = new IOException("client offline");
+            var item = await downloadClientGateway.GetQueueItemAsync(client,
+                new DownloadBuilder().WithExternalId("exact").Build(), new QueueItem { CanMoveFiles = true });
+            Assert.Null(item.CanMoveFiles);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task GetQueueItemAsync_StaleOrDuplicateIdentityCannotAuthorizeMovement(bool stale)
+        {
+            var adapter = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+            adapter.QueueItemMock = new QueueItem { SourceFiles = [], IsStaleSnapshot = stale };
+            adapter.Items = [new DownloadClientItem { DownloadId = "exact", CanMoveFiles = true, Status = DownloadItemStatus.Completed }];
+            if (!stale) adapter.Items.Add(adapter.Items[0]);
+            var item = await downloadClientGateway.GetQueueItemAsync(client,
+                new DownloadBuilder().WithExternalId("exact").Build(), new QueueItem());
+            Assert.Null(item.CanMoveFiles);
         }
 
         private async Task IsValid(QueueItem item)
