@@ -47,6 +47,26 @@ describe('root folder storage and relocation store actions', () => {
     expect(store.loading).toBe(false)
   })
 
+  it('keeps loaded root folders when a reload fails', async () => {
+    const folder = {
+      id: 3,
+      name: 'Library',
+      path: '/srv/Books',
+      isDefault: true,
+      caseSensitivityMode: 'Auto' as const,
+    }
+    vi.mocked(apiService.getRootFolders)
+      .mockResolvedValueOnce([folder])
+      .mockRejectedValueOnce(new Error('network'))
+    const store = useRootFoldersStore()
+
+    await store.load()
+    await store.load()
+
+    expect(store.folders).toEqual([folder])
+    expect(store.loading).toBe(false)
+  })
+
   it('sends the exact current path as the server relocation precondition', async () => {
     const current = {
       id: 3,

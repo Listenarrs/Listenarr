@@ -1438,4 +1438,30 @@ describe('AddNewView pagination', () => {
     expect(addBtn.text()).toContain('Added')
     expect(addBtn.attributes('disabled')).toBeDefined()
   })
+
+  it('opens the add modal on the first add with a configured root and no outputPath', async () => {
+    const apiModule = await import('@/services/api')
+    vi.mocked(apiModule.apiService.getRootFolders).mockResolvedValue([
+      { id: 1, name: 'Books', path: '/books', isDefault: true },
+    ])
+
+    const router = createTestRouter()
+    const push = vi.spyOn(router, 'push')
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchType?: string
+      audibleResult?: Record<string, unknown>
+      showAddLibraryModal?: boolean
+    }
+
+    vm.searchType = 'asin'
+    vm.audibleResult = { asin: 'BNEW1', title: 'New Book' }
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.search-results .result-actions .btn').trigger('click')
+    await flushPromises()
+
+    expect(push).not.toHaveBeenCalledWith('/settings')
+    expect(vm.showAddLibraryModal).toBe(true)
+  })
 })
