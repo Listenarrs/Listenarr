@@ -213,19 +213,18 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             // Author-free fallback: release names often omit the author, so a full title+author
             // query can return nothing even when the book is available. Retry without the author,
             // then assess every broadened result with the same identity and quality policy.
-            if (searchResults.Count == 0)
+            var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
+            var canRetryWithoutAuthor = !string.IsNullOrWhiteSpace(fallbackQuery)
+                && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase);
+            if (searchResults.Count == 0 && canRetryWithoutAuthor)
             {
-                var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
-                if (!string.IsNullOrWhiteSpace(fallbackQuery)
-                    && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
-                        audiobook.Title, fallbackQuery);
-                    var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
-                    searchResults = fallbackResults;
-                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
-                        audiobook.Title, fallbackResults.Count);
-                }
+                _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
+                    audiobook.Title, fallbackQuery);
+                var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                searchResults = fallbackResults;
+                canRetryWithoutAuthor = false;
+                _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
+                    audiobook.Title, fallbackResults.Count);
             }
 
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
@@ -264,12 +263,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             // This is the path that actually re-grabs: it selects here and calls StartDownloadAsync
             // directly rather than going through SearchAndDownloadAsync, so without this a release
             // could fail, be blocked, and be grabbed again by the next automatic pass.
-            using (var blocklistScope = _serviceScopeFactory.CreateScope())
-            {
-                var blocklistService = blocklistScope.ServiceProvider.GetRequiredService<IBlocklistService>();
-                searchResults = await BlockedReleaseFilter.ExcludeAsync(
-                    blocklistService, audiobook.Id, searchResults, _logger);
-            }
+            searchResults = await ExcludeBlockedAsync(audiobook.Id, searchResults);
 
             var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile, stoppingToken);
             var scoredResults = assessment.Candidates;
@@ -321,6 +315,24 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             }
 
             var topResult = automaticScoring.SelectBest(assessment);
+
+            // The raw results can all be junk that scoring rejects (a title match under the wrong
+            // author), which would end the search here although the author-free query was never
+            // tried. Retry once, with the same identity and quality policy.
+            if (topResult == null && canRetryWithoutAuthor)
+            {
+                _logger.LogInformation("No acceptable results for '{Title}' with the full query; retrying without the author: {Query}",
+                    audiobook.Title, fallbackQuery);
+                var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
+                    audiobook.Title, fallbackResults.Count);
+                if (fallbackResults.Count > 0)
+                {
+                    fallbackResults = await ExcludeBlockedAsync(audiobook.Id, fallbackResults);
+                    assessment = await automaticScoring.ScoreAsync(audiobook, fallbackResults, audiobook.QualityProfile, stoppingToken);
+                    topResult = automaticScoring.SelectBest(assessment);
+                }
+            }
 
             if (topResult == null)
             {
@@ -400,5 +412,11 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             && ex is not StackOverflowException
             && !(ex is OperationCanceledException && stoppingToken.IsCancellationRequested);
 
+        private async Task<List<SearchResult>> ExcludeBlockedAsync(int audiobookId, List<SearchResult> results)
+        {
+            using var blocklistScope = _serviceScopeFactory.CreateScope();
+            var blocklistService = blocklistScope.ServiceProvider.GetRequiredService<IBlocklistService>();
+            return await BlockedReleaseFilter.ExcludeAsync(blocklistService, audiobookId, results, _logger);
+        }
     }
 }

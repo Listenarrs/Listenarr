@@ -78,6 +78,171 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
                 Times.Once);
         }
 
+        [Fact]
+        public async Task RunCycleAsync_FullQueryResultsAllRejected_RetriesWithoutAuthorAndDownloads()
+        {
+            var fullQuery = "A Princess of Mars Edgar Rice Burroughs";
+            var fallbackQuery = "A Princess of Mars";
+            var junk = new SearchResult { Title = "Twenty Thousand Leagues Under the Sea - Jules Verne" };
+            var correct = new SearchResult
+            {
+                Title = "Edgar Rice Burroughs - A Princess of Mars - M4B",
+                DownloadType = DirectDownloadMetadataKeys.ClientId
+            };
+
+            var search = new Mock<ISearchService>();
+            SetupSearch(search, fullQuery, fallbackQuery, new List<SearchResult> { correct });
+            search.Setup(s => s.SearchAsync(
+                    fullQuery,
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()))
+                .ReturnsAsync(new List<SearchResult> { junk });
+            var download = new Mock<IDownloadService>();
+            download.Setup(d => d.StartDownloadAsync(
+                    It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()))
+                .ReturnsAsync("download-1");
+            var quality = new Mock<IQualityProfileService>();
+            quality.Setup(q => q.ScoreSearchResults(
+                    It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+                .ReturnsAsync((List<SearchResult> results, QualityProfile _) =>
+                    results.Select(r => new QualityScore { SearchResult = r, TotalScore = 100 }).ToList());
+            Init(builder =>
+            {
+                builder.WithSingleton(search.Object);
+                builder.WithSingleton(download.Object);
+                builder.WithSingleton(quality.Object);
+            });
+            var audiobook = await SeedMonitoredAudiobookAsync("A Princess of Mars", "Edgar Rice Burroughs");
+
+            await RunCycleAsync();
+
+            download.Verify(d => d.StartDownloadAsync(
+                    It.Is<SearchResult>(r => r.Title == correct.Title),
+                    DirectDownloadMetadataKeys.ClientId,
+                    audiobook.Id),
+                Times.Once);
+            search.Verify(s => s.SearchAsync(
+                    It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>()),
+                Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_FullQueryEmpty_FallbackOnlyRejected_RetriesExactlyOnce()
+        {
+            var search = new Mock<ISearchService>();
+            SetupSearch(
+                search,
+                "A Princess of Mars Edgar Rice Burroughs",
+                "A Princess of Mars",
+                new List<SearchResult> { new() { Title = "Twenty Thousand Leagues Under the Sea - Jules Verne" } });
+            var download = new Mock<IDownloadService>(MockBehavior.Strict);
+            Init(builder =>
+            {
+                builder.WithSingleton(search.Object);
+                builder.WithSingleton(download.Object);
+            });
+            await SeedMonitoredAudiobookAsync("A Princess of Mars", "Edgar Rice Burroughs");
+
+            await RunCycleAsync();
+
+            search.Verify(s => s.SearchAsync(
+                    It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>()),
+                Times.Exactly(2));
+            download.Verify(d => d.StartDownloadAsync(
+                It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_NoAuthor_FullAndTitleOnlyQueriesIdentical_OnlyRejected_SearchesOnce()
+        {
+            var search = new Mock<ISearchService>();
+            search.Setup(s => s.SearchAsync(
+                    "A Princess of Mars",
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()))
+                .ReturnsAsync(new List<SearchResult> { new() { Title = "Twenty Thousand Leagues Under the Sea - Jules Verne" } });
+            var download = new Mock<IDownloadService>(MockBehavior.Strict);
+            Init(builder =>
+            {
+                builder.WithSingleton(search.Object);
+                builder.WithSingleton(download.Object);
+            });
+            await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("A Princess of Mars")
+                .WithSeries("Barsoom")
+                .WithMonitored()
+                .WithQualityProfile(new QualityProfile { Name = "Any" })
+                .Build());
+
+            await RunCycleAsync();
+
+            // With no author the title-only query equals the full query, so repeating it would only
+            // spend a second request on the same indexers.
+            search.Verify(s => s.SearchAsync(
+                    It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>()),
+                Times.Once);
+            download.Verify(d => d.StartDownloadAsync(
+                It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_RetryAfterRejectedResults_DoesNotGrabABlockedRelease()
+        {
+            var fullQuery = "A Princess of Mars Edgar Rice Burroughs";
+            var fallbackQuery = "A Princess of Mars";
+            var junk = new SearchResult { Title = "Twenty Thousand Leagues Under the Sea - Jules Verne" };
+            var blockedRelease = new SearchResult
+            {
+                Title = "Edgar Rice Burroughs - A Princess of Mars - M4B",
+                DownloadType = DirectDownloadMetadataKeys.ClientId,
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12"
+            };
+
+            var search = new Mock<ISearchService>();
+            SetupSearch(search, fullQuery, fallbackQuery, new List<SearchResult> { blockedRelease });
+            search.Setup(s => s.SearchAsync(
+                    fullQuery,
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()))
+                .ReturnsAsync(new List<SearchResult> { junk });
+            var identifier = ReleaseIdentity.For(blockedRelease);
+            Assert.NotNull(identifier);
+            var blocklist = new Mock<IBlocklistService>();
+            blocklist.Setup(b => b.GetBlockedIdentifiersAsync(It.IsAny<int>()))
+                .ReturnsAsync([identifier]);
+            var download = new Mock<IDownloadService>(MockBehavior.Strict);
+            var quality = new Mock<IQualityProfileService>();
+            quality.Setup(q => q.ScoreSearchResults(
+                    It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+                .ReturnsAsync((List<SearchResult> results, QualityProfile _) =>
+                    results.Select(r => new QualityScore { SearchResult = r, TotalScore = 100 }).ToList());
+            Init(builder =>
+            {
+                builder.WithSingleton(search.Object);
+                builder.WithSingleton(download.Object);
+                builder.WithSingleton(blocklist.Object);
+                builder.WithSingleton(quality.Object);
+            });
+            await SeedMonitoredAudiobookAsync("A Princess of Mars", "Edgar Rice Burroughs");
+
+            await RunCycleAsync();
+
+            download.Verify(d => d.StartDownloadAsync(
+                It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Never);
+        }
+
         private async Task AssertFallbackNotDownloadedAsync(
             string title,
             string author,
