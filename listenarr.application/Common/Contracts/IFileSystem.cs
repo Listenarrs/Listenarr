@@ -28,6 +28,8 @@ public interface IFileSystem
     void DeleteFile(string path);
     void CreateDirectory(string path);
     void DeleteDirectory(string path, bool recursive);
+    /// <summary>Renames a file in place without overwriting an existing destination.</summary>
+    void MoveFile(string sourcePath, string destinationPath);
     IEnumerable<string> EnumerateFiles(string path);
     IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
     IEnumerable<string> EnumerateDirectories(string path);
