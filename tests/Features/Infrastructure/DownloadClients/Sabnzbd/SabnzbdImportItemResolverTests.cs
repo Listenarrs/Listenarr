@@ -24,6 +24,8 @@ using Listenarr.Tests.Mocks.DownloadClients;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
 {
+    [Trait("Name", nameof(SabnzbdImportItemResolverTests))]
+    [Trait("Category", "SabnzbdImportItemResolver")]
     public class SabnzbdImportItemResolverTests : BaseTests
     {
         private const string TargetNzoId = "SABnzbd_nzo_target";
