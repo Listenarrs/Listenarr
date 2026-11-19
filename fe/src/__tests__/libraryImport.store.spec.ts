@@ -18,10 +18,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SearchResult } from '@/types'
+import type { LibraryImportItem } from '@/stores/libraryImport'
 
 const startManualImport = vi.fn()
 const addToLibrary = vi.fn()
 const updateAudiobook = vi.fn()
+const getAudiobook = vi.fn()
 const advancedSearch = vi.fn()
 const scanUnmatchedFiles = vi.fn()
 const getUnmatchedResults = vi.fn()
@@ -36,6 +38,7 @@ vi.mock('@/services/api', () => ({
   apiService: {
     addToLibrary,
     updateAudiobook,
+    getAudiobook,
     startManualImport,
     advancedSearch,
     getAudibleMetadata,
@@ -70,6 +73,7 @@ describe('library import store', () => {
     setActivePinia(createPinia())
     addToLibrary.mockResolvedValue({ audiobook: { id: 42 } })
     updateAudiobook.mockResolvedValue({})
+    getAudiobook.mockResolvedValue({ id: 42, files: [] })
     startManualImport.mockResolvedValue({ importedCount: 3, totalCount: 3, results: [] })
     advancedSearch.mockResolvedValue([])
     getSavedUnmatchedFiles.mockResolvedValue({ items: [], lastScannedAt: null })
@@ -199,6 +203,131 @@ describe('library import store', () => {
     expect(result.warnings).toEqual([
       'The source file was retained because source cleanup could not be proven safe.',
     ])
+  })
+
+  it('imports grouped chapters and a separately matched chapter into the same audiobook', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    const match = { asin: 'B000APXZHK', title: 'Book', region: 'us' } as SearchResult
+    const row = (files: string[]): LibraryImportItem => ({
+      id: files[0]!,
+      fullPath: files[0]!,
+      sourceFiles: files,
+      folderPath: '/incoming/Book',
+      relativePath: 'Book',
+      folderName: 'Book',
+      format: 'MP3',
+      fileCount: files.length,
+      selectedMatch: null,
+      hasSearched: false,
+      isSearching: false,
+      selected: false,
+    })
+    store.items = {
+      grouped: { ...row(['/incoming/Book/01.mp3', '/incoming/Book/02.mp3']), id: 'grouped' },
+      separate: { ...row(['/incoming/Book/03.mp3']), id: 'separate' },
+    }
+    store.selectMatch('grouped', match)
+    store.selectMatch('separate', match)
+    store.action = 'move'
+    getAudiobook.mockResolvedValue({
+      id: 42,
+      basePath: '/library/Book',
+      files: [{ id: 1, path: '/library/Book/01.mp3' }],
+    })
+    addToLibrary
+      .mockResolvedValueOnce({ audiobook: { id: 42 } })
+      .mockRejectedValueOnce({ status: 409, body: { audiobook: { id: 42 } } })
+    startManualImport
+      .mockResolvedValueOnce({ importedCount: 2, results: [{ success: true }, { success: true }] })
+      .mockResolvedValueOnce({ importedCount: 1, results: [{ success: true }] })
+
+    const result = await store.importSelected('/library')
+
+    expect(result.imported).toBe(2)
+    expect(result.errors).toEqual([])
+    expect(getAudiobook).toHaveBeenCalledWith(42)
+    expect(updateAudiobook).not.toHaveBeenCalled()
+    expect(startManualImport.mock.calls.map(([request]) => request.items)).toEqual([
+      [
+        { fullPath: '/incoming/Book/01.mp3', matchedAudiobookId: 42 },
+        { fullPath: '/incoming/Book/02.mp3', matchedAudiobookId: 42 },
+      ],
+      [{ fullPath: '/incoming/Book/03.mp3', matchedAudiobookId: 42 }],
+    ])
+    expect(store.itemList).toEqual([])
+  })
+
+  it.each([
+    { book: { files: [] }, shouldRoute: true },
+    { book: { files: [{ id: 1, path: '/library/Book/01.mp3' }] }, shouldRoute: false },
+    { book: { fileCount: 1 }, shouldRoute: false },
+    { book: { filePath: '/library/Book/01.mp3' }, shouldRoute: false },
+  ])('routes only an empty existing book: $book', async ({ book, shouldRoute }) => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    store.items = {
+      chapter: {
+        id: 'chapter',
+        fullPath: '/incoming/02.mp3',
+        sourceFiles: ['/incoming/02.mp3'],
+        folderPath: '/incoming',
+        relativePath: 'Book',
+        folderName: 'Book',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: { asin: 'B000APXZHK', title: 'Book' } as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'hardlink/copy'
+    addToLibrary.mockRejectedValueOnce({ status: 409, body: { audiobook: { id: 42 } } })
+    getAudiobook.mockResolvedValueOnce({ id: 42, basePath: '/library/Book', ...book })
+    startManualImport.mockResolvedValueOnce({ importedCount: 1, results: [{ success: true }] })
+
+    const result = await store.importSelected('/library')
+
+    expect(result.imported).toBe(1)
+    expect(updateAudiobook.mock.calls).toEqual(shouldRoute ? [[42, { basePath: '/library' }]] : [])
+    expect(startManualImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [{ fullPath: '/incoming/02.mp3', matchedAudiobookId: 42 }],
+      }),
+    )
+  })
+
+  it('keeps the row and avoids import when the existing book cannot be checked', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    store.items = {
+      chapter: {
+        id: 'chapter',
+        fullPath: '/incoming/02.mp3',
+        sourceFiles: ['/incoming/02.mp3'],
+        folderPath: '/incoming',
+        relativePath: 'Book',
+        folderName: 'Book',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: { asin: 'B000APXZHK', title: 'Book' } as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'move'
+    addToLibrary.mockRejectedValueOnce({ status: 409, body: { audiobook: { id: 42 } } })
+    getAudiobook.mockRejectedValueOnce(new Error('Existing book lookup failed'))
+
+    const result = await store.importSelected('/library')
+
+    expect(result.errors).toEqual(['Book: Existing book lookup failed'])
+    expect(result.imported).toBe(0)
+    expect(updateAudiobook).not.toHaveBeenCalled()
+    expect(startManualImport).not.toHaveBeenCalled()
+    expect(store.items.chapter?.selected).toBe(true)
   })
 
   it('registers files in place using the discovered book folder and backend success result', async () => {

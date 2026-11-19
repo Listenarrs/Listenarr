@@ -109,6 +109,74 @@ describe('LibraryImportSearchModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('offers no quick selection until a book has been manually chosen', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="previous-match"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('explicitly reuses the last edition with its region even when another row holds it', async () => {
+    const previous = { ...primalHunter4, region: 'us' }
+    const store = useLibraryImportStore()
+    store.items = {
+      other: { ...primalHunter, id: 'other', selectedMatch: previous },
+    }
+    library.mockResolvedValue([
+      { id: 9, title: previous.title, asin: previous.asin, asinRegion: 'us', fileCount: 1 },
+    ])
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: { item: alchemised, lastSelected: previous },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="previous-match"]').text()).toContain('Primal Hunter 4')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    await wrapper.get('[data-testid="reuse-match"]').trigger('click')
+    expect(wrapper.emitted('select')).toEqual([[previous]])
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('can reuse a previous match while searching and releases the import search gate on close', async () => {
+    let answer: (results: SearchResult[]) => void = () => {}
+    vi.mocked(apiService.advancedSearch).mockImplementation(
+      () =>
+        new Promise<SearchResult[]>((resolve) => {
+          answer = resolve
+        }),
+    )
+    const previous = { ...primalHunter4, region: 'us' }
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: { item: alchemised, lastSelected: previous },
+    })
+    await flushPromises()
+    const store = useLibraryImportStore()
+    expect(store.findMatchSearching).toBe(true)
+    await wrapper.get('[data-testid="reuse-match"]').trigger('click')
+    const selections = wrapper.emitted('select')
+    expect(selections).toEqual([[previous]])
+    wrapper.unmount()
+    await flushPromises()
+    expect(store.findMatchSearching).toBe(false)
+    answer([{ title: 'Late result' } as SearchResult])
+    await flushPromises()
+    expect(selections).toHaveLength(1)
+  })
+
+  it('does not reuse an unidentified result as a new duplicate book', async () => {
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: { item: alchemised, lastSelected: { title: 'No identifiers' } as SearchResult },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="reuse-match"]').attributes('disabled')).toBeDefined()
+    await wrapper
+      .get('[data-testid="previous-match"] [data-testid="find-match-result"]')
+      .trigger('click')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   describe('a record goes on one book', () => {
     const held = { id: 9, title: 'The other book', asin: 'B000APXZHK', asinRegion: 'fr' }
     const result = (wrapper: ReturnType<typeof mountModal>) =>

@@ -31,7 +31,10 @@ import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
-import type { RootFolder } from '@/types'
+import type { RootFolder, SearchResult } from '@/types'
+import type { LibraryImportItem } from '@/stores/libraryImport'
+import LibraryImportRow from '@/components/domain/audiobook/LibraryImportRow.vue'
+import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
 
 const folder = (id: number, isDefault = false) =>
   ({ id, name: `Folder ${id}`, path: `/srv/${id}`, isDefault }) as unknown as RootFolder
@@ -58,6 +61,61 @@ function mountView({
 describe('LibraryImportView opened from "Scan for unmatched files"', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('shares an explicit match across chapter rows and forgets it on a folder change or rescan', async () => {
+    routeQuery.value = {}
+    const { wrapper, store } = mountView()
+    await flushPromises()
+    const chapter = (id: string): LibraryImportItem => ({
+      id,
+      fullPath: `/srv/2/${id}.mp3`,
+      sourceFiles: [`/srv/2/${id}.mp3`],
+      folderPath: '/srv/2',
+      relativePath: id,
+      folderName: id,
+      format: 'MP3',
+      fileCount: 1,
+      selectedMatch: null,
+      hasSearched: false,
+      isSearching: false,
+      selected: false,
+    })
+    store.rootFolderId = 2
+    store.scanStatus = 'done'
+    store.items = { first: chapter('first'), second: chapter('second') }
+    await flushPromises()
+    const previous = {
+      asin: 'B0BK9W82PQ',
+      title: 'Primal Hunter 4',
+      region: 'us',
+    } as SearchResult
+    let rows = wrapper.findAllComponents(LibraryImportRow)
+    await rows[0]!.get('.btn-search-toggle').trigger('click')
+    // Confirming a normal search result in the first row takes the real row -> view path.
+    rows[0]!.getComponent(LibraryImportSearchModal).vm.$emit('select', previous)
+    rows[0]!.getComponent(LibraryImportSearchModal).vm.$emit('close')
+    await flushPromises()
+
+    rows = wrapper.findAllComponents(LibraryImportRow)
+    await rows[1]!.get('.btn-search-toggle').trigger('click')
+    await flushPromises()
+    await rows[1]!.get('[data-testid="reuse-match"]').trigger('click')
+    expect(store.items.first?.selectedMatch).toEqual(previous)
+    expect(store.items.second?.selectedMatch).toEqual(previous)
+    expect(store.items.second?.sourceFiles).toEqual(['/srv/2/second.mp3'])
+
+    store.rootFolderId = 3
+    await flushPromises()
+    expect(wrapper.findAllComponents(LibraryImportRow)[0]!.props('lastSelected')).toBeNull()
+    wrapper.findAllComponents(LibraryImportRow)[0]!.vm.$emit('matched', previous)
+    await flushPromises()
+    store.scanStatus = 'scanning'
+    await flushPromises()
+    store.scanStatus = 'done'
+    await flushPromises()
+    expect(wrapper.findAllComponents(LibraryImportRow)[0]!.props('lastSelected')).toBeNull()
+    wrapper.unmount()
   })
 
   it('selects the requested folder, scans it once and drops the scan request from the address', async () => {

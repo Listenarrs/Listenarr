@@ -121,6 +121,7 @@
   <LibraryImportSearchModal
     v-if="showSearchModal"
     :item="item"
+    :last-selected="lastSelected"
     @close="showSearchModal = false"
     @select="applyMatch"
   />
@@ -134,7 +135,8 @@ import type { LibraryImportItem } from '@/stores/libraryImport'
 import type { SearchResult } from '@/types'
 import LibraryImportSearchModal from './LibraryImportSearchModal.vue'
 
-const props = defineProps<{ item: LibraryImportItem }>()
+const props = defineProps<{ item: LibraryImportItem; lastSelected?: SearchResult | null }>()
+const emit = defineEmits<{ matched: [result: SearchResult] }>()
 
 const store = useLibraryImportStore()
 const showSearchModal = ref(false)
@@ -153,6 +155,7 @@ function isAuthorMismatch(item: LibraryImportItem): boolean {
 
 function applyMatch(result: SearchResult) {
   store.selectMatch(props.item.id, result)
+  emit('matched', result)
 }
 
 function formatGroupedFileLabel(sourceFile: string): string {
