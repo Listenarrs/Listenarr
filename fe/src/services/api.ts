@@ -110,6 +110,14 @@ class ApiService {
     return {}
   }
 
+  /**
+   * Generic request passthrough for plugins. Player-agnostic FE seam: lets a plugin's own API
+   * client reuse this service's auth + antiforgery + retry handling instead of reimplementing it.
+   */
+  public pluginRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(endpoint, options)
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     // Await tokenReadyPromise before any unsafe request to guarantee fresh token
     const method = (options.method || 'GET').toString().toUpperCase()
