@@ -91,6 +91,23 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             string storedPath,
             AudiobookFilePathIdentity identity,
             CancellationToken ct = default);
+        /// <summary>
+        /// Re-home one tracked file row to another audiobook in a single compare-and-swap:
+        /// the row must still belong to <paramref name="expectedAudiobookId"/> with the complete
+        /// <paramref name="expectedPathState"/>, and it is rewritten with the freshly resolved
+        /// <paramref name="identity"/> for the same physical path. The ownership key is path
+        /// derived, so the database uniqueness contract keeps holding across the owner change;
+        /// callers prove with <see cref="CheckOwnershipAsync"/> that the new owner may hold it.
+        /// Physical-generation fields are never written by this operation.
+        /// </summary>
+        Task<bool> TransferOwnershipAsync(
+            int fileId,
+            int expectedAudiobookId,
+            AudiobookFilePathState expectedPathState,
+            int newAudiobookId,
+            string storedPath,
+            AudiobookFilePathIdentity identity,
+            CancellationToken ct = default);
         Task<bool> ReplacePhysicalGenerationAsync(
             int fileId,
             int audiobookId,
