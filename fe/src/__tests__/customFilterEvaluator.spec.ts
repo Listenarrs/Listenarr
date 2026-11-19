@@ -94,6 +94,19 @@ describe('customFilterEvaluator - grouping and precedence', () => {
     ).toBe(false)
   })
 
+  it.each([
+    ['0001-01-01', true],
+    ['0004-02-29', true],
+    ['0099-01-01', true],
+    ['0000-01-01', false],
+    ['0099-02-29', false],
+    ['0099-04-31', false],
+  ])('validates %s as a Date Added comparison date', (value, expected) => {
+    const book = { ...base, added: '2025-06-01T12:00:00Z' } as Audiobook
+
+    expect(evaluateRules(book, [{ field: 'added', operator: 'gt', value }])).toBe(expected)
+  })
+
   it('uses slim list file summary fields for path, filesize, and file count filters', () => {
     const slimBook = {
       ...base,
