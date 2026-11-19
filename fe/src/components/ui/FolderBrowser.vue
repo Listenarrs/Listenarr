@@ -47,6 +47,7 @@
         class="browser-input form-input"
         type="text"
         placeholder="Enter path..."
+        @input="onInlinePathInput"
         @keydown.enter.prevent="browseDirectory(localPath)"
         aria-label="Path"
       />
@@ -229,6 +230,17 @@ watch(
     emit('path-draft', v ?? '')
   },
 )
+
+// Commit a manually-typed path to the parent's v-model. Without this, typed
+// values only surface as `path-draft` and a parent binding via `v-model`
+// (which listens for `update:modelValue`) never receives them — so the value
+// is dropped on submit. Gated on `autoSelect` so modal-embedded browsers
+// (autoSelect=false) keep their draft-only semantics. (issue #523)
+function onInlinePathInput() {
+  if (props.inline && props.autoSelect) {
+    emit('update:modelValue', localPath.value)
+  }
+}
 
 const currentPath = ref<string | null>(null)
 const parentPath = ref<string | null>(null)
@@ -447,7 +459,11 @@ onMounted(() => {
 watch(
   () => props.modelValue,
   (v) => {
-    localPath.value = v ?? ''
+    const next = v ?? ''
+    // Ignore echoes of values we just emitted from the inline input — otherwise
+    // every keystroke would re-trigger a path validation request.
+    if (next === localPath.value) return
+    localPath.value = next
     // Validate the incoming path so the parent sees validation feedback immediately
     if (localPath.value) validatePath()
   },
