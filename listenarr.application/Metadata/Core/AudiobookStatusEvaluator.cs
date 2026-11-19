@@ -90,6 +90,9 @@ namespace Listenarr.Application.Metadata.Core
                 return QualityMismatch;
             }
 
+            // A profile that is not upgrading is handled below rather than here: every cutoff
+            // comparison past this point runs through QualityMatcher, which already treats
+            // UpgradeAllowed = false the same way it treats a blank cutoff.
             if (string.IsNullOrWhiteSpace(qualityProfile.CutoffQuality)
                 || qualityProfile.Qualities == null
                 || qualityProfile.Qualities.Count == 0)

@@ -90,7 +90,7 @@
               class="profile-section"
             >
               <h5><PhCheckSquare /> Allowed Qualities</h5>
-              <div v-if="profile.cutoffQuality" class="quality-subtitle">
+              <div v-if="showsCutoff(profile)" class="quality-subtitle">
                 <PhScissors />
                 Upgrade until {{ profile.cutoffQuality }}
               </div>
@@ -108,10 +108,12 @@
                       v-for="quality in group.qualities"
                       :key="quality.id"
                       class="quality-badge"
-                      :class="{ 'is-cutoff': quality.id === profile.cutoffQuality }"
+                      :class="{
+                        'is-cutoff': showsCutoff(profile) && quality.id === profile.cutoffQuality,
+                      }"
                     >
                       {{ quality.label }}
-                      <template v-if="quality.id === profile.cutoffQuality">
+                      <template v-if="showsCutoff(profile) && quality.id === profile.cutoffQuality">
                         <PhScissors title="Cutoff Quality" />
                       </template>
                     </span>
@@ -429,6 +431,14 @@ const toDisplayQuality = (quality: QualityProfile['qualities'][number]): Display
     priority: quality.priority,
   }
 }
+
+/**
+ * Whether to draw the cutoff marker. A profile that is not upgrading keeps the cutoff it last
+ * held, so the cutoff alone no longer says the profile is going to upgrade until it. Profiles
+ * from a server without the flag have no upgradeAllowed and still encode "off" as a blank cutoff.
+ */
+const showsCutoff = (profile: QualityProfile): boolean =>
+  profile.upgradeAllowed !== false && !!profile.cutoffQuality
 
 const getQualityGroups = (profile: QualityProfile): QualityGroupDisplay[] => {
   const allowed = (profile.qualities || [])

@@ -178,6 +178,7 @@ export type ListenarrDomainAudiobooksQualityProfile = {
     name: string;
     description?: string | null;
     qualities?: Array<ListenarrDomainAudiobooksQualityDefinition> | null;
+    upgradeAllowed?: boolean;
     cutoffQuality?: string | null;
     minimumSize?: number;
     maximumSize?: number;

@@ -48,6 +48,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20261021212418_AddAutomaticSearchTiming";
     private const string ReleaseBlocklistMigrationId =
         "20261029020400_AddReleaseBlocklist";
+    private const string QualityProfileUpgradeAllowedMigrationId =
+        "20261112054132_AddQualityProfileUpgradeAllowed";
 
     private const string AudiobookAddedDateMigrationId =
         ListenarrDatabaseMigrationPreflight.AudiobookAddedDateMigrationId;
@@ -236,6 +238,7 @@ public class SqliteMigrationSchemaTests : BaseTests
                 OperationEvidencePublicationsMigrationId,
                 AutomaticSearchTimingMigrationId,
                 ReleaseBlocklistMigrationId,
+                QualityProfileUpgradeAllowedMigrationId,
                 AudiobookAddedDateMigrationId
             ],
             postCanary);
