@@ -18,7 +18,6 @@
 using System.Collections.Specialized;
 using System.Text.Json;
 using System.Web;
-using Listenarr.Infrastructure.DownloadClients.Sabnzbd;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.DownloadClients;
