@@ -104,6 +104,14 @@ namespace Listenarr.Domain.Configuration
         // Failed download handling settings
         public bool FailedDownloadHandlingEnabled { get; set; } = true;
         public bool FailedDownloadAutoSearch { get; set; } = false;
+
+        // Background "fill missing from online": for books that hold files,
+        // periodically look up the catalog by the book's own ASIN/ISBN and fill
+        // ONLY the fields the record lacks (description, cover, narrators,
+        // genres, publisher, dates, language). Never overwrites an existing
+        // value, so manual edits stay intact. Off by default: it spends
+        // provider requests unattended.
+        public bool MetadataAutoBackfillEnabled { get; set; } = false;
         public List<string> ImportBlacklistExtensions
         {
             get
