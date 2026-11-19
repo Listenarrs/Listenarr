@@ -31,6 +31,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
         private readonly HttpClient _httpClient;
         private readonly ILogger<AudnexusService> _logger;
         private const string BASE_URL = "https://api.audnex.us";
+        private const int RequestTimeoutSeconds = 10;
 
         public AudnexusService(HttpClient httpClient, ILogger<AudnexusService> logger)
         {
@@ -60,7 +61,8 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
 
                 _logger.LogInformation("Fetching audiobook metadata from Audnexus: {Url}", url);
 
-                var response = await _httpClient.GetAsync(url);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeoutSeconds));
+                var response = await _httpClient.GetAsync(url, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -69,7 +71,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                     return null;
                 }
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cts.Token);
 
                 _logger.LogDebug("Audnexus raw JSON response for ASIN {Asin}: {Json}", LogRedaction.SanitizeText(asin), json.Length > 500 ? json.Substring(0, 500) + "..." : json);
 
@@ -103,6 +105,12 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
 
                 return result;
             }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Audnexus request timed out after {TimeoutSeconds}s fetching metadata for ASIN {Asin}",
+                    RequestTimeoutSeconds, LogRedaction.SanitizeText(asin));
+                return null;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error fetching metadata from Audnexus for ASIN {Asin}", LogRedaction.SanitizeText(asin));
@@ -123,7 +131,8 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                 var url = $"{BASE_URL}/authors?name={Uri.EscapeDataString(name)}&region={region}";
                 _logger.LogInformation("Searching Audnexus authors: {Url}", LogRedaction.SanitizeUrl(url));
 
-                var response = await _httpClient.GetAsync(url);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeoutSeconds));
+                var response = await _httpClient.GetAsync(url, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -132,7 +141,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                     return null;
                 }
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cts.Token);
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
@@ -144,6 +153,12 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                 _logger.LogInformation("Successfully searched Audnexus for author: {Name}, found {Count} results",
                     LogRedaction.SanitizeText(name), result?.Count ?? 0);
                 return result;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Audnexus request timed out after {TimeoutSeconds}s searching for author {Name}",
+                    RequestTimeoutSeconds, LogRedaction.SanitizeText(name));
+                return null;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -168,7 +183,8 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
 
                 _logger.LogInformation("Fetching author from Audnexus: {Url}", LogRedaction.SanitizeUrl(url));
 
-                var response = await _httpClient.GetAsync(url);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeoutSeconds));
+                var response = await _httpClient.GetAsync(url, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -177,7 +193,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                     return null;
                 }
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cts.Token);
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
@@ -222,7 +238,8 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
 
                 _logger.LogInformation("Fetching chapters from Audnexus: {Url}", LogRedaction.SanitizeUrl(url));
 
-                var response = await _httpClient.GetAsync(url);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(RequestTimeoutSeconds));
+                var response = await _httpClient.GetAsync(url, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -231,7 +248,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                     return null;
                 }
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cts.Token);
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
