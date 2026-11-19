@@ -46,11 +46,16 @@ vi.mock('@/services/api', () => ({
 
 type AudiobooksVm = {
   setGroupBy?: (value: string, options?: { brokenOnly?: boolean }) => Promise<void> | void
-  audiobooks?: Array<{ id: number }>
+  audiobooks?: Array<{ id: number; title?: string }>
   groupedCollections?: Array<{ name: string; count: number; coverUrl?: string }>
   showItemDetails?: boolean
   groupBy?: string
   visibleRange?: { start: number; end: number }
+  selectedFilterId?: string | null
+  sortKey?: string
+  sortOrder?: 'asc' | 'desc'
+  sortKeyProxy?: string
+  sortOptions?: Array<{ value: string; label: string }>
   confirmDelete?: (audiobook: import('@/types').Audiobook) => Promise<void>
   deleteTarget?: import('@/types').Audiobook | null
   deleteCapabilities?: import('@/types').AudiobookDeleteCapabilities | null
@@ -141,6 +146,109 @@ describe('AudiobooksView', () => {
     expect(wrapper.text()).toContain('Test Narrator')
     expect(wrapper.text()).toContain('Test Publisher')
     expect(wrapper.text()).toContain('2020')
+  })
+
+  it('sorts by canonical date added with unknown dates last', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Oldest', authors: ['A'], added: '2023-01-01T00:00:00Z', files: [] },
+      { id: 2, title: 'Newest', authors: ['A'], added: '2025-06-01T00:00:00Z', files: [] },
+      { id: 3, title: 'Middle', authors: ['A'], added: '2024-03-15T00:00:00Z', files: [] },
+      { id: 4, title: 'Unknown', authors: ['A'], added: null, files: [] },
+    ] as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const vm = getVm(wrapper)
+    await vm.setGroupBy?.('books')
+    await wrapper.vm.$nextTick()
+    expect(vm.sortOptions?.map((option) => option.value)).toContain('added')
+
+    vm.sortKey = 'added'
+    vm.sortOrder = 'desc'
+    await wrapper.vm.$nextTick()
+    expect(vm.audiobooks?.map((book) => book.title)).toEqual([
+      'Newest',
+      'Middle',
+      'Oldest',
+      'Unknown',
+    ])
+
+    vm.sortOrder = 'asc'
+    await wrapper.vm.$nextTick()
+    expect(vm.audiobooks?.map((book) => book.title)).toEqual([
+      'Oldest',
+      'Middle',
+      'Newest',
+      'Unknown',
+    ])
+
+    vm.sortKey = 'title'
+    vm.sortOrder = 'asc'
+    vm.sortKeyProxy = 'added'
+    await wrapper.vm.$nextTick()
+    expect(vm.sortKey).toBe('added')
+    expect(vm.sortOrder).toBe('desc')
+
+    const year = new Date().getFullYear()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Old publication',
+        added: new Date(year, 0, 2).toISOString(),
+        publishYear: '1900',
+      },
+      { id: 2, title: 'Previous year', added: new Date(year - 1, 0, 2).toISOString() },
+      {
+        id: 3,
+        title: 'Old addition',
+        added: new Date(year - 2, 0, 2).toISOString(),
+        publishYear: String(year),
+      },
+      { id: 4, title: 'Unknown addition', added: null, publishYear: String(year) },
+    ] as import('@/types').Audiobook[]
+    vm.selectedFilterId = 'recent'
+    await wrapper.vm.$nextTick()
+    expect(vm.audiobooks?.map((book) => book.title)).toEqual(['Old publication', 'Previous year'])
   })
 
   it('ignores stale delete capabilities when a newer audiobook becomes the target', async () => {

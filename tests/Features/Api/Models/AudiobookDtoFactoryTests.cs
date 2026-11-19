@@ -32,9 +32,11 @@ namespace Listenarr.Tests.Features.Api.Models
 
             using var db = new ListenArrDbContext(options);
 
+            var added = new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc);
             var book = new Audiobook
             {
                 Title = "Factory Book",
+                Added = added,
                 Authors = new System.Collections.Generic.List<string> { "Author One" },
                 Edition = "Collector's Edition",
                 Series = "Primary Series",
@@ -78,6 +80,7 @@ namespace Listenarr.Tests.Features.Api.Models
             Assert.Equal(book.Title, dto.Title);
             Assert.Contains("Author One", dto.Authors ?? new string[] { });
             Assert.Equal(book.Edition, dto.Edition);
+            Assert.Equal(added, dto.Added);
             Assert.Equal(book.BasePath, dto.BasePath);
             Assert.NotNull(dto.SeriesMemberships);
             Assert.Equal(2, dto.SeriesMemberships!.Length);

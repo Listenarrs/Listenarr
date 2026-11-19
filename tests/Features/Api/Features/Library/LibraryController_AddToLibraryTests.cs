@@ -644,6 +644,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await ReinitializeAsync(builder =>
                 builder.WithSingleton<INotificationService>(notifications.Object));
 
+            var beforeAdd = DateTime.UtcNow;
             var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
                 new LibraryController.AddToLibraryRequest
                 {
@@ -657,6 +658,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.IsType<OkObjectResult>(result);
             var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            var added = Assert.IsType<DateTime>(audiobook.Added);
+            Assert.Equal(DateTimeKind.Utc, added.Kind);
+            Assert.InRange(added, beforeAdd, DateTime.UtcNow);
             var history = Assert.Single(await _historyRepository.GetByAudiobookIdAsync(audiobook.Id));
             Assert.Equal("Added", history.EventType);
             Assert.Equal(audiobook.Id, history.AudiobookId);

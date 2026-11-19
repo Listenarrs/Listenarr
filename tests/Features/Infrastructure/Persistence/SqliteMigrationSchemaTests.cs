@@ -49,6 +49,9 @@ public class SqliteMigrationSchemaTests : BaseTests
     private const string ReleaseBlocklistMigrationId =
         "20261029020400_AddReleaseBlocklist";
 
+    private const string AudiobookAddedDateMigrationId =
+        ListenarrDatabaseMigrationPreflight.AudiobookAddedDateMigrationId;
+
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
     {
@@ -232,7 +235,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 WeakStorageVerifiedCleanupMigrationId,
                 OperationEvidencePublicationsMigrationId,
                 AutomaticSearchTimingMigrationId,
-                ReleaseBlocklistMigrationId
+                ReleaseBlocklistMigrationId,
+                AudiobookAddedDateMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

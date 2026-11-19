@@ -1154,8 +1154,6 @@ function getSortValue(book: CollectionDisplayItem): string {
       return book.authors?.[0] || ''
     case 'series':
       return book.series || ''
-    case 'added':
-      return book.inLibrary ? String(book.id).padStart(12, '0') : 'zzzzzzzzzzzz'
     default:
       return book.title || ''
   }
@@ -1262,6 +1260,14 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
     // position by default — then orders books within each group.
     if (isMetadataCollection.value && a.inLibrary !== b.inLibrary) {
       return a.inLibrary ? -1 : 1
+    }
+
+    if (sortKey.value === 'added') {
+      const aTime = Date.parse(a.added ?? '')
+      const bTime = Date.parse(b.added ?? '')
+      if (!Number.isFinite(aTime)) return Number.isFinite(bTime) ? 1 : 0
+      if (!Number.isFinite(bTime)) return -1
+      return aTime - bTime
     }
 
     const aVal = safeText(getSortValue(a))

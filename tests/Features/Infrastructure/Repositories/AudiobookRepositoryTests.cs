@@ -284,7 +284,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
-        public async Task UpdateAsync_DetachedMetadataChange_DoesNotOverwriteNewerPathReferences()
+        public async Task UpdateAsync_DetachedMetadataChange_PreservesPathReferencesAndAddedDate()
         {
             var databaseName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -301,6 +301,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 audiobook.FilePath = "/library/source/book.m4b";
                 audiobook.FileSize = 100;
                 audiobook.ImageUrl = "/library/source/cover.jpg";
+                audiobook.Added = new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc);
                 seed.Audiobooks.Add(audiobook);
                 await seed.SaveChangesAsync();
                 staleMetadataEntity = await seed.Audiobooks
@@ -320,6 +321,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             }
 
             staleMetadataEntity.Monitored = false;
+            staleMetadataEntity.Added = null;
             await using (var metadataContext = new ListenArrDbContext(options))
             {
                 var metadataRepository = new AudiobookRepository(metadataContext);
@@ -333,6 +335,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             Assert.Equal("/library/target/book.m4b", persisted.FilePath);
             Assert.Equal(200, persisted.FileSize);
             Assert.Equal("/library/target/cover.jpg", persisted.ImageUrl);
+            Assert.Equal(new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc), persisted.Added);
             Assert.False(persisted.Monitored);
         }
 

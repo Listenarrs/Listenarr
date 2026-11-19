@@ -735,6 +735,7 @@ export interface Audiobook {
   authors?: string[]
   publishedDate?: string
   publishYear?: string
+  added?: string | null
   series?: string
   seriesNumber?: string
   seriesMemberships?: AudiobookSeriesMembership[]

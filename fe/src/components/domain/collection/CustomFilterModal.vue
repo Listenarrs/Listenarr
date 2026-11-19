@@ -55,7 +55,11 @@
                   >
                     (
                   </button>
-                  <select v-model="r.field" class="form-select field-select">
+                  <select
+                    v-model="r.field"
+                    class="form-select field-select"
+                    @change="onFieldChange(r)"
+                  >
                     <option value="monitored">Monitored</option>
                     <option value="title">Title</option>
                     <option value="author">Author</option>
@@ -64,6 +68,7 @@
                     <option value="publisher">Publisher</option>
                     <option value="qualityProfileId">Quality Profile</option>
                     <option value="publishYear">Published Year</option>
+                    <option value="added">Date Added</option>
                     <option value="path">Path</option>
                     <option value="files">Files</option>
                     <option value="filesize">Filesize</option>
@@ -75,7 +80,9 @@
                     </template>
                     <template
                       v-else-if="
-                        ['publishYear', 'publishedYear', 'files', 'filesize'].includes(r.field)
+                        ['publishYear', 'publishedYear', 'files', 'filesize', 'added'].includes(
+                          r.field,
+                        )
                       "
                     >
                       <option value="eq">=</option>
@@ -119,6 +126,9 @@
                       class="form-input value-input"
                       placeholder="e.g. 2023"
                     />
+                  </template>
+                  <template v-else-if="r.field === 'added'">
+                    <input v-model="r.value" type="date" class="form-input value-input" />
                   </template>
                   <template v-else-if="r.field === 'files'">
                     <input
@@ -302,6 +312,23 @@ watch(
   },
   { immediate: true },
 )
+
+function onFieldChange(r: Rule) {
+  r.value = ''
+
+  if (r.field === 'monitored') {
+    r.operator = 'is'
+    r.value = 'true'
+    return
+  }
+
+  if (['publishYear', 'publishedYear', 'files', 'filesize', 'added'].includes(r.field)) {
+    r.operator = 'eq'
+    return
+  }
+
+  r.operator = 'contains'
+}
 
 function addRule() {
   local.value.rules.push({
