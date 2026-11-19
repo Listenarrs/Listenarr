@@ -18,6 +18,7 @@ RUN dotnet publish tests/Listenarr.FakeProviders/Listenarr.FakeProviders.csproj 
 	--configuration Release \
 	--output /out/integration-host \
 	/p:UseAppHost=false
+RUN sh docker/runtime/prepare-ffprobe.sh /out/integration-host
 RUN dotnet tool install dotnet-coverage --version "${DOTNET_COVERAGE_VERSION}" --tool-path /out/dotnet-coverage
 
 FROM ${LISTENARR_IMAGE}
