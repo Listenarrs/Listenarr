@@ -42,7 +42,56 @@ public sealed class RootFoldersUnmatchedScanGroupingTests : BaseTests
         Assert.Equal(6, item.GetProperty("FileCount").GetInt32());
     }
 
+    // A job canceled through the queue stops the processor at its own checkpoint, even when the
+    // processing token itself is not canceled (the queue keeps the job Canceled regardless): it
+    // throws, keeps the Canceled status with no results, and never sends the completion event.
+    [Fact]
+    public async Task ProcessJobAsync_JobCanceledThroughTheQueue_ThrowsAndSkipsTheFolder()
+    {
+        var pipeline = await BuildScanPipelineAsync("Canceled Scan", ["Some Book.m4b"]);
+
+        Assert.True(pipeline.Queue.TryCancel(pipeline.JobId, out _));
+
+        // Not the job's own token: only the processor's job-cancellation checkpoints can stop it here
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => pipeline.Processor.ProcessJobAsync(pipeline.Job, CancellationToken.None));
+
+        pipeline.ClientProxy.Verify(
+            proxy => proxy.SendCoreAsync(
+                "UnmatchedScanComplete",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        var results = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+            pipeline.Controller.GetUnmatchedResults(pipeline.JobId));
+        var payload = JsonSerializer.SerializeToElement(results.Value);
+        Assert.Equal("Canceled", payload.GetProperty("status").GetString());
+        Assert.Empty(payload.GetProperty("items").EnumerateArray());
+    }
+
     private async Task<List<JsonElement>> ScanFolderAsync(
+        string folderName,
+        IReadOnlyList<string> fileNames)
+    {
+        var pipeline = await BuildScanPipelineAsync(folderName, fileNames);
+        await pipeline.Processor.ProcessJobAsync(pipeline.Job, CancellationToken.None);
+
+        var results = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+            pipeline.Controller.GetUnmatchedResults(pipeline.JobId));
+        var payload = JsonSerializer.SerializeToElement(results.Value);
+        Assert.Equal("Completed", payload.GetProperty("status").GetString());
+        return payload.GetProperty("items").EnumerateArray().ToList();
+    }
+
+    private sealed record ScanPipeline(
+        AppRootFoldersController Controller,
+        UnmatchedScanQueueService Queue,
+        UnmatchedScanProcessor Processor,
+        Guid JobId,
+        UnmatchedScanJob Job,
+        Mock<IClientProxy> ClientProxy);
+
+    private async Task<ScanPipeline> BuildScanPipelineAsync(
         string folderName,
         IReadOnlyList<string> fileNames)
     {
@@ -88,12 +137,7 @@ public sealed class RootFoldersUnmatchedScanGroupingTests : BaseTests
             .GetString()!);
         Assert.True(queue.Reader.TryRead(out var job));
         Assert.Equal(jobId, job.Id);
-        await processor.ProcessJobAsync(job, CancellationToken.None);
 
-        var results = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
-            controller.GetUnmatchedResults(jobId));
-        var payload = JsonSerializer.SerializeToElement(results.Value);
-        Assert.Equal("Completed", payload.GetProperty("status").GetString());
-        return payload.GetProperty("items").EnumerateArray().ToList();
+        return new ScanPipeline(controller, queue, processor, jobId, job, clientProxy);
     }
 }

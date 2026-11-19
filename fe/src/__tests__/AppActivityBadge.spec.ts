@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, RouterLinkStub, type VueWrapper } from '@vue/test-utils'
 import { computed, reactive, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -54,6 +54,12 @@ const scanSignalRMock = vi.hoisted(() => ({
     | null,
 }))
 
+const notificationSignalRMock = vi.hoisted(() => ({
+  callback: null as
+    | ((notification: { id: string; title: string; message: string; timestamp: string }) => void)
+    | null,
+}))
+
 const scanJobStatusMock = vi.hoisted(() =>
   vi.fn(async (jobId: string) => ({
     id: jobId,
@@ -77,6 +83,53 @@ const moveJobsMock = vi.hoisted(() => ({
   stop: vi.fn(),
   loadActiveJobs: vi.fn(async () => undefined),
 }))
+
+type ScanTaskMock = {
+  id: string
+  jobId: string | null
+  rootFolderId: number
+  folderName: string | null
+  status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
+  startedAt: string
+  finishedAt: string | null
+  error: string | null
+  itemCount: number | null
+}
+
+// The Library Import store, as far as the bell uses it: its scan task, kept reactive so the
+// notification follows the task as it changes. Made once per file (resetModules keeps mocks).
+const libraryImportMock = vi.hoisted(() => ({
+  store: null as null | {
+    scanTask: ScanTaskMock | null
+    readonly scanTaskActive: boolean
+    scanHistory: ScanTaskMock[]
+    restoreScanTask: ReturnType<typeof vi.fn>
+    dismissScan: ReturnType<typeof vi.fn>
+    clearFinishedScans: ReturnType<typeof vi.fn>
+  },
+}))
+
+vi.mock('@/stores/libraryImport', async () => {
+  const { reactive } = await import('vue')
+  const store = reactive({
+    scanTask: null as ScanTaskMock | null,
+    get scanTaskActive(): boolean {
+      return this.scanTask?.status === 'starting' || this.scanTask?.status === 'running'
+    },
+    scanHistory: [] as ScanTaskMock[],
+    restoreScanTask: vi.fn(),
+    dismissScan: vi.fn((id: string) => {
+      if (store.scanTask?.id === id && !store.scanTaskActive) store.scanTask = null
+      store.scanHistory = store.scanHistory.filter((task) => task.id !== id)
+    }),
+    clearFinishedScans: vi.fn(() => {
+      if (!store.scanTaskActive) store.scanTask = null
+      store.scanHistory = []
+    }),
+  })
+  libraryImportMock.store = store
+  return { useLibraryImportStore: () => store }
+})
 
 vi.mock('@/stores/moveJobs', () => ({
   useMoveJobsStore: () => moveJobsMock,
@@ -120,7 +173,10 @@ vi.mock('@/services/signalr', () => ({
     onToast: vi.fn(() => () => undefined),
     onDownloadUpdate: vi.fn(() => () => undefined),
     onDownloadsList: vi.fn(() => () => undefined),
-    onNotification: vi.fn(() => () => undefined),
+    onNotification: vi.fn((callback) => {
+      notificationSignalRMock.callback = callback
+      return () => undefined
+    }),
   },
 }))
 
@@ -142,6 +198,12 @@ vi.mock('@/router', () => ({
 
 import { createRouter, createMemoryHistory } from 'vue-router'
 
+// Background jobs are under the cog; the bell keeps downloads and messages
+const JOBS_BUTTON = '[data-testid="jobs-menu"] .nav-btn'
+const JOBS_LIST = '[data-testid="jobs-menu"] .notification-dropdown'
+const BELL_BUTTON = '[data-testid="notifications-menu"] .nav-btn'
+const BELL_LIST = '[data-testid="notifications-menu"] .notification-dropdown'
+
 describe('App.vue activity badge', () => {
   let wrapper: VueWrapper | undefined
 
@@ -161,6 +223,10 @@ describe('App.vue activity badge', () => {
     }))
     deleteOperationsMock.dismiss.mockReset()
     deleteOperationsMock.clearFinished.mockReset()
+    if (libraryImportMock.store) {
+      libraryImportMock.store.scanTask = null
+      libraryImportMock.store.scanHistory = []
+    }
     setActivePinia(createPinia())
   })
 
@@ -189,7 +255,7 @@ describe('App.vue activity badge', () => {
     })
   }
 
-  it('shows active move progress in the notification dropdown', async () => {
+  it('shows active move progress in the jobs menu', async () => {
     moveJobsMock.trackedJobs.push({
       jobId: 'move-1',
       audiobookId: 98,
@@ -208,13 +274,16 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
 
-    const dropdown = wrapper.find('.notification-dropdown')
+    const dropdown = wrapper.find(JOBS_LIST)
     expect(dropdown.exists()).toBe(true)
     expect(dropdown.text()).toContain('Moving audiobook')
     expect(dropdown.text()).toContain('Verifying source')
@@ -222,7 +291,7 @@ describe('App.vue activity badge', () => {
     expect(dropdown.find('.progress-fill').attributes('style')).toContain('width: 42.4%')
   })
 
-  it('updates folder scan progress in one notification without a fake percentage', async () => {
+  it('updates folder scan progress in one job, with a spinner and no fake percentage', async () => {
     const { default: AppComponent } = await import('@/App.vue')
     const router = createRouter({
       history: createMemoryHistory(),
@@ -232,7 +301,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(scanSignalRMock.callback).not.toBeNull()
@@ -243,8 +315,8 @@ describe('App.vue activity badge', () => {
       status: 'Processing',
     })
     await wrapper.vm.$nextTick()
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
-    expect(wrapper.find('.notification-dropdown').text()).not.toContain('Scanning audiobook folder')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
+    expect(wrapper.find(JOBS_LIST).text()).not.toContain('Scanning audiobook folder')
 
     scanSignalRMock.callback?.({
       jobId: 'scan-1',
@@ -257,9 +329,11 @@ describe('App.vue activity badge', () => {
       .findAll('.notification-item')
       .find((item) => item.text().includes('Scan queued: audiobook folder'))
     expect(scanNotification?.text()).toContain('Waiting to scan folder')
-    expect(scanNotification?.find('.progress-fill').classes()).toContain('indeterminate')
+    expect(scanNotification?.find('.notif-icon .ph-spin').exists()).toBe(true)
+    expect(scanNotification?.find('.progress-fill').exists()).toBe(false)
     expect(scanNotification?.text()).not.toMatch(/\d+%/)
-    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(false)
+    // Dismissing a running job only hides its notification: it goes on
+    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(true)
 
     scanSignalRMock.callback?.({
       jobId: 'scan-1',
@@ -272,9 +346,10 @@ describe('App.vue activity badge', () => {
       .findAll('.notification-item')
       .find((item) => item.text().includes('Scanning audiobook folder'))
     expect(scanNotification?.text()).toContain('Scanning folder')
-    expect(scanNotification?.find('.progress-fill').classes()).toContain('indeterminate')
+    expect(scanNotification?.find('.notif-icon .ph-spin').exists()).toBe(true)
     expect(scanNotification?.text()).not.toMatch(/\d+%/)
-    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(false)
+    // Dismissing a running job only hides its notification: it goes on
+    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(true)
 
     scanSignalRMock.callback?.({
       jobId: 'scan-1',
@@ -289,7 +364,7 @@ describe('App.vue activity badge', () => {
       .findAll('.notification-item')
       .find((item) => item.text().includes('Scan complete: audiobook folder'))
     expect(scanNotification?.text()).toContain('3 files found · 2 added')
-    expect(scanNotification?.find('.progress-fill').exists()).toBe(false)
+    expect(scanNotification?.find('.ph-spin').exists()).toBe(false)
     expect(scanNotification?.find('.dismiss-btn').exists()).toBe(true)
   })
 
@@ -311,7 +386,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
@@ -324,8 +402,8 @@ describe('App.vue activity badge', () => {
 
     expect(scanJobStatusMock).toHaveBeenCalledWith('scan-reconcile')
 
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
-    const dropdown = wrapper.find('.notification-dropdown')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
+    const dropdown = wrapper.find(JOBS_LIST)
     expect(dropdown.text()).toContain('Scan complete: audiobook folder')
     expect(dropdown.text()).toContain('Folder scan completed')
     expect(dropdown.text()).not.toContain('Waiting to scan folder')
@@ -351,7 +429,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
@@ -387,7 +468,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
@@ -398,8 +482,8 @@ describe('App.vue activity badge', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
-    const dropdown = wrapper.find('.notification-dropdown')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
+    const dropdown = wrapper.find(JOBS_LIST)
     expect(dropdown.text()).toContain('Scan failed: audiobook folder')
     expect(dropdown.text()).toContain('Scan status is no longer available')
     expect(dropdown.text()).not.toContain('Waiting to scan folder')
@@ -415,7 +499,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
@@ -428,20 +515,20 @@ describe('App.vue activity badge', () => {
       created: 1,
     })
     await wrapper.vm.$nextTick()
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
-    expect(wrapper.find('.notification-dropdown').text()).not.toContain('scan-fast')
-    expect(wrapper.find('.notification-dropdown').text()).not.toContain('Scan complete')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
+    expect(wrapper.find(JOBS_LIST).text()).not.toContain('scan-fast')
+    expect(wrapper.find(JOBS_LIST).text()).not.toContain('Scan complete')
 
     scanSignalRMock.callback?.({ jobId: 'scan-fast', audiobookId: 42, status: 'Queued' })
     await wrapper.vm.$nextTick()
 
-    const dropdown = wrapper.find('.notification-dropdown')
+    const dropdown = wrapper.find(JOBS_LIST)
     expect(dropdown.text()).toContain('Scan complete: audiobook folder')
     expect(dropdown.text()).toContain('1 file found · 1 added')
     expect(dropdown.text()).not.toContain('Scan queued')
   })
 
-  it('shows library delete progress in notifications instead of Activity', async () => {
+  it('shows library delete progress in the jobs menu instead of Activity', async () => {
     deleteOperationsMock.operations.push({
       id: 'delete-bulk-1',
       kind: 'bulk',
@@ -465,20 +552,23 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
 
-    const dropdown = wrapper.find('.notification-dropdown')
-    expect(dropdown.text()).toContain('Notifications')
+    const dropdown = wrapper.find(JOBS_LIST)
+    expect(dropdown.text()).toContain('Jobs')
     expect(dropdown.text()).toContain('Deleting 4 audiobooks')
     expect(dropdown.text()).toContain('2/4 · Second Book')
     expect(dropdown.text()).toContain('50%')
   })
 
-  it('shows a single delete as indeterminate progress without a fake percentage', async () => {
+  it('shows a single delete with a spinner and no fake percentage', async () => {
     deleteOperationsMock.operations.push({
       id: 'delete-single-1',
       kind: 'single',
@@ -502,17 +592,21 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+    await wrapper.find(JOBS_BUTTON).trigger('click')
 
-    const dropdown = wrapper.find('.notification-dropdown')
+    const dropdown = wrapper.find(JOBS_LIST)
     expect(dropdown.text()).toContain('Deleting Slow Delete')
     expect(dropdown.text()).toContain('Removing audiobook from library')
     expect(dropdown.text()).not.toContain('35%')
-    expect(dropdown.find('.progress-fill').classes()).toContain('indeterminate')
+    expect(dropdown.find('.notif-icon .ph-spin').exists()).toBe(true)
+    expect(dropdown.find('.progress-fill').exists()).toBe(false)
   })
 
   it('counts active downloads correctly even when statuses are lowercase', async () => {
@@ -556,7 +650,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
 
     // Wait a tick for computed properties in mounted hook
@@ -606,7 +703,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
 
     // Allow async onMounted tasks to settle
@@ -671,7 +771,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
 
     // Allow async onMounted tasks (SignalR/connect, api fetches) to settle
@@ -708,7 +811,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
 
     await new Promise((r) => setTimeout(r, 20))
@@ -764,7 +870,10 @@ describe('App.vue activity badge', () => {
     await router.isReady().catch(() => {})
 
     wrapper = mount(AppComponent, {
-      global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
+      global: {
+        stubs: { RouterLink: RouterLinkStub, RouterView: true },
+        plugins: [createPinia(), router],
+      },
     })
 
     await new Promise((r) => setTimeout(r, 20))
@@ -778,5 +887,211 @@ describe('App.vue activity badge', () => {
     const vm = wrapper.vm as unknown as { wantedCount: number }
     expect(getLibrary).toHaveBeenCalledTimes(2)
     expect(vm.wantedCount).toBe(1)
+  })
+
+  describe('Library Import scan', () => {
+    function scanTask(overrides: Partial<ScanTaskMock> = {}): ScanTaskMock {
+      return {
+        id: 'scan-a',
+        jobId: 'unmatched-1',
+        rootFolderId: 7,
+        folderName: 'Audiobooks A',
+        status: 'running',
+        startedAt: '2026-08-08T10:40:00Z',
+        finishedAt: null,
+        error: null,
+        itemCount: null,
+        ...overrides,
+      }
+    }
+
+    async function mountApp(task: ScanTaskMock | null = null, { open = true } = {}) {
+      // The jobs dismissed from the notifications are kept for the session
+      sessionStorage.removeItem('listenarr.jobs.notifications.hidden')
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      useLibraryImportStore().scanTask = task
+      const { default: AppComponent } = await import('@/App.vue')
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/', name: 'home', component: { template: '<div />' } },
+          { path: '/library-import', name: 'library-import', component: { template: '<div />' } },
+          { path: '/:pathMatch(.*)*', name: 'other', component: { template: '<div />' } },
+        ],
+      })
+      await router.push('/')
+      await router.isReady().catch(() => {})
+      wrapper = mount(AppComponent, {
+        global: { stubs: ['RouterView'], plugins: [createPinia(), router] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      if (open) await wrapper.find(JOBS_BUTTON).trigger('click')
+      return { wrapper, router }
+    }
+
+    function scanItem(w: VueWrapper) {
+      return w.find('[data-testid="notification-library-import-scan"]')
+    }
+
+    it('shows a running scan with a spinner, and lets its notification be dismissed', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'starting', jobId: null }))
+
+      const item = scanItem(w)
+      expect(item.exists()).toBe(true)
+      expect(item.text()).toContain('Scanning Audiobooks A for unmatched files')
+      expect(item.find('.notif-icon .ph-spin').exists()).toBe(true)
+      expect(item.find('.progress-fill').exists()).toBe(false)
+      expect(item.find('.dismiss-btn').exists()).toBe(true)
+    })
+
+    it('updates the same notification as the scan ends, and stops the spinner', async () => {
+      const { wrapper: w } = await mountApp(scanTask())
+      const store = libraryImportMock.store!
+
+      store.scanTask = scanTask({
+        status: 'done',
+        finishedAt: '2026-08-08T10:42:00Z',
+        itemCount: 14,
+      })
+      await w.vm.$nextTick()
+      expect(w.findAll('[data-testid="notification-library-import-scan"]')).toHaveLength(1)
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A finished')
+      expect(scanItem(w).text()).toContain('14 unmatched books')
+      expect(scanItem(w).find('.ph-spin').exists()).toBe(false)
+      expect(scanItem(w).find('.dismiss-btn').exists()).toBe(true)
+
+      store.scanTask = scanTask({ status: 'failed', error: 'The root folder is unavailable' })
+      await w.vm.$nextTick()
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A failed')
+      expect(scanItem(w).text()).toContain('The root folder is unavailable')
+
+      store.scanTask = scanTask({ status: 'canceled', finishedAt: '2026-08-08T10:41:00Z' })
+      await w.vm.$nextTick()
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A canceled')
+    })
+
+    it('says "1 unmatched book" for a single result', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'done', itemCount: 1 }))
+
+      expect(scanItem(w).text()).toContain('1 unmatched book')
+      expect(scanItem(w).text()).not.toContain('1 unmatched books')
+    })
+
+    it('brings the user back to the folder in Library Import when its name is clicked', async () => {
+      const { wrapper: w, router } = await mountApp(scanTask())
+
+      await scanItem(w).find('a.notif-title').trigger('click')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(router.currentRoute.value.name).toBe('library-import')
+      expect(router.currentRoute.value.query).toEqual({ rootFolder: '7' })
+      expect(w.find(JOBS_LIST).exists()).toBe(false)
+    })
+
+    it('dismisses a notification without touching the job log', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'done', itemCount: 3 }))
+
+      await scanItem(w).find('.dismiss-btn').trigger('click')
+
+      expect(scanItem(w).exists()).toBe(false)
+      expect(libraryImportMock.store!.dismissScan).not.toHaveBeenCalled()
+      expect(libraryImportMock.store!.scanTask).not.toBeNull()
+    })
+
+    it('clears the notifications, and notifies again when a running scan ends', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'running' }))
+
+      await w.find(`${JOBS_LIST} .clear-btn`).trigger('click')
+      expect(scanItem(w).exists()).toBe(false)
+      expect(libraryImportMock.store!.clearFinishedScans).not.toHaveBeenCalled()
+
+      libraryImportMock.store!.scanTask = scanTask({ status: 'done', itemCount: 2 })
+      await w.vm.$nextTick()
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A finished')
+    })
+
+    it("brings back the session's scan when the app starts, whatever the page", async () => {
+      await mountApp()
+
+      expect(libraryImportMock.store!.restoreScanTask).toHaveBeenCalled()
+    })
+
+    it('keeps messages under the bell, and jobs out of it', async () => {
+      // Earlier tests replace the signalR mock: this one needs the message callback
+      vi.doMock('@/services/signalr', () => ({
+        signalRService: {
+          connect: vi.fn(async () => undefined),
+          onConnected: vi.fn(() => () => undefined),
+          onQueueUpdate: vi.fn(() => () => undefined),
+          onFilesRemoved: vi.fn(() => () => undefined),
+          onScanJobUpdate: vi.fn(() => () => undefined),
+          onToast: vi.fn(() => () => undefined),
+          onDownloadUpdate: vi.fn(() => () => undefined),
+          onDownloadsList: vi.fn(() => () => undefined),
+          onNotification: vi.fn((callback) => {
+            notificationSignalRMock.callback = callback
+            return () => undefined
+          }),
+        },
+      }))
+      const { wrapper: w } = await mountApp(scanTask(), { open: false })
+      notificationSignalRMock.callback?.({
+        id: 'n1',
+        title: 'Import finished',
+        message: 'Dune was imported',
+        timestamp: '2026-08-08T10:00:00Z',
+      })
+      await w.vm.$nextTick()
+
+      await w.find(BELL_BUTTON).trigger('click')
+      const bell = w.find(BELL_LIST)
+      expect(bell.find('.dropdown-header').text()).toContain('Notifications')
+      expect(bell.text()).toContain('Import finished')
+      expect(bell.text()).not.toContain('Scanning Audiobooks A')
+      expect(w.find(JOBS_LIST).exists()).toBe(false)
+
+      await w.find(JOBS_BUTTON).trigger('click')
+      expect(w.find(JOBS_LIST).text()).toContain('Scanning Audiobooks A for unmatched files')
+      expect(w.find(JOBS_LIST).text()).not.toContain('Import finished')
+    })
+
+    it('lists Jobs under System in the sidebar', async () => {
+      const { wrapper: w } = await mountApp(null, { open: false })
+
+      const jobsLink = w.find('.sidebar a.nav-subitem[href="/jobs"]')
+      expect(jobsLink.exists()).toBe(true)
+      expect(jobsLink.text()).toBe('Jobs')
+      expect(jobsLink.element.closest('.nav-sub')?.previousElementSibling?.textContent).toContain(
+        'System',
+      )
+    })
+
+    it('counts unread jobs on the cog, apart from the bell', async () => {
+      sessionStorage.clear()
+      const { wrapper: w } = await mountApp(scanTask(), { open: false })
+
+      expect(w.find('[data-testid="jobs-menu"] .notification-badge').text()).toBe('1')
+      expect(w.find('[data-testid="notifications-menu"] .notification-badge').exists()).toBe(false)
+
+      await w.find(JOBS_BUTTON).trigger('click')
+      expect(w.find('[data-testid="jobs-menu"] .notification-badge').exists()).toBe(false)
+    })
+
+    it('spins the cog while a job runs', async () => {
+      const { wrapper: w } = await mountApp(scanTask(), { open: false })
+      expect(w.find('[data-testid="jobs-menu"] .header-menu-icon').classes()).toContain('ph-spin')
+
+      libraryImportMock.store!.scanTask = scanTask({ status: 'done', itemCount: 2 })
+      await w.vm.$nextTick()
+      expect(w.find('[data-testid="jobs-menu"] .header-menu-icon').classes()).not.toContain(
+        'ph-spin',
+      )
+    })
+
+    it('names a folder it does not know as "root folder"', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ folderName: null }))
+
+      expect(scanItem(w).text()).toContain('Scanning root folder for unmatched files')
+    })
   })
 })

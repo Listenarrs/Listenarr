@@ -57,6 +57,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 job = LastJob;
                 return job != null && string.Equals(job.RootFolderPath, rootFolderPath, StringComparison.Ordinal);
             }
+            public bool TryCancel(Guid id, out UnmatchedScanJob? job) => TryGetJob(id, out job);
         }
 
         private static readonly IUnmatchedScanQueueService _fakeQueue = new FakeUnmatchedQueue();
@@ -357,6 +358,45 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task CancelUnmatchedScan_QueuedJob_ReturnsCanceledStatus()
+        {
+            using var db = CreateDb();
+            var queue = new UnmatchedScanQueueService(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<UnmatchedScanQueueService>.Instance,
+                new Mock<IFileSystemSemanticsResolver>().Object);
+            var jobId = await queue.EnqueueAsync(FileUtils.GetAbsolutePath("cancel-scan-root"));
+            var controller = new RootFoldersController(
+                new FakeService(),
+                queue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.CancelUnmatchedScan(jobId);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            Assert.Contains("\"status\":\"Canceled\"", JsonSerializer.Serialize(ok.Value), StringComparison.Ordinal);
+            var status = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(controller.GetUnmatchedResults(jobId));
+            Assert.Contains("\"status\":\"Canceled\"", JsonSerializer.Serialize(status.Value), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void CancelUnmatchedScan_UnknownJob_ReturnsNotFound()
+        {
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                new FakeUnmatchedQueue(),
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.CancelUnmatchedScan(Guid.NewGuid());
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundObjectResult>(result);
+        }
+
+        [Fact]
         public async Task ScanUnmatched_NonScannableStorage_RejectsBeforeQueuePublication()
         {
             var svc = new FakeService();
@@ -440,6 +480,39 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Contains(expectedJobId.ToString(), JsonSerializer.Serialize(ok.Value), StringComparison.Ordinal);
             queue.VerifyAll();
             storageHealthResolver.VerifyAll();
+        }
+
+        [Fact]
+        public void GetUnmatchedResults_ReturnsEnqueuedAndCompletedTimestamps()
+        {
+            var queue = new FakeUnmatchedQueue
+            {
+                LastJob = new UnmatchedScanJob
+                {
+                    Id = Guid.NewGuid(),
+                    RootFolderPath = "/library",
+                    Status = "Completed",
+                    EnqueuedAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+                    CompletedAt = new DateTime(2026, 1, 2, 3, 6, 7, DateTimeKind.Utc),
+                    Results = []
+                }
+            };
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                queue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.GetUnmatchedResults(queue.LastJob.Id);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var json = JsonSerializer.Serialize(ok.Value);
+            Assert.Contains("\"enqueuedAt\":", json, StringComparison.Ordinal);
+            Assert.Contains("\"completedAt\":", json, StringComparison.Ordinal);
+            Assert.Contains("2026-01-02T03:04:05", json, StringComparison.Ordinal);
+            Assert.Contains("2026-01-02T03:06:07", json, StringComparison.Ordinal);
         }
 
         [Fact]

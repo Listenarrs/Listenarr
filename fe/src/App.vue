@@ -135,73 +135,31 @@
             </div>
           </div>
         </div>
-        <div class="notification-wrapper" ref="notificationRef">
-          <button
-            class="nav-btn"
-            @click="toggleNotifications"
-            aria-haspopup="true"
-            :aria-expanded="notificationsOpen"
-          >
-            <PhBell class="notification-inline-icon" />
-            <span class="notification-badge" v-if="notificationCount > 0">{{
-              notificationCount
-            }}</span>
-          </button>
-          <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
-            <div class="dropdown-header">
-              <strong>Notifications</strong>
-              <button class="clear-btn" @click.stop="clearNotifications" title="Clear">
-                Clear
-              </button>
-            </div>
-            <ul class="notification-list">
-              <li v-for="item in visibleNotifications" :key="item.id" class="notification-item">
-                <div class="notif-icon">
-                  <component
-                    v-if="notificationIconComponent(item.icon)"
-                    :is="notificationIconComponent(item.icon)"
-                  />
-                  <i v-else :class="item.icon"></i>
-                </div>
-                <div class="notif-content">
-                  <div class="notif-title">{{ item.title }}</div>
-                  <div class="notif-message">{{ item.message }}</div>
-                  <ProgressBar
-                    v-if="item.progress != null"
-                    :value="item.progress"
-                    variant="activity"
-                    height="small"
-                    :show-percentage="item.showProgressPercentage !== false"
-                    :show-size="false"
-                    :animating="item.active === true && item.indeterminate !== true"
-                    :indeterminate="item.indeterminate === true"
-                  />
-                  <div v-if="item.timestamp" class="notif-time">
-                    {{ formatTime(item.timestamp) }}
-                  </div>
-                </div>
-                <div class="notif-actions">
-                  <button
-                    v-if="!item.active"
-                    class="dismiss-btn"
-                    @click.stop="dismissNotification(item.id)"
-                    title="Dismiss"
-                  >
-                    <PhX />
-                  </button>
-                </div>
-              </li>
-              <li v-if="visibleNotifications.length === 0" class="notification-empty">
-                No recent activity
-              </li>
-            </ul>
-            <div class="dropdown-footer">
-              <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false"
-                >View activity</RouterLink
-              >
-            </div>
-          </div>
-        </div>
+        <!-- Background jobs (scans, moves, deletes): the cog spins while one runs -->
+        <HeaderMenu
+          label="Jobs"
+          :icon="PhGear"
+          :items="jobMenuItems"
+          read-storage-key="listenarr.jobs.read"
+          :footer="{ to: '/jobs', label: 'View jobs' }"
+          empty-text="No jobs"
+          :icon-spinning="jobsStore.hasActiveJobs"
+          test-id="jobs-menu"
+          @dismiss="jobsStore.dismissNotification"
+          @clear="jobsStore.clearNotifications()"
+        />
+        <!-- Downloads and messages from the server -->
+        <HeaderMenu
+          label="Notifications"
+          :icon="PhBell"
+          :items="visibleNotifications"
+          read-storage-key="listenarr.notifications.read"
+          :footer="{ to: '/activity', label: 'View activity' }"
+          empty-text="No recent activity"
+          test-id="notifications-menu"
+          @dismiss="dismissNotification"
+          @clear="clearNotifications"
+        />
         <template v-if="authEnabled">
           <template v-if="auth.user.authenticated">
             <div class="nav-user" ref="navUserRef">
@@ -463,15 +421,43 @@
               to="/system"
               class="nav-item"
               :class="{ 'router-link-active': pendingNavPath === '/system' }"
-              @mouseenter="preload('system')"
-              @focus="preload('system')"
+              @mouseenter="onPrimaryNavMouseEnter('system', 'system')"
+              @mouseleave="onNavMouseLeave('system')"
+              @focus="onPrimaryNavFocus('system', 'system')"
+              @blur="onNavBlur('system')"
               @touchstart.passive="preload('system')"
-              @click="closeMobileMenu"
+              @click="onPrimaryNavClick('system')"
             >
               <PhMonitor />
               <span>System</span>
               <Pill variant="error" v-if="systemIssues > 0">{{ systemIssues }}</Pill>
             </RouterLink>
+            <!-- Sub-navigation for System -->
+            <div
+              class="nav-sub"
+              @mouseenter="onNavMouseEnter('system')"
+              @mouseleave="onNavMouseLeave('system')"
+              @focusin="onNavFocus('system')"
+              @focusout="onNavBlur('system')"
+              :class="{
+                open:
+                  hoverNav === 'system' ||
+                  persistentNav === 'system' ||
+                  route.path === '/system' ||
+                  route.path === '/jobs',
+              }"
+            >
+              <RouterLink
+                to="/jobs"
+                class="nav-subitem"
+                :class="{ active: route.path === '/jobs' }"
+                @mouseenter="preload('jobs')"
+                @focus="preload('jobs')"
+                @click="closeMobileMenu"
+              >
+                <span>Jobs</span>
+              </RouterLink>
+            </div>
           </div>
         </nav>
         <div v-if="version && version.length > 0" class="sidebar-footer">
@@ -557,9 +543,6 @@ import {
   PhHeart,
   PhGear,
   PhMonitor,
-  PhFileMinus,
-  PhDownload,
-  PhCheckCircle,
   PhList,
   PhFolderOpen,
 } from '@phosphor-icons/vue'
@@ -575,22 +558,25 @@ import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useLibraryStore } from '@/stores/library'
 import { useMoveJobsStore } from '@/stores/moveJobs'
-import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useJobsStore } from '@/stores/jobs'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { handleImageError } from '@/utils/imageFallback'
-import { Pill, ProgressBar } from '@/components/base'
+import { Pill } from '@/components/base'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import { normalizeQueueSnapshot } from '@/utils/queueSnapshot'
 import type { QueueItem } from '@/types'
-import { ref as vueRef, ref as vueRef2, reactive } from 'vue'
+import { ref as vueRef, reactive } from 'vue'
 import GlobalToast from '@/components/ui/GlobalToast.vue'
+import HeaderMenu from '@/components/ui/HeaderMenu.vue'
+import type { HeaderMenuItem } from '@/components/ui/HeaderMenu.vue'
 import { useToast } from '@/services/toastService'
 import { logger } from '@/utils/logger'
 import BrandLogo from '@/components/base/BrandLogo.vue'
@@ -607,8 +593,9 @@ const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
 const moveJobsStore = useMoveJobsStore()
-const deleteOperationsStore = useLibraryDeleteOperationsStore()
 const scanNotificationsStore = useScanNotificationsStore()
+const libraryImportStore = useLibraryImportStore()
+const jobsStore = useJobsStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
@@ -878,152 +865,15 @@ const activityCount = computed(() => {
   return count
 })
 
-// Notification dropdown state
-const notificationsOpen = vueRef2(false)
-const notificationRef = vueRef<HTMLElement | null>(null)
-const handleNotificationDocumentClick = (e: MouseEvent) => {
-  const el = notificationRef.value
-  if (!el) return
-  const target = e.target as Node
-  if (!el.contains(target)) {
-    notificationsOpen.value = false
-  }
-}
-
-type HistoryNotification = {
-  id: string
-  title: string
-  message: string
-  icon?: string
-  timestamp?: string
-  dismissed?: boolean
-  progress?: number
-  phase?: string
-  active?: boolean
-  showProgressPercentage?: boolean
-  indeterminate?: boolean
-}
+// The bell: downloads and messages from the server (background jobs are under the cog)
+type HistoryNotification = HeaderMenuItem & { dismissed?: boolean }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
 const recentDownloadTitles = ref<Set<string>>(new Set()) // Track recent download titles to avoid spam
 
-const activeMoveNotifications = computed<HistoryNotification[]>(() =>
-  moveJobsStore.trackedJobs.map((job) => {
-    const audiobookTitle = job.audiobookId
-      ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
-      : undefined
-    const target = job.target ? ` to ${job.target}` : ''
-    return {
-      id: `move-${job.jobId}`,
-      title: audiobookTitle ? `Moving ${audiobookTitle}` : 'Moving audiobook',
-      message: `${job.phase || 'Preparing move'}${target}`,
-      icon: 'ph ph-folder-open',
-      progress: job.progress,
-      phase: job.phase,
-      active: true,
-    }
-  }),
+const visibleNotifications = computed(() =>
+  recentNotifications.filter((notification) => !notification.dismissed),
 )
-
-const scanNotifications = computed<HistoryNotification[]>(() =>
-  scanNotificationsStore.jobs
-    .filter((job) => job.visible && !job.dismissed)
-    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-    .map((job) => {
-      const normalizedStatus = job.status.toLowerCase()
-      const active = normalizedStatus === 'queued' || normalizedStatus === 'processing'
-      const audiobookTitle = job.audiobookId
-        ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
-        : undefined
-      const subject = audiobookTitle || 'audiobook folder'
-      const title =
-        normalizedStatus === 'queued'
-          ? `Scan queued: ${subject}`
-          : normalizedStatus === 'processing'
-            ? `Scanning ${subject}`
-            : normalizedStatus === 'completed'
-              ? `Scan complete: ${subject}`
-              : normalizedStatus === 'superseded'
-                ? `Scan stopped: ${subject}`
-                : `Scan failed: ${subject}`
-      const message =
-        normalizedStatus === 'queued'
-          ? 'Waiting to scan folder'
-          : normalizedStatus === 'processing'
-            ? 'Scanning folder'
-            : normalizedStatus === 'completed'
-              ? job.found != null
-                ? `${job.found} file${job.found === 1 ? '' : 's'} found${job.created != null ? ` · ${job.created} added` : ''}`
-                : 'Folder scan completed'
-              : job.error || 'The folder scan did not complete'
-
-      return {
-        id: `scan-${job.jobId}`,
-        title,
-        message,
-        icon: 'ph ph-folder-open',
-        timestamp: job.timestamp,
-        progress: active ? 0 : undefined,
-        active,
-        showProgressPercentage: false,
-        indeterminate: active,
-      }
-    }),
-)
-
-const deleteNotifications = computed<HistoryNotification[]>(() =>
-  deleteOperationsStore.operations
-    .filter((operation) => !operation.dismissed)
-    .map((operation) => {
-      const active = operation.status === 'deleting'
-      const isBulk = operation.kind === 'bulk'
-      const title = active
-        ? isBulk
-          ? operation.title
-          : `Deleting ${operation.title}`
-        : operation.status === 'completed'
-          ? isBulk
-            ? `Deleted ${operation.deleted} audiobook${operation.deleted === 1 ? '' : 's'}`
-            : `Deleted ${operation.title}`
-          : isBulk
-            ? `Delete incomplete: ${operation.deleted}/${operation.total} audiobooks`
-            : `Delete failed: ${operation.title}`
-      const message = isBulk
-        ? active
-          ? operation.currentTitle
-            ? `${operation.processed}/${operation.total} · ${operation.currentTitle}`
-            : `${operation.processed}/${operation.total}`
-          : operation.status === 'completed'
-            ? `${operation.deleted}/${operation.total} deleted`
-            : `${operation.deleted}/${operation.total} deleted · ${operation.failed} failed${operation.error ? ` · ${operation.error}` : ''}`
-        : active
-          ? 'Removing audiobook from library'
-          : operation.status === 'completed'
-            ? 'Removed from library'
-            : operation.error || 'Could not remove audiobook from library'
-
-      return {
-        id: operation.id,
-        title,
-        message,
-        icon: 'ph ph-file-remove',
-        timestamp: operation.startedAt,
-        progress: active ? operation.progress : undefined,
-        active,
-        showProgressPercentage: isBulk,
-        indeterminate: active && !isBulk,
-      }
-    }),
-)
-
-const visibleNotifications = computed(() => [
-  ...activeMoveNotifications.value,
-  ...scanNotifications.value,
-  ...deleteNotifications.value,
-  ...recentNotifications.filter((notification) => !notification.dismissed),
-])
-
-const notificationCount = computed(() => visibleNotifications.value.length)
 
 function pushNotification(n: HistoryNotification) {
   // Ensure new notifications are not dismissed
@@ -1036,49 +886,34 @@ function pushNotification(n: HistoryNotification) {
 function clearNotifications() {
   recentNotifications.length = 0
   recentDownloadTitles.value.clear()
-  deleteOperationsStore.clearFinished()
-  scanNotificationsStore.clearFinished()
 }
 
 function dismissNotification(id: string) {
-  deleteOperationsStore.dismiss(id)
-  if (id.startsWith('scan-')) {
-    scanNotificationsStore.dismiss(id.slice('scan-'.length))
-  }
   const notification = recentNotifications.find((n) => n.id === id)
   if (notification) {
     notification.dismissed = true
   }
 }
 
-function toggleNotifications() {
-  notificationsOpen.value = !notificationsOpen.value
-}
-
-// Format timestamp for display - reuse the same formatTime helper used elsewhere
-function formatTime(ts: string) {
-  try {
-    const d = new Date(ts)
-    return d.toLocaleString()
-  } catch {
-    return ts
-  }
-}
-
-// Map legacy notification icon class strings to Ph components when possible.
-function notificationIconComponent(icon?: string) {
-  if (!icon) return null
-  switch (icon) {
-    case 'ph ph-file-remove':
-      return PhFileMinus
-    case 'ph ph-download':
-      return PhDownload
-    case 'ph ph-check-circle':
-      return PhCheckCircle
-    default:
-      return null
-  }
-}
+// The cog: the job notifications, apart from the job log (the Jobs page). A running job shows a
+// spinner, or its progress bar when it knows a percentage, and can be dismissed: it goes on, and
+// is notified again when it ends.
+const jobMenuItems = computed<HeaderMenuItem[]>(() =>
+  jobsStore.notificationJobs.map((job) => ({
+    id: job.id,
+    title: job.title,
+    message: job.message,
+    icon: job.icon,
+    timestamp: job.startedAt,
+    active: job.active,
+    dismissible: true,
+    spinner: job.active && job.progress == null,
+    progress: job.progress,
+    showProgressPercentage: job.progress != null,
+    to: job.to,
+    testId: job.kind === 'library-import-scan' ? 'notification-library-import-scan' : undefined,
+  })),
+)
 
 let unsubscribeQueue: (() => void) | null = null
 let unsubscribeFilesRemoved: (() => void) | null = null
@@ -1354,8 +1189,6 @@ watch(
   },
 )
 
-// (notificationRef and click-outside handler are declared earlier)
-
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
   filesystemReadinessStore.start()
@@ -1405,6 +1238,8 @@ onMounted(async () => {
     // Keep durable move jobs globally visible so the notification dropdown can
     // show progress even when the Activity page is not mounted.
     moveJobsStore.start()
+    // The session's Library Import scan, followed again from any page for the notification list
+    libraryImportStore.restoreScanTask()
 
     // Hydrate the app once, then keep it current from SignalR updates.
     await Promise.all([downloadsStore.loadDownloads(), syncLibrarySnapshot()])
@@ -1573,7 +1408,6 @@ onMounted(async () => {
   // Use VueUse for automatic event listener cleanup
   useEventListener(document, 'click', handleDocumentClick)
   useEventListener(document, 'click', handleSearchDocumentClick)
-  useEventListener(document, 'click', handleNotificationDocumentClick)
   useEventListener(window, 'storage', (event: StorageEvent) => {
     if (event.key === SECURITY_WARNING_BANNER_PREF_KEY) {
       refreshSecurityWarningBannerPreference()
@@ -2872,6 +2706,16 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.notif-title-link {
+  display: block;
+  text-decoration: none;
+}
+
+.notif-title-link:hover {
+  color: #2196f3;
+  text-decoration: underline;
 }
 
 .notif-message {
