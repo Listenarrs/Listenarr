@@ -43,7 +43,13 @@ namespace Listenarr.Api.Features.Images
             };
 
             _logger.LogInformation("Serving cached image for identifier: {Identifier}, path: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
-            headers["Cache-Control"] = "private, max-age=3600";
+            // Covers are effectively immutable per identifier (a replaced cover
+            // rewrites the same file, which updates Last-Modified). A 7-day
+            // max-age keeps a ~3k-cover grid from refetching every browse;
+            // PhysicalFileResult answers If-Modified-Since with 304 after
+            // expiry, so revalidation costs zero bytes. Was 1h, which meant a
+            // full ~100MB refetch of the grid on any visit an hour apart.
+            headers["Cache-Control"] = "private, max-age=604800";
             return new PhysicalFileResult(fullPath, contentType)
             {
                 EnableRangeProcessing = true
