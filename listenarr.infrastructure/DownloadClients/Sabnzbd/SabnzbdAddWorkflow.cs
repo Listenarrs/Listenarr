@@ -45,7 +45,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 using var multipart = new MultipartFormDataContent();
                 var fileContent = new ByteArrayContent(usenet.NzbBytes);
                 fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-nzb");
-                multipart.Add(fileContent, "name", usenet.FileName);
+                // Quotes and control characters are invalid in the multipart filename header.
+                // SABnzbd names the job from the nzbname query parameter, so this only affects the upload.
+                multipart.Add(fileContent, "name", SanitizeMultipartFileName(usenet.FileName));
                 var response = await http.PostAsync(requestUrl, multipart, ct);
                 var responseContent = await response.Content.ReadAsStringAsync(ct);
 
@@ -87,6 +89,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 logger.LogError(ex, "Failed to send NZB to SABnzbd");
                 throw;
             }
+        }
+
+        private static string SanitizeMultipartFileName(string fileName)
+        {
+            var sanitized = string.Concat(fileName.Select(character =>
+                character is '"' or '\\' || char.IsControl(character) ? '_' : character));
+            return string.IsNullOrWhiteSpace(sanitized) ? "download.nzb" : sanitized;
         }
     }
 }
