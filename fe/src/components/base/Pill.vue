@@ -59,17 +59,39 @@ interface Props {
   variant?: VariantType
   size?: 'small' | 'medium' | 'large'
   outlined?: boolean
+  /**
+   * Render as a button so the pill can toggle the state it displays.
+   * Defaults to false, keeping the plain span for read-only pills.
+   */
+  interactive?: boolean
+  disabled?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   variant: 'default',
   size: 'medium',
   outlined: false,
+  interactive: false,
+  disabled: false,
 })
+
+// Declared explicitly rather than relying on attribute fallthrough: the template
+// has v-if/v-else roots, so binding the listener here keeps the behaviour obvious
+// and stops the same handler also arriving as a fallthrough attribute.
+const emit = defineEmits<{ click: [MouseEvent] }>()
 </script>
 
 <template>
-  <span :class="['pill', `pill-${variant}`, `pill-${size}`, { outlined }]">
+  <button
+    v-if="interactive"
+    type="button"
+    :disabled="disabled"
+    :class="['pill', `pill-${variant}`, `pill-${size}`, { outlined, interactive }]"
+    @click="emit('click', $event)"
+  >
+    <slot />
+  </button>
+  <span v-else :class="['pill', `pill-${variant}`, `pill-${size}`, { outlined }]">
     <slot />
   </span>
 </template>
@@ -84,6 +106,30 @@ withDefaults(defineProps<Props>(), {
   white-space: nowrap;
   transition: all 0.2s;
   border: 1px solid transparent;
+}
+
+/* Interactive pills render as a button; reset the UA styles the span never had. */
+button.pill {
+  font: inherit;
+  color: inherit;
+}
+
+.pill.interactive {
+  cursor: pointer;
+}
+
+.pill.interactive:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.pill.interactive:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.pill.interactive:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 /* Size variants */
