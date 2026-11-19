@@ -69,6 +69,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             // was started on this context instance" under real database latency.
             var fileSummaryRows = await _audiobookFileRepository.GetFormatSummariesAsync();
             var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
+            var earliestFileDateById = await _audiobookFileRepository.GetEarliestCreatedAtByAudiobookIdAsync();
             var membershipsByAudiobookId = await _audiobookRepository.GetAllSeriesMembershipsGroupedByAudiobookIdAsync();
             var asinRegions = await _audiobookRepository.GetAsinRegionsAsync();
             var asinsByAudiobookId = await _audiobookRepository.GetAsinIdentifiersGroupedByAudiobookIdAsync();
@@ -152,7 +153,10 @@ namespace Listenarr.Application.Audiobooks.Catalog
                          hasAnyFile,
                          a.Quality,
                          qualityProfile,
-                         files)
+                         files),
+                    DateDownloaded = earliestFileDateById.TryGetValue(a.Id, out var earliestFileDate)
+                        ? earliestFileDate
+                        : (DateTime?)null
                 };
             }).ToList();
         }
