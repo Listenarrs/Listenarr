@@ -214,6 +214,7 @@
           "Microsoft.EntityFrameworkCore": "[10.0.8, )",
           "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.8, )",
           "Microsoft.Extensions.Http.Polly": "[10.0.8, )",
+          "Openur.FFprobeStatic": "[9.0.2.508, )",
           "Polly": "[8.6.6, )",
           "Serilog.Sinks.File": "[7.0.0, )",
           "SharpCompress": "[0.49.1, )",
@@ -306,6 +307,12 @@
           "Polly": "7.2.4",
           "Polly.Extensions.Http": "3.0.0"
         }
+      },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
       },
       "Polly": {
         "type": "CentralTransitive",

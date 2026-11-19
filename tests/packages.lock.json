@@ -733,6 +733,12 @@
       "listenarr.domain": {
         "type": "Project"
       },
+      "listenarr.fakeproviders": {
+        "type": "Project",
+        "dependencies": {
+          "Listenarr.Api": "[1.9.1, )"
+        }
+      },
       "listenarr.infrastructure": {
         "type": "Project",
         "dependencies": {
@@ -750,12 +756,6 @@
           "SharpCompress": "[0.49.1, )",
           "SixLabors.ImageSharp": "[4.1.3, )",
           "TagLibSharp": "[2.3.0, )"
-        }
-      },
-      "listenarr.fakeproviders": {
-        "type": "Project",
-        "dependencies": {
-          "Listenarr.Api": "[1.7.2, )"
         }
       },
       "Asp.Versioning.Mvc": {
