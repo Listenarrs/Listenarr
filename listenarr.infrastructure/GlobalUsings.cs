@@ -69,6 +69,7 @@ global using Listenarr.Domain.Identity;
 global using Listenarr.Domain.Search;
 global using Listenarr.Domain.SystemDiagnostics;
 global using Listenarr.Domain.SystemDiagnostics.Exceptions;
+global using Listenarr.Infrastructure.Search.Providers.AudioBookBay;
 global using Listenarr.Infrastructure.Search.Providers.InternetArchive;
 global using Listenarr.Infrastructure.Search.Providers.MyAnonamouse;
 global using Listenarr.Infrastructure.Search.Providers.Torznab;
