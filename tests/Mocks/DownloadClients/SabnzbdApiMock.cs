@@ -15,6 +15,7 @@ namespace Listenarr.Tests.Mocks.DownloadClients
         public bool GetCatsTimesOut { get; set; }
         public System.Net.HttpStatusCode HistoryStatusCode { get; set; } = System.Net.HttpStatusCode.OK;
         public string? HistoryResponseOverride { get; set; }
+        public Func<System.Collections.Specialized.NameValueCollection, string?>? HistoryQueryResponder { get; set; }
         public List<Uri> RemovalRequests { get; } = [];
 
         public SabnzbdApiMock()
@@ -27,6 +28,12 @@ namespace Listenarr.Tests.Mocks.DownloadClients
             if (HistoryStatusCode != System.Net.HttpStatusCode.OK)
             {
                 return new HttpResponseMessage(HistoryStatusCode);
+            }
+
+            var queryResponse = HistoryQueryResponder?.Invoke(HttpUtility.ParseQueryString(request.RequestUri!.Query));
+            if (queryResponse != null)
+            {
+                return MockUtils.GetCannedResponse(queryResponse);
             }
 
             if (HistoryResponseOverride != null)
