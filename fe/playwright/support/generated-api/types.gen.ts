@@ -35,6 +35,7 @@ export type ListenarrApplicationAudiobooksCatalogLibraryAudiobookListItem = {
     narrators?: Array<string> | null;
     publishYear?: string | null;
     publishedDate?: string | null;
+    added?: string | null;
     series?: string | null;
     seriesNumber?: string | null;
     seriesMemberships?: Array<ListenarrApplicationAudiobooksCommonAudiobookSeriesMembershipDto> | null;
@@ -82,6 +83,7 @@ export type ListenarrDomainAudiobooksAudiobook = {
     seriesNumber?: string | null;
     seriesMemberships?: Array<ListenarrDomainAudiobooksAudiobookSeriesMembership> | null;
     description?: string | null;
+    added?: string | null;
     genres?: Array<string> | null;
     tags?: Array<string> | null;
     narrators?: Array<string> | null;
@@ -428,6 +430,7 @@ export type ListenarrDomainAudiobooksAudiobookWritable = {
     seriesNumber?: string | null;
     seriesMemberships?: Array<ListenarrDomainAudiobooksAudiobookSeriesMembership> | null;
     description?: string | null;
+    added?: string | null;
     genres?: Array<string> | null;
     tags?: Array<string> | null;
     narrators?: Array<string> | null;

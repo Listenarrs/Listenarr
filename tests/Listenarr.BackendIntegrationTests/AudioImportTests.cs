@@ -76,6 +76,7 @@ public sealed class AudioImportTests : BackendIntegrationTests
         Assert.Equal(Author, (string?)metadata["authors"]![0]!["name"]);
 
         // Add the matched book to the library, then move its file there.
+        var beforeAdd = DateTime.UtcNow;
         var added = await Host.SendJsonAsync(HttpMethod.Post, "/api/v1/library/add", new
         {
             metadata = new { asin = Asin, title = Title, authors = new[] { Author }, region = "us", source = "Audible" },
@@ -84,6 +85,9 @@ public sealed class AudioImportTests : BackendIntegrationTests
             destinationPath = libraryRootPath,
         });
         var audiobookId = (int)added["audiobook"]!["id"]!;
+        var addedAt = added["audiobook"]!["added"]!.GetValue<DateTime>();
+        Assert.Equal(DateTimeKind.Utc, addedAt.Kind);
+        Assert.InRange(addedAt, beforeAdd, DateTime.UtcNow);
 
         var sourceFiles = item["sourceFiles"]?.AsArray().Select(path => (string)path!).ToArray() ?? [(string)item["fullPath"]!];
         var import = await Host.SendJsonAsync(HttpMethod.Post, "/api/v1/library/manual-import", new
@@ -101,8 +105,11 @@ public sealed class AudioImportTests : BackendIntegrationTests
         // The library record points at the moved file, and the source is gone.
         var books = await Host.GetLibraryAsync();
         Assert.Equal(5, books.Count);
-        Assert.Equal(audiobookId, (int)books.Single(book => (string?)book!["asin"] == Asin)!["id"]!);
+        var listItem = books.Single(book => (string?)book!["asin"] == Asin)!;
+        Assert.Equal(audiobookId, (int)listItem["id"]!);
+        Assert.Equal(addedAt, listItem["added"]!.GetValue<DateTime>());
         var saved = await Host.GetJsonAsync($"/api/v1/library/{audiobookId}");
+        Assert.Equal(addedAt, saved["added"]!.GetValue<DateTime>());
         var storedPath = (string?)saved["files"]?.AsArray().FirstOrDefault()?["path"] ?? (string?)saved["filePath"] ?? string.Empty;
         var destinationPath = Path.IsPathRooted(storedPath) ? storedPath : Path.Join((string?)saved["basePath"], storedPath);
         Assert.StartsWith(Host.LibraryPath + Path.DirectorySeparatorChar, destinationPath, StringComparison.Ordinal);
