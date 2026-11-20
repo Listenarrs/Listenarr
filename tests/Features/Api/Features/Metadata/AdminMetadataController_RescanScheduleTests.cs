@@ -11,9 +11,12 @@ namespace Listenarr.Tests.Features.Api.Features.Metadata;
 [Trait("Category", "AdminMetadataController")]
 public sealed class AdminMetadataController_RescanScheduleTests : BaseTests
 {
-    private const string FilePath = "/library/source/book.m4b";
     private const string ReextractEndpoint = "reextract-file";
     private const string TriggerEndpoint = "trigger-rescan";
+
+    // Host-native: the repository skips rows whose stored path syntax differs from the host's.
+    private static readonly string BaseDirectory = Path.Combine(Path.GetTempPath(), "library", "source");
+    private static readonly string FilePath = Path.Combine(BaseDirectory, "book.m4b");
 
     private static readonly DateTime NowUtc = new(2026, 12, 1, 10, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime DueInAWeekUtc = NowUtc.AddDays(7);
@@ -90,8 +93,20 @@ public sealed class AdminMetadataController_RescanScheduleTests : BaseTests
 
         var extractions = await store.RunAsync(TriggerEndpoint, fileId, CompleteMetadata(), fileExists: false);
 
+        Assert.Equal(1, store.FileExistsQueries);
         Assert.Equal(0, extractions);
         Assert.Equal(seeded, StoredSchedule.Of(await store.ReadFileAsync(fileId)));
+    }
+
+    [Fact]
+    public void SeededFile_IsRescanCandidateOnCurrentHost()
+    {
+        var hostSyntax = OperatingSystem.IsWindows() ? FileSystemPathSyntax.Windows : FileSystemPathSyntax.Unix;
+
+        Assert.True(EfAudiobookFileRepository.CanRescanOnCurrentHost(
+            new AudiobookFile { Path = FilePath },
+            BaseDirectory,
+            hostSyntax));
     }
 
     private static AudioMetadata CompleteMetadata() => new()
@@ -144,7 +159,7 @@ public sealed class AdminMetadataController_RescanScheduleTests : BaseTests
             await using var context = CreateContext();
             var file = new AudiobookFile
             {
-                Audiobook = new Audiobook { Title = "A Princess of Mars", BasePath = "/library/source" },
+                Audiobook = new Audiobook { Title = "A Princess of Mars", BasePath = BaseDirectory },
                 Path = FilePath,
                 MetadataRescanDueUtc = schedule.DueUtc,
                 MetadataRescanFailureCount = schedule.Failure,
@@ -156,6 +171,9 @@ public sealed class AdminMetadataController_RescanScheduleTests : BaseTests
             await context.SaveChangesAsync();
             return file.Id;
         }
+
+        // How many times the controller asked whether the file exists; zero means the row was never a candidate.
+        public int FileExistsQueries { get; private set; }
 
         // Returns how many times the extraction ran.
         public async Task<int> RunAsync(
@@ -199,6 +217,7 @@ public sealed class AdminMetadataController_RescanScheduleTests : BaseTests
                 await controller.TriggerRescan();
             }
 
+            FileExistsQueries = fileSystem.Invocations.Count(call => call.Method.Name == nameof(IFileSystem.FileExists));
             return metadataService.Invocations.Count(call => call.Method.Name == nameof(IMetadataService.ExtractFileMetadataAsync));
         }
 

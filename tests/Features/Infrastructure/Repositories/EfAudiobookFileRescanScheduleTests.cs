@@ -12,6 +12,9 @@ public sealed class EfAudiobookFileRescanScheduleTests : BaseTests
     private const string SqliteProvider = "Sqlite";
     private const string InMemoryProvider = "InMemory";
 
+    // Host-native: the repository skips rows whose stored path syntax differs from the host's.
+    private static readonly string BaseDirectory = Path.Combine(Path.GetTempPath(), "library", "source");
+
     private static readonly RescanSchedule WrittenSchedule = new(
         new DateTime(2026, 12, 1, 10, 15, 30, DateTimeKind.Utc),
         FailureCount: 3,
@@ -164,8 +167,8 @@ public sealed class EfAudiobookFileRescanScheduleTests : BaseTests
             await using var context = CreateContext();
             var file = new AudiobookFile
             {
-                Audiobook = new Audiobook { Title = "A Princess of Mars", BasePath = "/library/source" },
-                Path = "/library/source/book.m4b"
+                Audiobook = new Audiobook { Title = "A Princess of Mars", BasePath = BaseDirectory },
+                Path = Path.Combine(BaseDirectory, "book.m4b")
             };
             context.AudiobookFiles.Add(file);
             await context.SaveChangesAsync();
