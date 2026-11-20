@@ -35,16 +35,14 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             DownloadClientConfiguration client,
             IReadOnlyCollection<string>? monitoredIds = null,
             CancellationToken ct = default,
-            bool ignoreCategory = false)
+            bool trackedPresence = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
             var monitoredIdSet = BuildMonitoredIdSet(monitoredIds);
             var isMonitorPoll = monitoredIdSet.Count > 0;
-            // Tracked lookups for orphan cleanup ignore the category. Monitor polls
-            // already keep tracked nzo_ids across a category change (#759).
-            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             try
             {
@@ -63,8 +61,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 });
                 logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, requestBuilder.BuildSensitiveValues(requestContext)));
 
-                var http = httpFactory.CreateClient(clientType);
-                var response = await http.GetAsync(requestUrl, ct);
+                using var http = httpFactory.CreateClient(clientType);
+                using var response = await http.GetAsync(requestUrl, ct);
                 if (!response.IsSuccessStatusCode)
                 {
                     var message = $"SABnzbd queue request failed with status {response.StatusCode} for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
@@ -80,7 +78,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     throw new DownloadClientAdapterPollingException(message);
                 }
 
-                var doc = JsonDocument.Parse(jsonContent);
+                using var doc = JsonDocument.Parse(jsonContent);
                 if (!doc.RootElement.TryGetProperty("queue", out var queue) ||
                     !queue.TryGetProperty("slots", out var slots) ||
                     slots.ValueKind != JsonValueKind.Array)
@@ -88,6 +86,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     var message = $"SABnzbd returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
                     throw new DownloadClientAdapterPollingException(message);
+                }
+
+                if (trackedPresence)
+                {
+                    return await ReadTrackedPresenceAsync(requestContext, http, queue, slots, monitoredIdSet, ct);
                 }
 
                 var speed = 0.0;
@@ -156,6 +159,84 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             return items;
         }
 
+        private async Task<List<QueueItem>> ReadTrackedPresenceAsync(
+            SabnzbdRequestContext requestContext,
+            HttpClient http,
+            JsonElement queue,
+            JsonElement slots,
+            HashSet<string> missingIds,
+            CancellationToken ct)
+        {
+            var found = new List<QueueItem>();
+            ReadPresenceIds(slots, missingIds, found);
+            if (missingIds.Count == 0)
+            {
+                return found;
+            }
+
+            if (queue.TryGetProperty("noofslots", out var queueCount) && !MatchesSlotCount(queueCount, slots))
+            {
+                throw new DownloadClientAdapterPollingException("Incomplete SABnzbd active queue during tracked lookup.");
+            }
+
+            var parameters = new Dictionary<string, string>
+            {
+                ["mode"] = "history",
+                ["output"] = "json",
+                ["limit"] = MonitorHistoryLimit.ToString(CultureInfo.InvariantCulture)
+            };
+            var ids = string.Join(',', missingIds);
+            if (Uri.EscapeDataString(ids).Length <= 2048)
+            {
+                parameters["nzo_ids"] = ids;
+            }
+
+            using var response = await http.GetAsync(requestBuilder.BuildUrl(requestContext, parameters), ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new DownloadClientAdapterPollingException($"SABnzbd tracked history request failed with status {response.StatusCode}.");
+            }
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            if (!document.RootElement.TryGetProperty("history", out var history) ||
+                !history.TryGetProperty("slots", out var historySlots) || historySlots.ValueKind != JsonValueKind.Array)
+            {
+                throw new DownloadClientAdapterPollingException("Invalid SABnzbd tracked history response.");
+            }
+
+            ReadPresenceIds(historySlots, missingIds, found);
+            // Older servers can ignore nzo_ids. A short result alone does not
+            // prove absence. Require the returned slots to cover the reported total.
+            if (missingIds.Count > 0 &&
+                (!history.TryGetProperty("noofslots", out var historyCount) || !MatchesSlotCount(historyCount, historySlots)))
+            {
+                throw new DownloadClientAdapterPollingException("Incomplete SABnzbd tracked history response.");
+            }
+
+            return found;
+        }
+
+        private static bool MatchesSlotCount(JsonElement count, JsonElement slots) =>
+            count.ValueKind == JsonValueKind.Number && count.TryGetInt32(out var total) && total == slots.GetArrayLength();
+
+        private static void ReadPresenceIds(JsonElement slots, HashSet<string> missingIds, List<QueueItem> found)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var slot in slots.EnumerateArray())
+            {
+                if (!HasUsableNzoId(slot) || !seen.Add(slot.GetProperty("nzo_id").GetString()!))
+                {
+                    throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                }
+
+                var id = slot.GetProperty("nzo_id").GetString()!;
+                if (missingIds.Remove(id))
+                {
+                    found.Add(new QueueItem { Id = id });
+                }
+            }
+        }
+
         private async Task AddHistoryItemsAsync(
             DownloadClientConfiguration client,
             SabnzbdRequestContext requestContext,
@@ -176,7 +257,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     ["output"] = "json",
                     ["limit"] = historyLimit.ToString(CultureInfo.InvariantCulture)
                 });
-                var historyResp = await http.GetAsync(historyUrl, ct);
+                using var historyResp = await http.GetAsync(historyUrl, ct);
                 if (!historyResp.IsSuccessStatusCode)
                 {
                     var message = $"SABnzbd history request failed with status {historyResp.StatusCode} for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
@@ -200,7 +281,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return;
                 }
 
-                var histDoc = JsonDocument.Parse(historyText);
+                using var histDoc = JsonDocument.Parse(historyText);
                 if (!histDoc.RootElement.TryGetProperty("history", out var history) ||
                     !history.TryGetProperty("slots", out var histSlots) ||
                     histSlots.ValueKind != JsonValueKind.Array)
@@ -258,7 +339,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
 
         private static bool HasUsableNzoId(JsonElement slot)
         {
-            return slot.TryGetProperty("nzo_id", out var nzoId) &&
+            return slot.ValueKind == JsonValueKind.Object && slot.TryGetProperty("nzo_id", out var nzoId) &&
                 nzoId.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(nzoId.GetString());
         }

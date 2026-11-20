@@ -47,7 +47,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 }
 
                 // Limit fields returned to reduce memory usage.
-                var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
+                var fields = ignoreCategory
+                    ? "hash"
+                    : "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
                 // Tracked lookups for orphan cleanup ignore the category, so a tracked
                 // torrent stays visible after its category changes. Display and
                 // discovery keep the category filter.
@@ -93,9 +95,26 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
+                    var hash = torrent != null && torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
                         ? hashEl.GetString() ?? string.Empty
                         : string.Empty;
+
+                    if (string.IsNullOrWhiteSpace(hash))
+                    {
+                        if (ignoreCategory)
+                        {
+                            throw new DownloadClientAdapterPollingException("qBittorrent returned a tracked lookup entry with no readable hash.");
+                        }
+
+                        isComplete = false;
+                        continue;
+                    }
+
+                    if (ignoreCategory)
+                    {
+                        items.Add(new QueueItem { Id = hash });
+                        continue;
+                    }
 
                     // One torrent that cannot be read must not take the rest of the response with
                     // it. Without this, an exception raised while mapping torrent N escapes the

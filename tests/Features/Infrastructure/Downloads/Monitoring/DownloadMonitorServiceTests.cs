@@ -192,8 +192,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
                     "progress": 0.5,
                     "size": 1000,
                     "downloaded": 500,
-                    "state": "downloading",
-                    "save_path": "/downloads/book"
+                    "state": "downloading"
                 }
             ]
             """;
@@ -263,8 +262,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
                     "size": 1000,
                     "downloaded": 500,
                     "state": "downloading",
-                    "category": "movies",
-                    "save_path": "/downloads/book"
+                    "category": "movies"
                 }
             ]
             """;

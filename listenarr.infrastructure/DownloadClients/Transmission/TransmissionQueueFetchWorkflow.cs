@@ -34,7 +34,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                 method = "torrent-get",
                 arguments = new
                 {
-                    fields = new[]
+                    fields = ignoreCategory ? ["id", "hashString"] : new[]
                     {
                         "id", "hashString", "name", "percentDone", "status", "totalSize", "rateDownload", "rateUpload",
                         "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels"
@@ -65,8 +65,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                     throw new DownloadClientAdapterPollingException(message);
                 }
 
+                var needsNumericId = ignoreCategory && ids.Any(id => int.TryParse(id, out _));
+                var needsHash = ignoreCategory && ids.Any(id => !int.TryParse(id, out _));
                 foreach (var torrent in torrents.EnumerateArray())
                 {
+                    if (ignoreCategory)
+                    {
+                        AddTrackedIdentities(torrent, needsHash, needsNumericId, items);
+                        continue;
+                    }
+
                     try
                     {
                         var labels = TransmissionResponseMapper.ExtractLabels(torrent);
@@ -107,6 +115,25 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             }
 
             return FilterByIds(items, ids);
+        }
+
+        private static void AddTrackedIdentities(JsonElement torrent, bool needsHash, bool needsNumericId, List<QueueItem> items)
+        {
+            var hash = needsHash ? TransmissionResponseMapper.GetTorrentHash(torrent) : string.Empty;
+            var numericId = torrent.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) && value > 0
+                ? value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : null;
+
+            // Both ID formats have been used by the adapter. If a stored format
+            // cannot be checked against this entry, absence is ambiguous.
+            if ((needsHash && string.IsNullOrWhiteSpace(hash)) || (needsNumericId && numericId == null))
+            {
+                throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+            }
+
+            if (needsHash) items.Add(new QueueItem { Id = hash });
+            if (needsNumericId) items.Add(new QueueItem { Id = numericId! });
         }
 
         private static List<QueueItem> FilterByIds(List<QueueItem> items, List<string> ids)
