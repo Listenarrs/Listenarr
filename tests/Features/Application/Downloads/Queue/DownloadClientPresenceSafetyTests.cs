@@ -38,7 +38,10 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         foreach (var client in new[] { "qbittorrent", "transmission", "sabnzbd", "nzbget" })
             foreach (var scenario in new[] { "present", "bad-telemetry", "absent", "unrelated-bad-present", "unrelated-bad-absent" })
                 yield return [client, scenario];
-        foreach (var scenario in new[] { "older-history", "truncated-history", "history-without-total", "unreadable-history-id" })
+        yield return ["qbittorrent", "ambiguous-id"];
+        yield return ["transmission", "ambiguous-id"];
+        yield return ["transmission", "conflicting-id-aliases"];
+        foreach (var scenario in new[] { "older-history", "truncated-history", "history-without-total", "unreadable-history-id", "ambiguous-history-id" })
             yield return ["sabnzbd", scenario];
         foreach (var status in new[] { "WARNING/SPACE", "WARNING/REPAIRABLE", "WARNING/SCRIPT", "WARNING/HEALTH", "SUCCESS/ALL", "FAILURE/HEALTH", "DELETED/MANUAL" })
             yield return ["nzbget", status];
@@ -69,7 +72,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
                     var request = await reader.ReadToEndAsync();
                     requests.Enqueue(context.Request.RawUrl + " " + request);
                     var method = type == "nzbget" ? XDocument.Parse(request).Root!.Element("methodName")!.Value : string.Empty;
-                    var body = Response(type, scenario, context.Request, method);
+                    var body = Response(type, scenario, context.Request, request, method);
                     var bytes = Encoding.UTF8.GetBytes(body);
                     context.Response.ContentLength64 = bytes.Length;
                     await context.Response.OutputStream.WriteAsync(bytes);
@@ -121,7 +124,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         }
     }
 
-    private static string Response(string type, string scenario, HttpListenerRequest request, string method)
+    private static string Response(string type, string scenario, HttpListenerRequest request, string requestBody, string method)
     {
         if (type == "qbittorrent" && request.RawUrl!.Contains("auth/login")) return "Ok.";
         if (type == "qbittorrent" && request.RawUrl!.Contains("torrents/files")) return "[]";
@@ -147,6 +150,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
                     "truncated-history" => """{"history":{"slots":[{"nzo_id":"other-job"}],"noofslots":101}}""",
                     "history-without-total" => """{"history":{"slots":[]}}""",
                     "unreadable-history-id" => """{"history":{"slots":[{"nzo_id":42}],"noofslots":1}}""",
+                    "ambiguous-history-id" => $$$"""{"history":{"slots":[{"nzo_id":"{{{Target}}}","nzo_id":"other-job"}],"noofslots":1}}""",
                     _ => """{"history":{"slots":[],"noofslots":0}}"""
                 };
             }
@@ -154,8 +158,26 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
             return """{"history":{"slots":[],"noofslots":0}}""";
         }
         if (type == "nzbget" && method != "listgroups") return Xml("<struct/>");
+        if (type == "qbittorrent" && scenario == "ambiguous-id" &&
+            request.QueryString["category"] == null && request.QueryString["hashes"] == Target)
+        {
+            return $$"""[{"hash":"{{Target}}","hash":"{{Other}}"}]""";
+        }
+        if (type == "transmission" && !requestBody.Contains("percentDone", StringComparison.Ordinal))
+        {
+            if (scenario == "ambiguous-id")
+            {
+                return $$$"""{"result":"success","arguments":{"torrents":[{"id":7,"hashString":"{{{Target}}}","hashString":"{{{Other}}}"}]}}""";
+            }
+            if (scenario == "conflicting-id-aliases")
+            {
+                return $$$"""{"result":"success","arguments":{"torrents":[{"id":7,"hashString":"{{{Target}}}","hash_string":"{{{Other}}}"}]}}""";
+            }
+        }
+
         var entries = new List<string>();
         if (scenario != "absent" && scenario != "unrelated-bad-absent" && !historyCase &&
+            scenario is not ("ambiguous-id" or "conflicting-id-aliases") &&
             !(type == "sabnzbd" && scenario.Contains("history", StringComparison.Ordinal)))
             entries.Add(ActiveEntry(type, type == "nzbget" ? "101" : Target, scenario == "bad-telemetry"));
         if (scenario.StartsWith("unrelated-bad-", StringComparison.Ordinal))

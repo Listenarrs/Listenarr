@@ -45,7 +45,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
 
             try
             {
-                var response = await rpcClient.InvokeAsync(client, payload, ct);
+                var response = await rpcClient.InvokeAsync(client, payload, ct, allowDuplicateProperties: ids.Count > 0 && !ignoreCategory);
 
                 // HTTP 200 only means the RPC call was answered. An RPC error can still
                 // carry an empty torrents array, which must not read as an empty queue.
@@ -120,6 +120,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
         private static void AddTrackedIdentities(JsonElement torrent, bool needsHash, bool needsNumericId, List<QueueItem> items)
         {
             var hash = needsHash ? TransmissionResponseMapper.GetTorrentHash(torrent) : string.Empty;
+            if (needsHash && torrent.TryGetProperty("hash_string", out _) && torrent.TryGetProperty("hashString", out var alternateHash) &&
+                (alternateHash.ValueKind != JsonValueKind.String || !string.Equals(hash, alternateHash.GetString(), StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new DownloadClientAdapterPollingException("Transmission returned conflicting hashes for a torrent.");
+            }
+
             var numericId = torrent.TryGetProperty("id", out var id) &&
                 id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) && value > 0
                 ? value.ToString(System.Globalization.CultureInfo.InvariantCulture)
