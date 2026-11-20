@@ -107,9 +107,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
         public async Task CompletionProceeds_WhenAHeldDownloadDisappearsFromTheClient()
         {
             // The hold writes the row back with its pre-completion status, so the completion edge
-            // lives only in memory. If the client drops the item before the window passes, a later
-            // poll never sees it complete again, and orphan cleanup would delete the row. Without
-            // the window the import was enqueued on the first pass; the hold must not do worse.
+            // lives only in the row's observation. If the client drops the item before the window
+            // passes, a later poll never sees it complete again, and orphan cleanup would delete
+            // the row. Without the window the import was enqueued on the first pass; the hold must
+            // not do worse.
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithCompletionStabilitySeconds(60)
                 .Build());
@@ -190,8 +191,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
         [Trait("Scenario", "The release only applies to a row still waiting for its first completion")]
         public async Task GoneFromClient_DoesNotRestartAnImportThatHasMovedOn()
         {
-            // A hold entry can outlive the hold, for example when the window is set to zero while
-            // a download is held. If the row has meanwhile moved into import and the client then
+            // An observation can outlive the hold, for example when the window is set to zero
+            // while a download is held. If the row has meanwhile moved into import and the client then
             // drops the item, releasing it would write Completed over ImportPending, and the
             // Completed edge would enqueue the import a second time.
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -199,11 +200,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
                 .Build());
 
             var download = await DriveToCompletionAsync();
-            var processor = (DownloadMonitorProcessor)_provider.GetRequiredService<IDownloadMonitorProcessor>();
-            Assert.True(processor._completionFirstSeen.ContainsKey(download.Id));
 
             var importing = await _downloadRepository.GetByIdAsync(download.Id);
-            await _downloadRepository.UpdateAsync(importing!.Importing());
+            Assert.NotNull(importing!.GetCompletionObservedAt());
+            await _downloadRepository.UpdateAsync(importing.Importing());
 
             ClientAdapter().QueueItemsMock = [];
 

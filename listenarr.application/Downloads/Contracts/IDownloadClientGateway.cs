@@ -70,12 +70,11 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <param name="client"></param>
         /// <param name="downloads">List of downloads to update</param>
         /// <param name="cancellationToken"></param>
-        /// <param name="reportedDownloadIds">
-        /// When given, receives the id of every download the client reported in this poll. A download
-        /// left out of it was not in the client's answer, which the returned list cannot show, because
-        /// an unreported download comes back unchanged.
+        /// <param name="pollReport">
+        /// When given, receives which downloads the client reported in this poll and whether the
+        /// adapter accounted for every item the client listed.
         /// </param>
         /// <returns>Same list with updated values</returns>
-        Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default, ISet<string>? reportedDownloadIds = null);
+        Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default, DownloadPollReport? pollReport = null);
     }
 }
