@@ -147,8 +147,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 "forcedMetaDL" => DownloadItemStatus.Downloading,
                 "stalledDL" => DownloadItemStatus.Downloading,
                 "checkingDL" => DownloadItemStatus.Downloading,
-                "stoppedDL" => DownloadItemStatus.Paused,
-                "stoppedUP" => DownloadItemStatus.Paused,
+                // qBittorrent < 5.0 (and compatible APIs like rdt-client) report pausedDL/pausedUP
+                // where 5.x reports stoppedDL/stoppedUP (#1047).
+                "stoppedDL" or "pausedDL" => DownloadItemStatus.Paused,
+                "stoppedUP" or "pausedUP" => DownloadItemStatus.Paused,
                 "queuedDL" => DownloadItemStatus.Queued,
                 "queuedUP" => DownloadItemStatus.Queued,
                 "uploading" => DownloadItemStatus.Downloading,
@@ -162,7 +164,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 _ => DownloadItemStatus.Warning
             };
 
-            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP"))
+            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP" or "pausedUP"))
             {
                 return DownloadItemStatus.Completed;
             }
@@ -180,8 +182,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 "forcedMetaDL" => "downloading",
                 "stalledDL" => "downloading",
                 "checkingDL" => "downloading",
-                "stoppedDL" => "paused",
-                "stoppedUP" => "paused",
+                "stoppedDL" or "pausedDL" => "paused",
+                "stoppedUP" or "pausedUP" => "paused",
                 "queuedDL" => "queued",
                 "queuedUP" => "queued",
                 "uploading" => "seeding",
@@ -195,7 +197,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 _ => "unknown"
             };
 
-            return progress >= 100.0 && (status == "seeding" || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP")
+            return progress >= 100.0 && (status == "seeding" || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP" or "pausedUP")
                 ? "completed"
                 : status;
         }

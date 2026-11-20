@@ -11,7 +11,6 @@ internal partial class MoveJobProcessor
         FileSystemPathSemantics sourceSemantics,
         FileSystemPathSemantics targetSemantics,
         string? cleanupBoundary,
-        IReadOnlyDictionary<string, string>? sourcePhysicalObjectIdentities = null,
         Func<double, string, CancellationToken, Task>? progressReporter = null) =>
         new(
             source,
@@ -22,7 +21,6 @@ internal partial class MoveJobProcessor
             targetSemantics,
             CreateLeaseToken(job),
             cleanupBoundary,
-            SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities,
             ProgressReporter: progressReporter,
             SourceCleanupMode: job.SourceCleanupMode,
             SourceRootFolderId: job.SourceRootFolderId,

@@ -52,7 +52,7 @@ public sealed partial class LibraryMoveWorkflow
 
         var forceCopyAndRetainSource = authorization.ForceCopyAndRetainSource
             || (sourceStorage != null
-                && !sourceStorage.CanRetireDurably
+                && !sourceStorage.CanRetireSourceNow
                 && !sourceStorage.CanRetireVerifiedSource);
         return (
             authorization,

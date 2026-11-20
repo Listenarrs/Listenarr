@@ -18,7 +18,7 @@ internal sealed partial class EfMoveExecutionStore
             {
                 EnsureLeaseTokenProvided(jobId, leaseToken);
                 ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-                ArgumentException.ThrowIfNullOrWhiteSpace(sourcePhysicalObjectIdentity);
+                ArgumentNullException.ThrowIfNull(sourcePhysicalObjectIdentity);
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                 var entry = await db.MoveJobEntries
@@ -61,15 +61,6 @@ internal sealed partial class EfMoveExecutionStore
                         nameof(sha256));
                 }
 
-                if (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                    && !string.Equals(
-                        entry.SourcePhysicalObjectIdentity,
-                        sourcePhysicalObjectIdentity,
-                        StringComparison.Ordinal))
-                {
-                    throw new MoveNeedsAttentionException(
-                        "The source entry changed physical generation before markerless execution.");
-                }
                 if (!string.IsNullOrWhiteSpace(entry.Sha256)
                     && sha256 != null
                     && !string.Equals(
@@ -81,10 +72,33 @@ internal sealed partial class EfMoveExecutionStore
                         "The source entry content changed before markerless execution.");
                 }
 
+                if (sourcePhysicalObjectIdentity == string.Empty)
+                {
+                    if (!db.Database.IsRelational())
+                    {
+                        entry.MoveJob.ForceCopyAndRetainSource = true;
+                        entry.MoveJob.SourceCleanupMode = MoveSourceCleanupMode.RetainSource;
+                    }
+                    else
+                    {
+                        var retained = await db.MoveJobs.Where(job => job.Id == jobId
+                            && job.Status == MoveJobStatus.Running
+                            && job.LeaseOwner == leaseToken.Owner
+                            && job.LeaseGeneration == leaseToken.Generation
+                            && job.LeaseExpiresAt != null && job.LeaseExpiresAt > nowUtc)
+                            .ExecuteUpdateAsync(updates => updates
+                                .SetProperty(job => job.ForceCopyAndRetainSource, true)
+                                .SetProperty(job => job.SourceCleanupMode, MoveSourceCleanupMode.RetainSource),
+                                cancellationToken);
+                        if (retained != 1) throw new MoveLeaseLostException(jobId, leaseToken.Generation);
+                    }
+                }
                 var observedIdentity = entry.SourcePhysicalObjectIdentity;
                 var observedSha256 = entry.Sha256;
                 var observedLastWriteTimeUtc = entry.LastWriteTimeUtc;
-                var desiredIdentity = observedIdentity ?? sourcePhysicalObjectIdentity;
+                // The observed identity is diagnostic only and may change after
+                // a remount. Content proof remains durable operation evidence.
+                var desiredIdentity = sourcePhysicalObjectIdentity;
                 var desiredSha256 = observedSha256 ?? sha256;
                 if (!db.Database.IsRelational())
                 {

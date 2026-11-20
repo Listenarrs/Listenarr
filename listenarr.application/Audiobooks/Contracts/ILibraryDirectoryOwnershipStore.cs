@@ -69,6 +69,8 @@ public interface ILibraryDirectoryOwnershipStore
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default);
 
+    // Persisted move diagnostics cannot establish that a path ownership claim is
+    // stale. Implementations without the original live proof retain the claim.
     Task<bool> TryRetireReplacedByMarkerlessMoveAsync(
         string path,
         FileSystemPathSemantics semantics,

@@ -359,8 +359,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Jobs
             Assert.Equal("existing-codec", persisted.Codec);
             Assert.Equal(64000, persisted.Bitrate);
             Assert.Equal(2, persisted.Channels);
-            Assert.False(string.IsNullOrWhiteSpace(
-                persisted.PhysicalObjectIdentity));
+            Assert.Null(persisted.PhysicalObjectIdentity);
         }
 
         [Theory]

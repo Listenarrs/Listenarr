@@ -1,62 +1,7 @@
-using System.Text.Json;
-
 namespace Listenarr.Infrastructure.FileSystem;
 
 public sealed partial class CompatibilitySourceCleanupCoordinator
 {
-    private void PrepareQuarantineDirectory(string path, Guid batchId)
-    {
-        var markerPath = Path.Join(path, OwnershipMarkerName);
-        var marker = JsonSerializer.Serialize(new
-        {
-            ProtocolVersion = CompatibilityFilePublicationProtocol.Current,
-            BatchId = batchId
-        });
-        var existed = Directory.Exists(path);
-        if (existed
-            && (!File.Exists(markerPath)
-                || !string.Equals(
-                    File.ReadAllText(markerPath),
-                    marker,
-                    StringComparison.Ordinal)))
-        {
-            throw new InvalidOperationException(
-                "An existing quarantine directory is not owned by this batch.");
-        }
-
-        Directory.CreateDirectory(path);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            var actual = File.GetUnixFileMode(path);
-            var forbidden = UnixFileMode.GroupRead | UnixFileMode.GroupWrite
-                | UnixFileMode.GroupExecute | UnixFileMode.OtherRead
-                | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
-            if ((actual & forbidden) != 0)
-            {
-                throw new UnauthorizedAccessException(
-                    "The quarantine directory permissions are not private.");
-            }
-        }
-        else
-        {
-            ApplyPrivateWindowsAcl(path);
-            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden);
-        }
-
-        if (!File.Exists(markerPath))
-        {
-            File.WriteAllText(markerPath, marker);
-        }
-        else if (!string.Equals(File.ReadAllText(markerPath), marker, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "The quarantine ownership marker does not match this batch.");
-        }
-    }
-
     private static bool ContentMatches(string path, long length, string sha256)
     {
         try

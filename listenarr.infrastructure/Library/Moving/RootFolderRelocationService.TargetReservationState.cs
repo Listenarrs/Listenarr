@@ -29,13 +29,9 @@ public sealed partial class RootFolderRelocationService
             return;
         }
 
-        if (reservation.DirectoryObjectIdentityVersion
-                != ManagedDirectoryIdentity.CurrentVersion
-            || !parent.MatchesManagedDirectoryOwnershipIdentity(
-                reservation.DirectoryObjectIdentityVersion,
-                reservation.DirectoryObjectIdentity,
-                reservation.OwnershipToken)
-            || !ReservationPathMatchesOrThrowUnavailable(
+        // Stored parent observations are diagnostic. The caller validates the
+        // canonical direct-child reservation chain and pins the current parent.
+        if (!ReservationPathMatchesOrThrowUnavailable(
                 parent,
                 "The parent of a planned relocation directory is temporarily unavailable."))
         {
@@ -48,18 +44,12 @@ public sealed partial class RootFolderRelocationService
         RootFolderRelocationCreatedDirectory reservation,
         PinnedDirectoryCreation.PinnedDirectoryAnchor parent)
     {
-        if (reservation.DirectoryObjectIdentityVersion
-                != ManagedDirectoryIdentity.CurrentVersion
-            || !parent.MatchesManagedDirectoryOwnershipIdentity(
-                reservation.DirectoryObjectIdentityVersion,
-                reservation.DirectoryObjectIdentity,
-                reservation.OwnershipToken)
-            || !ReservationPathMatchesOrThrowUnavailable(
+        if (!ReservationPathMatchesOrThrowUnavailable(
                 parent,
                 "The planned relocation directory parent is temporarily unavailable."))
         {
             throw new InvalidOperationException(
-                "A planned relocation directory lost its parent-generation authorization.");
+                "A planned relocation directory parent changed while pinned.");
         }
     }
 

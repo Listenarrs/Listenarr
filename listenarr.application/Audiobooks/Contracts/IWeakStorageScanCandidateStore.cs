@@ -3,8 +3,7 @@ namespace Listenarr.Application.Audiobooks.Contracts;
 public sealed record WeakStorageMissingFileCandidate(
     int AudiobookFileId,
     string ExpectedStoredPath,
-    string ExpectedResolvedPath,
-    string? ExpectedPhysicalObjectIdentity);
+    string ExpectedResolvedPath);
 
 public sealed record WeakStorageScanConfirmationResult(
     int RemovedCount,

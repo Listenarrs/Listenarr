@@ -106,13 +106,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
 
         var resolved = compatible[0];
-        if (!HasDestructiveIdentity(resolved))
-        {
-            return new LibraryDirectoryOwnershipResolution(
-                LibraryDirectoryOwnershipResolutionState.Unavailable,
-                resolved,
-                "Durable directory ownership lacks managed-root physical identity.");
-        }
         if (validateProof
             && resolved.State is (
                 LibraryDirectoryOwnershipState.Owned
@@ -120,40 +113,33 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         {
             try
             {
-                using var authorization =
-                    await _boundaryAuthorizer.AuthorizeOwnershipAsync(
-                        resolved,
+                using var rootAuthorization =
+                    await _boundaryAuthorizer.AuthorizeContainingRootAsync(
+                        resolved.CanonicalPath,
+                        semantics,
                         cancellationToken);
-                using var live = authorization.ParentAnchor.OpenExistingChild(
+                using var live = rootAuthorization.ParentAnchor.OpenExistingChild(
                     Path.GetFileName(resolved.CanonicalPath));
-                if (!live.MatchesManagedDirectoryOwnershipIdentity(
-                        resolved.DirectoryObjectIdentityVersion,
-                        resolved.DirectoryObjectIdentity,
-                        resolved.OwnershipToken)
-                    || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                if (!DirectoryVisibilityMatchesOrThrowUnavailable(
                         live,
-                        "The owned directory is temporarily unavailable while its persisted physical identity is being verified.")
+                        "The owned directory is temporarily unavailable while its current path is being verified.")
                     || !DirectoryVisibilityMatchesOrThrowUnavailable(
-                        authorization.ParentAnchor,
-                        "The owned directory parent is temporarily unavailable while its persisted physical identity is being verified."))
+                        rootAuthorization.ParentAnchor,
+                        "The owned directory parent is temporarily unavailable while its current path is being verified."))
                 {
                     throw new InvalidOperationException(
-                        "The owned directory no longer matches its persisted physical identity.");
+                        "The owned directory changed while its current path was being verified.");
                 }
                 AfterOwnedDirectoryPhysicalIdentityPinnedForTest?.Invoke();
-                if (!live.MatchesManagedDirectoryOwnershipIdentity(
-                        resolved.DirectoryObjectIdentityVersion,
-                        resolved.DirectoryObjectIdentity,
-                        resolved.OwnershipToken)
-                    || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                if (!DirectoryVisibilityMatchesOrThrowUnavailable(
                         live,
-                        "The owned directory is temporarily unavailable after its physical identity was pinned.")
+                        "The owned directory is temporarily unavailable during final live-path proof.")
                     || !DirectoryVisibilityMatchesOrThrowUnavailable(
-                        authorization.ParentAnchor,
-                        "The owned directory parent is temporarily unavailable after its physical identity was pinned."))
+                        rootAuthorization.ParentAnchor,
+                        "The owned directory parent is temporarily unavailable during final live-path proof."))
                 {
                     throw new InvalidOperationException(
-                        "The owned directory changed after its physical identity was pinned.");
+                        "The owned directory changed during final live-path proof.");
                 }
             }
             catch (Exception exception) when (
@@ -161,7 +147,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             {
                 return new LibraryDirectoryOwnershipResolution(
                     LibraryDirectoryOwnershipResolutionState.Unavailable,
-                    Reason: $"Durable directory ownership proof is unavailable: {exception.Message}");
+                    Reason: $"Directory ownership path is unavailable: {exception.Message}");
             }
             catch (Exception exception) when (exception is
                 IOException or UnauthorizedAccessException
@@ -169,7 +155,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             {
                 return new LibraryDirectoryOwnershipResolution(
                     LibraryDirectoryOwnershipResolutionState.Unavailable,
-                    Reason: $"Durable directory ownership proof is temporarily unavailable: {exception.Message}",
+                    Reason: $"Directory ownership path is temporarily unavailable: {exception.Message}",
                     IsTransient: true);
             }
             catch (Exception exception) when (exception is
@@ -178,12 +164,12 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             {
                 return new LibraryDirectoryOwnershipResolution(
                     LibraryDirectoryOwnershipResolutionState.Unavailable,
-                    Reason: $"Durable directory ownership proof is unavailable: {exception.Message}");
+                    Reason: $"Directory ownership path is unavailable: {exception.Message}");
             }
         }
 
-        // Removing has separate restart semantics: the durable state transition can
-        // outlive the final namespace deletion.
+        // Persisted native identity is diagnostic only. Canonical path ownership plus
+        // a live pinned-path verification governs the current operation.
         return new LibraryDirectoryOwnershipResolution(
             LibraryDirectoryOwnershipResolutionState.Owned,
             resolved);
@@ -243,34 +229,25 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                 throw new InvalidOperationException(
                     "A conflicting or unavailable durable directory ownership claim overlaps the move source.");
             }
-            if (!HasDestructiveIdentity(candidate))
-            {
-                throw new InvalidOperationException(
-                    "A durable ownership claim lacks managed-root physical identity.");
-            }
-
             if (candidate.State is LibraryDirectoryOwnershipState.Owned
                 or LibraryDirectoryOwnershipState.Retained)
             {
                 using var authorization =
-                    await _boundaryAuthorizer.AuthorizeOwnershipAsync(
-                        candidate,
+                    await _boundaryAuthorizer.AuthorizeContainingRootAsync(
+                        candidate.CanonicalPath,
+                        semantics,
                         cancellationToken);
                 using var live = authorization.ParentAnchor.OpenExistingChild(
                     Path.GetFileName(candidate.CanonicalPath));
-                if (!live.MatchesManagedDirectoryOwnershipIdentity(
-                        candidate.DirectoryObjectIdentityVersion,
-                        candidate.DirectoryObjectIdentity,
-                        candidate.OwnershipToken)
-                    || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                if (!DirectoryVisibilityMatchesOrThrowUnavailable(
                         live,
-                        "A move-source ownership directory is temporarily unavailable while its physical generation is being verified.")
+                        "An owned directory is temporarily unavailable while its current path is being verified.")
                     || !DirectoryVisibilityMatchesOrThrowUnavailable(
                         authorization.ParentAnchor,
-                        "A move-source ownership parent is temporarily unavailable while its physical generation is being verified."))
+                        "An owned directory parent is temporarily unavailable while its current path is being verified."))
                 {
                     throw new InvalidOperationException(
-                        "A durable ownership claim no longer matches its persisted physical directory generation.");
+                        "An owned directory changed while its current path was being verified.");
                 }
             }
 
@@ -295,12 +272,4 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         return visibility == RegistrationPublicationMatchOutcome.Match;
     }
 
-    private static bool HasDestructiveIdentity(
-        LibraryDirectoryOwnership ownership) =>
-        ownership.ManagedRootFolderId.HasValue
-        && ownership.DirectoryObjectIdentityVersion
-            == ManagedDirectoryIdentity.CurrentVersion
-        && !string.IsNullOrWhiteSpace(ownership.DirectoryObjectIdentity)
-        && string.IsNullOrWhiteSpace(
-            ownership.DirectoryObjectIdentityUnavailableReason);
 }

@@ -99,7 +99,8 @@
 
         <div v-else-if="item.hasSearched" class="match-status no-match">
           <PhWarningCircle :size="14" class="match-icon-warn" />
-          <span>No match found</span>
+          <span v-if="item.matchError" class="match-error">{{ item.matchError }}</span>
+          <span v-else>No match found</span>
         </div>
 
         <div v-else class="match-status unsearched">

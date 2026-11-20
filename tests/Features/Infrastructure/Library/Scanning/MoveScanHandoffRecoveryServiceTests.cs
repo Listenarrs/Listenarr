@@ -40,7 +40,7 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
         Assert.True(scanQueue.Reader.TryRead(out var scanJob));
         Assert.Equal(handoff.Id, scanJob.MoveScanHandoffId);
         Assert.Equal(1, scanJob.MoveScanAttemptGeneration);
-        Assert.True(scanJob.PhysicalIdentity.HasValue);
+        Assert.NotNull(scanJob.PathIdentity);
         await using var db = await GetFactory().CreateDbContextAsync();
         var persisted = await db.MoveScanHandoffs.AsNoTracking().SingleAsync(candidate => candidate.Id == handoff.Id);
         Assert.Equal(MoveScanHandoffStatus.Claimed, persisted.Status);
@@ -175,9 +175,10 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
             .AsNoTracking()
             .SingleAsync(candidate => candidate.Id == handoff.Id);
         Assert.Equal(MoveScanHandoffStatus.Pending, persisted.Status);
+        Assert.False(string.IsNullOrWhiteSpace(persisted.LastError));
         Assert.Contains(
-            "physical identity",
-            persisted.LastError ?? string.Empty,
+            "pinned",
+            persisted.LastError!,
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
             "completed move bytes",

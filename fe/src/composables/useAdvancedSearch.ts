@@ -17,7 +17,7 @@
  */
 /**
  * Composable for managing advanced search form state and persistence
- * Handles form validation, localStorage persistence with debouncing,
+ * Handles form validation, sessionStorage persistence with debouncing,
  * and search parameter management for the AddNewView component
  */
 
@@ -35,7 +35,7 @@ export interface AdvancedSearchParams {
 }
 
 /**
- * Persisted state structure for localStorage
+ * Persisted state structure for sessionStorage
  */
 interface PersistedAdvancedState {
   // persisted state may contain stringified booleans from older versions
@@ -63,7 +63,7 @@ export const useAdvancedSearch = () => {
     asin: '',
   })
 
-  // Debounce timer for localStorage saves
+  // Debounce timer for sessionStorage saves
   const saveTimer = ref<number | null>(null)
 
   /**
@@ -82,7 +82,7 @@ export const useAdvancedSearch = () => {
   })
 
   /**
-   * Save advanced search state to localStorage with debouncing
+   * Save advanced search state to sessionStorage with debouncing
    * Prevents excessive writes while user is typing
    * @internal
    */
@@ -100,9 +100,9 @@ export const useAdvancedSearch = () => {
           showAdvanced: showAdvancedSearch.value,
           params: advancedSearchParams.value,
         }
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
       } catch {
-        // swallow localStorage errors (quota exceeded, private mode, etc.)
+        // swallow sessionStorage errors (quota exceeded, private mode, etc.)
       }
 
       try {
@@ -114,11 +114,11 @@ export const useAdvancedSearch = () => {
   }
 
   /**
-   * Load persisted advanced search state from localStorage
+   * Load persisted advanced search state from sessionStorage
    */
   const loadAdvancedState = () => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY)
+      const raw = window.sessionStorage.getItem(STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw) as PersistedAdvancedState
         if (typeof parsed === 'object' && parsed !== null) {
@@ -139,8 +139,15 @@ export const useAdvancedSearch = () => {
         }
       }
     } catch {
-      // ignore localStorage errors
+      // ignore sessionStorage errors
     }
+  }
+
+  // Earlier versions kept the form in localStorage, where it outlived the session: drop it
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore storage errors
   }
 
   // Load persisted state immediately so tests and callers see restored values
@@ -185,7 +192,7 @@ export const useAdvancedSearch = () => {
   }
 
   /**
-   * Clear saved state from localStorage
+   * Clear saved state from sessionStorage
    * Useful for debugging or user preference reset
    */
   const clearPersistedState = () => {
@@ -197,7 +204,7 @@ export const useAdvancedSearch = () => {
         } catch {}
         saveTimer.value = null
       }
-      window.localStorage.removeItem(STORAGE_KEY)
+      window.sessionStorage.removeItem(STORAGE_KEY)
     } catch {
       // ignore errors
     }
@@ -211,7 +218,7 @@ export const useAdvancedSearch = () => {
   })
 
   /**
-   * Watch for changes to persist to localStorage
+   * Watch for changes to persist to sessionStorage
    */
   // Ensure watchers run synchronously so tests (and consumers) observe
   // the scheduled debounce timer immediately after a mutation.

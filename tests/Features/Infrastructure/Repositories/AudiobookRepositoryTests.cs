@@ -64,6 +64,33 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
+        public async Task GetAsinRegions_GivesEachAsinsRegion_PrimaryFirst()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            await using var db = new ListenArrDbContext(options);
+            var book = new AudiobookBuilder().WithTitle("Book").WithAsin("B000000001").Build();
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            AudiobookExternalIdentifier Identifier(AudiobookExternalIdentifierType type, string value, string? region, bool isPrimary) =>
+                new() { AudiobookId = book.Id, Type = type, ValueRaw = value, ValueNormalized = value, Region = region, IsPrimary = isPrimary };
+            db.AudiobookExternalIdentifiers.AddRange(
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000001", "uk", false),
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000001", "fr", true),
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000002", null, false),
+                Identifier(AudiobookExternalIdentifierType.Isbn, "9781039400740", null, true));
+            await db.SaveChangesAsync();
+
+            var regions = await new AudiobookRepository(db).GetAsinRegionsAsync();
+
+            Assert.Equal(2, regions.Count);
+            Assert.Equal("fr", regions[(book.Id, "B000000001")]);
+            Assert.Null(regions[(book.Id, "B000000002")]);
+        }
+
+        [Fact]
         public async Task GetByIdQueries_DoNotTriggerMultipleCollectionIncludeWarning()
         {
             await using var connection = new SqliteConnection("DataSource=:memory:");
@@ -257,7 +284,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
-        public async Task UpdateAsync_DetachedMetadataChange_DoesNotOverwriteNewerPathReferences()
+        public async Task UpdateAsync_DetachedMetadataChange_PreservesPathReferencesAndAddedDate()
         {
             var databaseName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -274,6 +301,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 audiobook.FilePath = "/library/source/book.m4b";
                 audiobook.FileSize = 100;
                 audiobook.ImageUrl = "/library/source/cover.jpg";
+                audiobook.Added = new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc);
                 seed.Audiobooks.Add(audiobook);
                 await seed.SaveChangesAsync();
                 staleMetadataEntity = await seed.Audiobooks
@@ -293,6 +321,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             }
 
             staleMetadataEntity.Monitored = false;
+            staleMetadataEntity.Added = null;
             await using (var metadataContext = new ListenArrDbContext(options))
             {
                 var metadataRepository = new AudiobookRepository(metadataContext);
@@ -306,6 +335,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             Assert.Equal("/library/target/book.m4b", persisted.FilePath);
             Assert.Equal(200, persisted.FileSize);
             Assert.Equal("/library/target/cover.jpg", persisted.ImageUrl);
+            Assert.Equal(new DateTime(2026, 8, 19, 18, 30, 0, DateTimeKind.Utc), persisted.Added);
             Assert.False(persisted.Monitored);
         }
 

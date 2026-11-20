@@ -217,6 +217,100 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         Assert.False(Directory.Exists(statePath));
     }
 
+    [WindowsNetworkStorageFact]
+    public void DeletePinnedEmptyDirectoryImmediately_NetworkStorage_CoHeldAnchorReleased_RemovesDirectory()
+    {
+        var scenarioRoot = CreateNetworkScenarioRoot();
+        var child = Path.Join(scenarioRoot, "Book");
+        Directory.CreateDirectory(child);
+        var degradeBefore = Interlocked.Read(
+            ref PinnedDirectoryCreation
+                .DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
+        try
+        {
+            using var anchor =
+                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(scenarioRoot);
+            using var publication = anchor.OpenExistingChildForPublication("Book");
+            // Production callers (the delete tree and move cleanup) keep a duplicate handle
+            // open across the delete via OpenCreatedDirectoryAnchor(). On SMB the delete
+            // degrades to delete-on-close, which finalizes only once every handle closes, so
+            // the co-held pin is handed over for release at the degrade boundary.
+            using var coHeld = publication.OpenCreatedDirectoryAnchor();
+
+            publication.DeletePinnedEmptyDirectoryImmediately(
+                "Book",
+                releaseCoHeldDirectoryPins: coHeld.Dispose);
+
+            Assert.False(Directory.Exists(child));
+        }
+        finally
+        {
+            TryDeleteNetworkScenarioRoot(scenarioRoot);
+        }
+
+        var degradeAfter = Interlocked.Read(
+            ref PinnedDirectoryCreation
+                .DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
+        // On SMB the POSIX immediate unlink is rejected, so the delete must have taken the
+        // delete-on-close degrade path — this proves the fallback engaged on this mount.
+        Assert.True(
+            degradeAfter > degradeBefore,
+            "Expected the immediate directory delete to degrade to delete-on-close on SMB.");
+    }
+
+    [WindowsNetworkStorageFact]
+    public void DeletePinnedEmptyDirectoryImmediately_NetworkStorage_CoHeldAnchorRetained_FailsClosed()
+    {
+        var scenarioRoot = CreateNetworkScenarioRoot();
+        var child = Path.Join(scenarioRoot, "Book");
+        Directory.CreateDirectory(child);
+        try
+        {
+            using var anchor =
+                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(scenarioRoot);
+            using var publication = anchor.OpenExistingChildForPublication("Book");
+            // The caller keeps the duplicate handle open but does NOT hand it over. On SMB the
+            // directory stays delete-pending, so the helper must fail closed rather than treat
+            // the still-present entry as a completed immediate deletion.
+            using var coHeld = publication.OpenCreatedDirectoryAnchor();
+
+            var error = Assert.Throws<System.ComponentModel.Win32Exception>(() =>
+                publication.DeletePinnedEmptyDirectoryImmediately("Book"));
+            Assert.Equal(145, error.NativeErrorCode);
+        }
+        finally
+        {
+            TryDeleteNetworkScenarioRoot(scenarioRoot);
+        }
+    }
+
+    private static string CreateNetworkScenarioRoot()
+    {
+        var providedRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "A network filesystem path was not provided."));
+        var scenarioRoot = Path.Join(
+            providedRoot,
+            $"listenarr-smb-immediate-delete-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scenarioRoot);
+        return scenarioRoot;
+    }
+
+    private static void TryDeleteNetworkScenarioRoot(string scenarioRoot)
+    {
+        try
+        {
+            Directory.Delete(scenarioRoot, recursive: true);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort cleanup on externally supplied network storage.
+        }
+    }
+
     [Fact]
     public void PublishCreatedDirectoryAs_EmptyDirectory_PublishesWithinPinnedParent()
     {

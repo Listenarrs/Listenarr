@@ -178,8 +178,7 @@ public sealed class WeakStorageScanCandidateStoreTests : BaseTests
                 [new WeakStorageMissingFileCandidate(
                     fileId,
                     storedPath,
-                    resolvedPath,
-                    physicalIdentity)]);
+                    resolvedPath)]);
             var pending = Assert.Single(await store.GetPendingAsync(audiobookId));
             store.BeforeConfirmationCommitForTest = () =>
                 throw new InvalidOperationException("Injected commit failure.");
@@ -274,8 +273,7 @@ public sealed class WeakStorageScanCandidateStoreTests : BaseTests
             new WeakStorageMissingFileCandidate(
                 file.Id,
                 storedPath,
-                resolvedPath,
-                physicalIdentity));
+                resolvedPath));
     }
 
     private sealed record Scenario(

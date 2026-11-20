@@ -80,6 +80,7 @@ public sealed class LibraryQueryWorkflow(
         series = audiobook.Series,
         seriesNumber = audiobook.SeriesNumber,
         publishedDate = audiobook.PublishedDate,
+        added = audiobook.Added,
         seriesMemberships = audiobook.SeriesMemberships?
             .OrderByDescending(membership => membership.IsPrimary)
             .ThenBy(membership => membership.SortOrder)

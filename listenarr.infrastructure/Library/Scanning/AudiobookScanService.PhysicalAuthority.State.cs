@@ -25,15 +25,6 @@ internal sealed partial class AudiobookScanService
                 }
             }
 
-            if (command.ScanPhysicalIdentity.HasDurableGenerationProof
-                && (!directories[0].Anchor.MatchesDirectoryObjectIdentity(
-                        command.ScanPhysicalIdentity.BoundaryObjectIdentity!)
-                    || !Root.MatchesDirectoryObjectIdentity(
-                        command.ScanPhysicalIdentity.ScanRootObjectIdentity!)))
-            {
-                throw new InvalidOperationException(
-                    "The physical scan-root generation changed after authorization.");
-            }
         }
 
         public void Dispose()
@@ -57,12 +48,7 @@ internal sealed partial class AudiobookScanService
         string? ObjectIdentity)
     {
         internal static PinnedDirectoryState Capture(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
-            bool requireDurableGenerationProof) =>
-            new(
-                anchor,
-                requireDurableGenerationProof
-                    ? anchor.GetDirectoryObjectIdentity()
-                    : null);
+            PinnedDirectoryCreation.PinnedDirectoryAnchor anchor) =>
+            new(anchor, null);
     }
 }

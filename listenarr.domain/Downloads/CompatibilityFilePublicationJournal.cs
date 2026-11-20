@@ -39,8 +39,9 @@ public enum CompatibilityCleanupOwner
 
 /// <summary>
 /// Recovery state for publication on storage that cannot expose durable object
-/// generations. Protocol v1 is retain-only; protocol v2 can authorize verified,
-/// policy-gated source cleanup after registration commits for the entire batch.
+/// generations. Protocol v1 is retain-only. Protocol v2 also records historical
+/// verified-cleanup transitions; those facts cannot recreate source-delete authority.
+/// Current batch completion retains sources without their original live proof.
 /// </summary>
 public sealed class CompatibilityFilePublicationJournal
 {
@@ -56,11 +57,16 @@ public sealed class CompatibilityFilePublicationJournal
     public CompatibilityCleanupOwner CleanupOwner { get; set; } =
         CompatibilityCleanupOwner.None;
     public int? SourceRootFolderId { get; set; }
+    // Legacy revisions remain part of persisted claim matching, not cleanup authority.
     public int? SourcePolicyRevision { get; set; }
     public int? SourceStorageContractRevision { get; set; }
     public int? DestinationRootFolderId { get; set; }
+    // Current cleanup authority uses storage-contract revisions and live evidence.
     public int? DestinationPolicyRevision { get; set; }
     public int? DestinationStorageContractRevision { get; set; }
+    public int? ExpectedBatchMemberCount { get; set; }
+    [MaxLength(64)]
+    public string? ExpectedBatchSourceManifestSha256 { get; set; }
     [Required, MaxLength(4096)]
     public string SourcePath { get; set; } = string.Empty;
     [Required, MaxLength(4096)]

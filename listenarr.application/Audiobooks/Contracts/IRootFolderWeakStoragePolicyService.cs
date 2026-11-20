@@ -7,6 +7,10 @@ public sealed record RootFolderWeakStoragePolicyUpdate(
 public sealed class RootFolderWeakStoragePolicyConflictException(string message)
     : InvalidOperationException(message);
 
+/// <summary>
+/// Persists legacy policy values for existing clients. These values do not
+/// authorize source deletion; current storage capabilities and operation evidence do.
+/// </summary>
 public interface IRootFolderWeakStoragePolicyService
 {
     Task<RootFolder> UpdateAsync(

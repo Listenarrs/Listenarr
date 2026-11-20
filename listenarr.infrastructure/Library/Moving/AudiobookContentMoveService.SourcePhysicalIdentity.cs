@@ -7,28 +7,10 @@ internal sealed partial class AudiobookContentMoveService
         MoveJobEntry manifestEntry,
         PinnedDirectoryCreation.PinnedFileEntry sourceEntry)
     {
-        var identities = request.SourcePhysicalObjectIdentities;
-        if (identities == null)
-        {
-            return;
-        }
-
-        if (!identities.TryGetValue(
-                manifestEntry.RelativePath,
-                out var expectedIdentity))
-        {
-            // Non-audio companion files are authorized by the exclusive managed
-            // audiobook directory plus their immutable persisted content manifest.
-            // Tracked audiobook files are present in this identity map and retain
-            // the stronger physical-generation fence.
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(expectedIdentity)
-            || !sourceEntry.MatchesObjectIdentity(expectedIdentity))
-        {
-            throw new MoveNeedsAttentionException(
-                $"The tracked source file identifies a different physical generation: {manifestEntry.RelativePath}");
-        }
+        // Persisted physical identity is legacy diagnostic data. Source authority
+        // comes from the live pinned path plus the manifest content proof.
+        _ = request;
+        _ = manifestEntry;
+        _ = sourceEntry;
     }
 }

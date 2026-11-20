@@ -226,7 +226,15 @@ namespace Listenarr.Infrastructure.Search.Providers.MyAnonamouse
                         if (grabs > 0) r.Grabs = grabs;
                         if (files > 0) r.Files = files;
                         if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
-                        if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = SearchResultAttributeParser.ParseLanguageFromCode(langCode);
+                        if (!string.IsNullOrEmpty(langCode) && (string.IsNullOrEmpty(r.Language) || r.LanguageOrigin == IdentityEvidenceOrigin.ReleaseNameDerived))
+                        {
+                            var explicitLanguage = SearchResultAttributeParser.ParseLanguageFromCode(langCode);
+                            if (!string.IsNullOrEmpty(explicitLanguage))
+                            {
+                                r.Language = explicitLanguage;
+                                r.LanguageOrigin = IdentityEvidenceOrigin.ProviderSupplied;
+                            }
+                        }
 
                         _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
                     }

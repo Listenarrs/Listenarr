@@ -42,6 +42,15 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260821141235_AddCompatibilityFilePublication";
     private const string WeakStorageVerifiedCleanupMigrationId =
         "20260825021432_AddWeakStorageVerifiedCleanup";
+    private const string OperationEvidencePublicationsMigrationId =
+        "20261002210137_AddOperationEvidencePublications";
+    private const string AutomaticSearchTimingMigrationId =
+        "20261021212418_AddAutomaticSearchTiming";
+    private const string ReleaseBlocklistMigrationId =
+        "20261029020400_AddReleaseBlocklist";
+
+    private const string AudiobookAddedDateMigrationId =
+        ListenarrDatabaseMigrationPreflight.AudiobookAddedDateMigrationId;
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -173,6 +182,30 @@ public class SqliteMigrationSchemaTests : BaseTests
             connection,
             "CompatibilityFilePublicationJournals",
             "DestinationStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "ExpectedBatchMemberCount"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "ExpectedBatchSourceManifestSha256"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "VerifiedFileRenameJournals",
+            "ExpectedBatchManifestSha256"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "VerifiedFileRenameJournals",
+            "SourceStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "VerifiedFileRenameJournals",
+            "DestinationStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "VerifiedFileRenameJournals",
+            "RetirementPath"));
         Assert.Equal(
             "'RetainSource'",
             await ColumnDefaultAsync(connection, "MoveJobs", "SourceCleanupMode"));
@@ -199,7 +232,11 @@ public class SqliteMigrationSchemaTests : BaseTests
                 MoveJobRelocationForeignKeyMigrationId,
                 FileMutationParentGenerationProofsMigrationId,
                 CompatibilityFilePublicationMigrationId,
-                WeakStorageVerifiedCleanupMigrationId
+                WeakStorageVerifiedCleanupMigrationId,
+                OperationEvidencePublicationsMigrationId,
+                AutomaticSearchTimingMigrationId,
+                ReleaseBlocklistMigrationId,
+                AudiobookAddedDateMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

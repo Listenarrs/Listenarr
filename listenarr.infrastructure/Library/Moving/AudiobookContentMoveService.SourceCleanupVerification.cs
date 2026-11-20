@@ -28,10 +28,12 @@ internal sealed partial class AudiobookContentMoveService
         string targetPath,
         IReadOnlyCollection<MoveJobEntry> manifest)
     {
+        // Deleted may record a source already absent after recovery; visible occupants
+        // are still rejected below. DeleteAuthorized cannot coexist with forced retention.
         if (request.ForceCopyAndRetainSource
             && manifest
                 .Where(IsPhysicalManifestEntry)
-                .Any(entry => IsDestructiveCleanupState(entry.CleanupState)))
+                .Any(entry => entry.CleanupState == MoveJobEntryCleanupState.DeleteAuthorized))
         {
             throw new MoveNeedsAttentionException(
                 "Forced source retention has contradictory destructive cleanup evidence.");
@@ -148,17 +150,10 @@ internal sealed partial class AudiobookContentMoveService
                     && !IsSameOrInside(target, entry, request.SourceSemantics)))
             .ToList();
 
-        if (ordinaryRemainingEntries.Count == 0
-            && request.DeleteEmptySource
-            && !targetInsideSource
-            && !IsSourceCleanupBoundary(
-                source,
-                request.SourceCleanupBoundary,
-                request.SourceSemantics))
-        {
-            throw new MoveNeedsAttentionException(
-                "The completed move source directory was recreated after cleanup.");
-        }
+        // An empty surviving source directory is harmless scaffolding. After a
+        // restart we intentionally retain it rather than treating persisted ownership
+        // or prior cleanup state as authority to remove it.
+        _ = ordinaryRemainingEntries;
     }
 
     private static bool AuthorizedSourceDirectoryExists(
@@ -182,15 +177,12 @@ internal sealed partial class AudiobookContentMoveService
         var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundary);
         try
         {
-            if (!current.MatchesManagedDirectoryIdentity(
-                    authorization.SourceDirectoryObjectIdentityVersion,
-                    authorization.SourceDirectoryObjectIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     current,
                     "The source boundary is temporarily unavailable during cleanup verification."))
             {
                 throw new MoveNeedsAttentionException(
-                    "The source boundary changed physical generation during cleanup verification.");
+                    "The source boundary changed during live cleanup verification.");
             }
 
             foreach (var segment in SplitMovePathSegments(relativePath, request.SourceSemantics))

@@ -11,7 +11,10 @@ internal sealed partial class AudiobookContentMoveService
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
 
         var source = NormalizeMoveDirectoryEndpoint(request.Source);
         var target = NormalizeMoveDirectoryEndpoint(request.Target);
@@ -56,16 +59,14 @@ internal sealed partial class AudiobookContentMoveService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(result);
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
         request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
-        if (request.ForceCopyAndRetainSource && !result.SourceRetained)
-        {
-            throw new MoveNeedsAttentionException(
-                "Forced source retention cannot accept a destructive recovery result.");
-        }
         if (result.SourceCleanupCompleted)
         {
             return result;
@@ -86,24 +87,14 @@ internal sealed partial class AudiobookContentMoveService
                 "Source cleanup is blocked because no persisted move manifest is available.");
         }
 
-        if (result.SourceRetained)
-        {
-            await RetainMarkerlessSourceAsync(
-                request,
-                result.Target,
-                manifest,
-                cancellationToken);
-        }
-        else
-        {
-            await DeleteMarkerlessSourceAsync(
-                request,
-                result.Source,
-                result.Target,
-                result.TargetInsideSource,
-                manifest,
-                cancellationToken);
-        }
+        // Resume occurs after a process boundary. Persisted cleanup state may
+        // describe what already happened, but cannot recreate delete authority.
+        var sourceRetained = await ReconcileRestartedMarkerlessSourceAsync(
+            request,
+            result.Source,
+            result.Target,
+            manifest,
+            cancellationToken);
         VerifySourceCleanupState(
             request,
             result.Source,
@@ -116,6 +107,7 @@ internal sealed partial class AudiobookContentMoveService
         return result with
         {
             SourceCleanupCompleted = true,
+            SourceRetained = sourceRetained,
             TargetPhysicalObjectIdentities = identities
         };
     }

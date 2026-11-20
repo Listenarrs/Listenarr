@@ -285,22 +285,7 @@ class ApiService {
   }
 
   // Search API
-  // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
-
-  async intelligentSearch(
-    query: string,
-    category?: string,
-    signal?: AbortSignal,
-  ): Promise<SearchResult[]> {
-    const body: Record<string, unknown> = { mode: 'Simple', query }
-    if (category) body['category'] = category
-    const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
-      '/search',
-      { method: 'POST', body: JSON.stringify(body), signal },
-    )
-    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
-    return results
-  }
+  // Deprecated compatibility shim removed. Use `searchIndexers` or `searchByApi`.
 
   async searchIndexers(
     query: string,
@@ -563,17 +548,20 @@ class ApiService {
     return results
   }
 
-  async advancedSearch(params: {
-    title?: string
-    author?: string
-    isbn?: string
-    series?: string
-    asin?: string
-    region?: string
-    language?: string
-    pagination?: { page?: number; limit?: number }
-    cap?: number
-  }): Promise<SearchResult[]> {
+  async advancedSearch(
+    params: {
+      title?: string
+      author?: string
+      isbn?: string
+      series?: string
+      asin?: string
+      region?: string
+      language?: string
+      pagination?: { page?: number; limit?: number }
+      cap?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
     const body: Record<string, unknown> = { mode: 'Advanced' }
     const hasAsin = !!params.asin
     if (params.title) (body as Record<string, unknown>).title = params.title
@@ -591,7 +579,7 @@ class ApiService {
     if (typeof params.cap === 'number') (body as Record<string, unknown>).cap = params.cap
     const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
       '/search',
-      { method: 'POST', body: JSON.stringify(body) },
+      { method: 'POST', body: JSON.stringify(body), signal },
     )
     let results = Array.isArray(resp) ? resp : (resp?.results ?? [])
 
@@ -911,17 +899,6 @@ class ApiService {
         isDefault: root.isDefault === true,
         caseSensitivityMode: root.caseSensitivityMode ?? 'Auto',
       }),
-    })
-  }
-
-  async updateRootFolderWeakStoragePolicy(
-    id: number,
-    policy: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy',
-    expectedRevision: number,
-  ): Promise<RootFolder> {
-    return this.request<RootFolder>(`/rootfolders/${id}/weak-storage-policy`, {
-      method: 'PATCH',
-      body: JSON.stringify({ policy, expectedRevision }),
     })
   }
 
@@ -2262,9 +2239,6 @@ class ApiService {
 }
 
 export const apiService = new ApiService()
-
-// Compatibility export for legacy code expecting apiService.search
-export const search = apiService.advancedSearch.bind(apiService)
 
 // Export individual indexer functions for convenience
 export const getIndexers = () => apiService.getIndexers()

@@ -32,18 +32,14 @@ public partial class MoveQueueService
             return;
         }
         if (command.TargetRootFolderId is not > 0
-            || command.TargetPolicyRevision is not >= 0
             || command.TargetStorageContractRevision is not >= 0
-            || command.SourceRootFolderId.HasValue
-                != command.SourcePolicyRevision.HasValue
             || command.SourceRootFolderId.HasValue
                 != command.SourceStorageContractRevision.HasValue
             || command.SourceRootFolderId is <= 0
-            || command.SourcePolicyRevision is < 0
             || command.SourceStorageContractRevision is < 0)
         {
             throw new ArgumentException(
-                "Verified source deletion requires a complete root-folder policy snapshot.",
+                "Verified source deletion requires a complete root-folder storage snapshot.",
                 nameof(command));
         }
     }

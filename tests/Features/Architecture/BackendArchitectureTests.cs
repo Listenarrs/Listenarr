@@ -148,7 +148,6 @@ public sealed class BackendArchitectureTests : BaseTests
             "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FailureTests",
             "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FilePathPreservationTests",
             "Listenarr.Tests.Features.Infrastructure.Metadata.Parsing.PathMetadataParserTests",
-            "Listenarr.Tests.Features.Infrastructure.Migrations.MigrationMetadataTests",
             "Listenarr.Tests.Features.Infrastructure.Migrations.ReleasedSchemaUpgradeTests",
             "Listenarr.Tests.Features.Infrastructure.Notifications.Delivery.NotificationServiceTests",
             "Listenarr.Tests.Features.Infrastructure.Notifications.Discord.DiscordBotServiceTests",
@@ -1046,7 +1045,7 @@ public sealed class BackendArchitectureTests : BaseTests
             architecture,
             StringComparison.Ordinal);
         Assert.Contains(
-            "root-folder physical identities, active root relocations, directory ownership, durable audiobook-deletion intents, owner-bound file-rename journals, then audiobook-file identities",
+            "root path/case capabilities, active relocations, directory ownership, deletion intents, owner-bound rename journals, and audiobook-file path identities",
             architecture,
             StringComparison.Ordinal);
     }
@@ -1098,10 +1097,14 @@ public sealed class BackendArchitectureTests : BaseTests
             "entry.claim"
         };
 
-        var allowedQuarantineFiles = new HashSet<string>(StringComparer.Ordinal)
+        var allowedOperationNamespaceFiles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            "listenarr.infrastructure/FileSystem/CompatibilitySourceCleanupCoordinator.cs",
-            "listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.Enumeration.cs"
+            ["listenarr.infrastructure/FileSystem/CompatibilitySourceCleanupCoordinator.cs"] =
+                ".listenarr-quarantine-",
+            ["listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.Enumeration.cs"] =
+                ".listenarr-quarantine-",
+            ["listenarr.infrastructure/FileSystem/VerifiedFileRenameTransactionCoordinator.cs"] =
+                ".listenarr-organize-"
         };
         var violations = productionRoots
             .SelectMany(root => Directory.EnumerateFiles(
@@ -1117,9 +1120,11 @@ public sealed class BackendArchitectureTests : BaseTests
             .SelectMany(candidate => forbidden
                 .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal)
                     && !(token == ".listenarr-"
-                        && allowedQuarantineFiles.Contains(candidate.File)
+                        && allowedOperationNamespaceFiles.TryGetValue(
+                            candidate.File,
+                            out var auditedPrefix)
                         && candidate.Source.Contains(
-                            ".listenarr-quarantine-",
+                            auditedPrefix,
                             StringComparison.Ordinal)))
                 .Select(token => $"{candidate.File}: {token}"))
             .ToList();
@@ -1298,7 +1303,6 @@ public sealed class BackendArchitectureTests : BaseTests
             // Internal application/runtime paths, not user library volume identity.
             "listenarr.application/Configuration/Core/StartupConfigService.cs",
             "listenarr.infrastructure/DependencyInjection/InfrastructureStartupCompositionExtensions.cs",
-            "listenarr.infrastructure/Ffmpeg/Installation/FfmpegService.cs",
             "listenarr.infrastructure/FileSystem/FileSystemSafety.cs",
             // Remote path mapping translates client-reported paths to local native paths and
             // uses host-native semantics only to keep relative joins inside the mapped local base.
@@ -1372,6 +1376,58 @@ public sealed class BackendArchitectureTests : BaseTests
             violations.Count == 0,
             "Named request-to-noncancelable phase tokens must be entered through "
             + "RequestCancellationBoundary.EnterNonCancelablePhase:" + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void ReleaseBlocklistKeys_AreDerivedOnlyByReleaseIdentity()
+    {
+        // The release blocklist has had four defects and all four were one defect: a release
+        // identity worked out in one place and worked out differently in another, so the row
+        // written when a release failed was looked up under a key nothing computed again. The
+        // fourth cost a live install an indexer termination warning while a correctly formatted
+        // row for the book sat in the database unmatched.
+        //
+        // BlockedReleaseFilter already carries a comment saying the field-picking belongs to
+        // ReleaseIdentity and nowhere else. A comment is advice. This is the same statement in a
+        // form that fails a build.
+        var owner = Normalize(Path.Join("listenarr.domain", "Downloads", "ReleaseIdentity.cs"));
+        var roots = new[]
+        {
+            "listenarr.domain",
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                Path = file,
+                Relative = Normalize(Path.GetRelativePath(RepositoryRoot, file))
+            })
+            .Where(source => !string.Equals(source.Relative, owner, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(source => ReleaseIdentitySourceAnalyzer
+                .Analyze(File.ReadAllText(source.Path))
+                .Select(violation => $"{source.Relative}:{violation.Line} {violation.Reason}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "Only ReleaseIdentity may work out a release blocklist key. Call "
+            + "ReleaseIdentity.For(searchResult) where the search result is still in hand, or read "
+            + "the grab-time value back with ReleaseIdentity.ForGrabbed(download). Deriving a key "
+            + "here gives the feature two authors of one value, which is the shape of every defect "
+            + "it has had:" + Environment.NewLine
             + string.Join(Environment.NewLine, violations));
     }
 

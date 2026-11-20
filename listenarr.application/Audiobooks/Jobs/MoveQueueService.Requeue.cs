@@ -186,25 +186,6 @@ public partial class MoveQueueService
                 return null;
             }
 
-            if (!MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
-                    job.Entries,
-                    out _,
-                    out _,
-                    out _)
-                || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
-                    job.Entries,
-                    out _,
-                    out _,
-                    out _))
-            {
-                await MarkUnsafeStoredPathNeedsAttentionAsync(
-                    job,
-                    "The move job has no durable source- or target-boundary physical-generation authorization and cannot be requeued safely.",
-                    cancellationToken);
-                jobToNotify = job;
-                return null;
-            }
-
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 job.AudiobookId,
                 sourcePath,

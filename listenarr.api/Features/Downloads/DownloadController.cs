@@ -58,6 +58,20 @@ namespace Listenarr.Api.Features.Downloads
                 var result = await _downloadService.SearchAndDownloadAsync(request.AudiobookId);
                 return Ok(result);
             }
+            catch (DownloadClientRejectedReleaseException ex)
+            {
+                // The client refused this one release rather than failing to accept it,
+                // most often because it already holds the same release, grabbed earlier for
+                // another book the release also satisfies. Neither the client nor the
+                // release is broken, so this answers the same way the service does when no
+                // download client is available, rather than reporting a server error.
+                _logger.LogInformation(
+                    "Download client refused the release for audiobook {AudiobookId}: {Reason}",
+                    request.AudiobookId,
+                    ex.Message);
+
+                return Ok(new SearchAndDownloadResult { Success = false, Message = ex.Message });
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error in search and download for audiobook {AudiobookId}", request.AudiobookId);
@@ -106,6 +120,23 @@ namespace Listenarr.Api.Features.Downloads
                 return StatusCode(
                     ex.IsExpired ? StatusCodes.Status410Gone : StatusCodes.Status400BadRequest,
                     new { message = "Unable to use download reference", error = ex.Message });
+            }
+            catch (DownloadClientRejectedReleaseException ex)
+            {
+                // Same reasoning as search-and-download above, answered in this endpoint's own
+                // idiom. The client refused one release it already holds; nothing upstream of it
+                // is broken, so 502 Bad Gateway is the wrong thing to tell the caller. This
+                // endpoint already answers 409 a few lines up when a download for the audiobook
+                // is active, which is the same situation seen from the database side, so the
+                // refusal reuses that code rather than inventing one.
+                //
+                // This catch must stay ABOVE the DownloadClientSubmissionException catch below:
+                // the rejected-release type derives from it, and the first matching clause wins.
+                _logger.LogInformation(
+                    "Download client refused the release: {Reason}",
+                    LogRedaction.SanitizeText(ex.Message));
+
+                return Conflict(new { message = ex.Message });
             }
             catch (DownloadClientSubmissionException ex)
             {

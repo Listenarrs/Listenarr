@@ -314,6 +314,198 @@ public sealed class ScanFileDiscoveryTests : BaseTests, IDisposable
             && issue.Path == link);
     }
 
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorHasPostNominalInMetadata_MatchesCleanFolder()
+    {
+        var requested = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, PhD")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorFolderHasGenerationalSuffix_MatchesCleanMetadata()
+    {
+        var requested = CreateAudioFile("Martin King Jr", "Speeches", "Speeches.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Speeches")
+            .WithAuthor("Martin King")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AmbiguousShortWordSuffix_IsNotStrippedAsPostNominal()
+    {
+        // "Ma" is a real surname (e.g. Yo-Yo Ma), not a post-nominal, so a "Yo Yo" folder must
+        // not capture a "Yo Yo Ma" book. Excluding short ambiguous degree abbreviations keeps
+        // the normalization from silently dropping surnames.
+        _ = CreateAudioFile("Yo Yo", "Suite", "Suite.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Suite")
+            .WithAuthor("Yo Yo Ma")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorInitials_AreNotExpandedToFullName()
+    {
+        // Post-nominals only: initials such as "L. M." must not be treated as equivalent to a
+        // spelled-out given name, which would over-match otherwise-distinct authors.
+        _ = CreateAudioFile("Lucy Maud Montgomery", "Avonlea", "Avonlea.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Avonlea")
+            .WithAuthor("L. M. Montgomery")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Empty(result);
+    }
+
+    [Theory]
+    [InlineData("Jane Doe, Ph.D.")]
+    [InlineData("Jane Doe, M.D.")]
+    [InlineData("Jane Doe, J.D.")]
+    [InlineData("Jane Doe, Ed.D.")]
+    [InlineData("Jane Doe, D.D.S.")]
+    [InlineData("Jane Doe, LL.M.")]
+    [InlineData("Jane Doe, M.D., Ph.D.")]
+    public void FindMatchingAudioFiles_AuthorHasDottedPostNominalInMetadata_MatchesCleanFolder(
+        string author)
+    {
+        // Dotted spellings ("Ph.D.") must match a clean folder just like the plain form
+        // ("PhD") already does, including stacked credentials.
+        var requested = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor(author)
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorFolderHasDottedPostNominal_MatchesCleanMetadata()
+    {
+        // The reverse direction: a folder carrying a dotted credential matches clean metadata.
+        // No trailing dot — Windows strips those from directory names, which is also exactly how
+        // such a folder ends up on disk ("Martin King Ph.D.") -> "Martin King Ph.D").
+        var requested = CreateAudioFile("Martin King Ph.D", "Speeches", "Speeches.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Speeches")
+            .WithAuthor("Martin King")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Theory]
+    [InlineData("Jane Doe, B.S.")]
+    [InlineData("Jane Doe, A.B.")]
+    public void FindMatchingAudioFiles_UncuratedDottedAbbreviation_IsNotStripped(string author)
+    {
+        // Short abbreviations outside the curated list (e.g. "B.S.", "A.B.") must not be
+        // stripped, so the full name stays distinct and a bare "Jane Doe" folder is not captured.
+        _ = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor(author)
+            .Build();
+
+        Assert.Empty(Discover(audiobook));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_TrailingDottedInitials_AreNotStrippedAsPostNominal()
+    {
+        // Trailing initials ("L.M.") are not a credential and must not be collapsed/stripped,
+        // which would otherwise over-match a bare surname folder.
+        _ = CreateAudioFile("Montgomery", "Avonlea", "Avonlea.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Avonlea")
+            .WithAuthor("Montgomery L.M.")
+            .Build();
+
+        Assert.Empty(Discover(audiobook));
+    }
+
+    [Theory]
+    [InlineData("Jane Doe, Ph.D., CPA")]
+    [InlineData("Jane Doe, CPA, Ph.D.")]
+    public void FindMatchingAudioFiles_MixedCredentialStack_MatchesCleanFolder(string author)
+    {
+        // A stack mixing a dotted and a plain credential, in either order, must still reduce to
+        // the clean name so a bare author folder matches. The walk crosses the plain credential
+        // to reach the dotted one instead of stopping at it (#990 review).
+        var requested = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor(author)
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_SpacedCredentialFolder_MatchesDottedRecord()
+    {
+        // Regression: a "Jane Doe Ph D" folder must still match a "Jane Doe, Ph.D." record.
+        // Preserving the original author token restores this; the collapsed/stripped aliases
+        // alone missed the spaced spelling (#990 review).
+        var requested = CreateAudioFile("Jane Doe Ph D", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, Ph.D.")
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_DottedCredentialFolder_MatchesSpacedRecord()
+    {
+        // The reverse direction: a dotted-credential folder must match a spaced-credential record.
+        // Keeping the folder's original normalization (before collapsing) restores it (#990 review).
+        var requested = CreateAudioFile("Jane Doe Ph.D", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe Ph D")
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_CredentialLikeTokenWithExtraCharacters_IsNotStripped()
+    {
+        // "Ph.D.2" is not a credential. Stripping only the periods keeps it as "phd2" (not a
+        // curated post-nominal), so a bare "Jane Doe" folder is not wrongly captured (#990 review).
+        _ = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, Ph.D.2")
+            .Build();
+
+        Assert.Empty(Discover(audiobook));
+    }
+
     private List<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook).AttributedFiles.ToList();
 

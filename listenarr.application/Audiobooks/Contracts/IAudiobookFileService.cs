@@ -52,6 +52,7 @@ namespace Listenarr.Application.Audiobooks.Contracts
         string MetadataPath { get; }
         string PhysicalObjectIdentity { get; }
         bool HasDurablePhysicalObjectIdentity => true;
+        bool SupportsMetadataWrite => false;
         string? SourcePhysicalObjectIdentity { get; }
         Stream OpenMetadataReadStream() =>
             throw new NotSupportedException(
@@ -98,6 +99,16 @@ namespace Listenarr.Application.Audiobooks.Contracts
             string? expectedPhysicalObjectIdentity,
             IAudiobookFileRegistrationLease registrationLease,
             string? source = "scan",
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Refresh metadata for an already-owned path using a live read lease.
+        /// Does not enroll, replace, or clear path or physical-generation identity.
+        /// </summary>
+        Task<bool> RefreshMetadataAsync(
+            Audiobook audiobook,
+            int fileId,
+            IAudiobookFileRegistrationLease registrationLease,
             CancellationToken cancellationToken = default);
 
         Task<bool> RollbackPhysicalGenerationClaimAsync(

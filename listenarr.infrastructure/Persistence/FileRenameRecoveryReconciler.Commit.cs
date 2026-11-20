@@ -14,48 +14,54 @@ public sealed partial class FileRenameRecoveryReconciler
         ListenArrDbContext db,
         FileMutationJournal journal,
         string protectedPath,
-        string expectedPhysicalObjectIdentity,
         CancellationToken cancellationToken)
     {
-        PinnedAudiobookFileRegistrationLease? lease;
-        try
-        {
-            lease = PinnedAudiobookFileRegistrationLease.Open(
-                protectedPath,
-                expectedPhysicalObjectIdentity);
-        }
-        catch (FileNotFoundException)
-        {
-            return GenerationMatchOutcome.Mismatch;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return GenerationMatchOutcome.Mismatch;
-        }
-        catch (System.ComponentModel.Win32Exception exception) when (
-            OperatingSystem.IsWindows()
-                ? exception.NativeErrorCode is 2 or 3
-                : exception.NativeErrorCode == 2)
-        {
-            return GenerationMatchOutcome.Mismatch;
-        }
-        catch (Exception exception) when (IsTransientRecoveryFilesystemException(exception))
-        {
-            return GenerationMatchOutcome.Unavailable;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException
-                or NotSupportedException or PathTooLongException)
+        if (string.IsNullOrWhiteSpace(journal.SourceSha256))
         {
             return GenerationMatchOutcome.Mismatch;
         }
 
-        using (lease)
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? parent = null;
+        PinnedDirectoryCreation.PinnedFileEntry? file = null;
+        try
         {
-            var publicationMatch = lease.ProbeCurrentPublication();
-            if (publicationMatch != RegistrationPublicationMatchOutcome.Match)
+            var fullPath = Path.GetFullPath(protectedPath);
+            var parentPath = Path.GetDirectoryName(fullPath);
+            var fileName = Path.GetFileName(fullPath);
+            if (string.IsNullOrWhiteSpace(parentPath)
+                || string.IsNullOrWhiteSpace(fileName))
             {
-                return ToGenerationMatchOutcome(publicationMatch);
+                return GenerationMatchOutcome.Mismatch;
+            }
+
+            parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parentPath,
+                createMissing: false);
+            var openOutcome = parent.TryOpenExistingFileWithOutcome(
+                fileName,
+                requireDeleteAccess: false,
+                out file);
+            if (openOutcome == PinnedFileOpenOutcome.NotFound)
+            {
+                return GenerationMatchOutcome.Missing;
+            }
+            if (openOutcome == PinnedFileOpenOutcome.Unavailable)
+            {
+                return GenerationMatchOutcome.Unavailable;
+            }
+            if (file == null || !file.IsRegularFile())
+            {
+                return GenerationMatchOutcome.Mismatch;
+            }
+
+            var publicationMatch = await ProbePinnedRecoveryContentAsync(
+                parent,
+                file,
+                journal,
+                cancellationToken);
+            if (publicationMatch != GenerationMatchOutcome.Match)
+            {
+                return publicationMatch;
             }
 
             await using var transaction = db.Database.IsRelational()
@@ -73,14 +79,18 @@ public sealed partial class FileRenameRecoveryReconciler
                     journal.OperationId);
             }
 
-            publicationMatch = lease.ProbeCurrentPublication();
-            if (publicationMatch != RegistrationPublicationMatchOutcome.Match)
+            publicationMatch = await ProbePinnedRecoveryContentAsync(
+                parent,
+                file,
+                journal,
+                CancellationToken.None);
+            if (publicationMatch != GenerationMatchOutcome.Match)
             {
                 if (transaction != null)
                 {
                     await transaction.RollbackAsync(CancellationToken.None);
                 }
-                return ToGenerationMatchOutcome(publicationMatch);
+                return publicationMatch;
             }
 
             if (transaction != null)
@@ -89,14 +99,54 @@ public sealed partial class FileRenameRecoveryReconciler
             }
             return GenerationMatchOutcome.Match;
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            return GenerationMatchOutcome.Missing;
+        }
+        catch (Exception exception) when (IsTransientRecoveryFilesystemException(exception))
+        {
+            return GenerationMatchOutcome.Unavailable;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException)
+        {
+            return GenerationMatchOutcome.Mismatch;
+        }
+        finally
+        {
+            file?.Dispose();
+            parent?.Dispose();
+        }
     }
 
-    private static GenerationMatchOutcome ToGenerationMatchOutcome(
-        RegistrationPublicationMatchOutcome outcome) =>
-        outcome switch
+    private static async Task<GenerationMatchOutcome>
+        ProbePinnedRecoveryContentAsync(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
+            PinnedDirectoryCreation.PinnedFileEntry file,
+            FileMutationJournal journal,
+            CancellationToken cancellationToken)
+    {
+        var fileVisibility = file.ProbeVisiblePathMatch();
+        var parentVisibility = parent.ProbeVisiblePathMatch();
+        if (fileVisibility == RegistrationPublicationMatchOutcome.Unavailable
+            || parentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
         {
-            RegistrationPublicationMatchOutcome.Match => GenerationMatchOutcome.Match,
-            RegistrationPublicationMatchOutcome.Unavailable => GenerationMatchOutcome.Unavailable,
-            _ => GenerationMatchOutcome.Mismatch
-        };
+            return GenerationMatchOutcome.Unavailable;
+        }
+        if (fileVisibility != RegistrationPublicationMatchOutcome.Match
+            || parentVisibility != RegistrationPublicationMatchOutcome.Match)
+        {
+            return GenerationMatchOutcome.Mismatch;
+        }
+
+        return await file.MatchesAsync(
+                journal.SourceLength,
+                journal.SourceSha256!,
+                cancellationToken)
+            ? GenerationMatchOutcome.Match
+            : GenerationMatchOutcome.Mismatch;
+    }
 }

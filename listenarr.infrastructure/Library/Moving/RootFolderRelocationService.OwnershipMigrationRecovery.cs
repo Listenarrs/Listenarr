@@ -260,41 +260,28 @@ public sealed partial class RootFolderRelocationService
             relocation.SkippedItems.Select(item => item.AudiobookId).ToHashSet(),
             cancellationToken);
         var transferPlans = ownershipPreparation.Transfers;
-        PinnedDirectoryCreation.PinnedDirectoryAnchor? targetGenerationLease = null;
-        if (relocation.TargetDirectoryObjectIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(relocation.TargetDirectoryObjectIdentity)
-            && string.IsNullOrWhiteSpace(
-                relocation.TargetDirectoryObjectIdentityUnavailableReason))
-        {
-            var currentTargetGeneration =
-                await ResolveExistingDirectoryObjectIdentityAsync(
+        // Recovery retires persisted cleanup claims instead of restoring them.
+        // Metadata-only repair must also work while its target is unmounted.
+        var currentTargetGeneration =
+            await ResolveOrEnrollDirectoryObjectIdentityAsync(
+                relocation.TargetPath,
+                cancellationToken);
+        using PinnedDirectoryCreation.PinnedDirectoryAnchor? targetGenerationLease =
+            relocation.Mode != RootFolderRelocationMode.MetadataOnly
+                || currentTargetGeneration.IsAvailable
+                ? PinTargetDirectoryGeneration(
                     relocation.TargetPath,
-                    relocation.TargetDirectoryObjectIdentityVersion.Value,
-                    relocation.TargetDirectoryObjectIdentity!,
-                    cancellationToken);
-            if (currentTargetGeneration.IsAvailable)
-            {
-                targetGenerationLease = PinTargetDirectoryGeneration(
-                    relocation.TargetPath,
-                    relocation.TargetDirectoryObjectIdentityVersion,
-                    relocation.TargetDirectoryObjectIdentity,
-                    relocation.TargetDirectoryObjectIdentityUnavailableReason,
-                    cancellationToken);
-            }
-            else
-            {
-                // Metadata-only repair does not require physical authority over the
-                // target generation. If that generation changed while the metadata
-                // saga was incomplete, drop the stale authority and require a later
-                // explicit root confirmation rather than adopting the replacement.
-                relocation.TargetDirectoryObjectIdentityVersion = null;
-                relocation.TargetDirectoryObjectIdentity = null;
-                relocation.TargetDirectoryObjectIdentityUnavailableReason =
-                    "The root folder directory changed during metadata repair and must be confirmed before filesystem mutations.";
-                relocation.TargetIdentityEnrollmentState =
-                    TargetIdentityEnrollmentState.Unavailable;
-            }
-        }
+                    expectedVersion: null,
+                    expectedValue: null,
+                    unavailableReason: null,
+                    cancellationToken)
+                : null;
+        relocation.TargetDirectoryObjectIdentityVersion =
+            currentTargetGeneration.Version;
+        relocation.TargetDirectoryObjectIdentity =
+            currentTargetGeneration.Value;
+        relocation.TargetDirectoryObjectIdentityUnavailableReason =
+            currentTargetGeneration.UnavailableReason;
         IReadOnlyList<OwnershipMigrationTargetLease> ownershipGenerationLeases = [];
         try
         {
@@ -409,7 +396,6 @@ public sealed partial class RootFolderRelocationService
         finally
         {
             DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
-            targetGenerationLease?.Dispose();
         }
     }
 

@@ -83,6 +83,22 @@ namespace Listenarr.Infrastructure.Persistence.Configurations
                 .HasColumnType("TEXT");
             authorAsinsProp.Metadata.SetValueComparer(authorAsinsComparer);
 
+            // SQLite stores DateTime as TEXT without the DateTimeKind flag. Added is a UTC
+            // instant, so restore that contract when values are materialized and normalize
+            // any local values before persistence.
+            var addedUtcConverter = new ValueConverter<DateTime?, DateTime?>(
+                value => value.HasValue
+                    ? value.Value.Kind == DateTimeKind.Local
+                        ? value.Value.ToUniversalTime()
+                        : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                    : value,
+                value => value.HasValue
+                    ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                    : value);
+            builder.Property(e => e.Added)
+                .HasConversion(addedUtcConverter)
+                .HasColumnType("TEXT");
+
             // One-to-many: Audiobook -> AudiobookFiles
             builder.HasMany(a => a.Files)
                 .WithOne(f => f.Audiobook)

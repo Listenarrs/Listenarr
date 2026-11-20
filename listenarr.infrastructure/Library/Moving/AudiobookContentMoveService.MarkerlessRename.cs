@@ -12,9 +12,7 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
+
 
         foreach (var entry in manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
@@ -53,17 +51,12 @@ internal sealed partial class AudiobookContentMoveService
                     "Interrupted native-rename recovery target parent changed type or became linked.");
             }
 
-            if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-            {
-                throw new MoveNeedsAttentionException(
-                    "Interrupted native-rename recovery requires a persisted target endpoint generation.");
-            }
+
             using var targetParent = OpenPinnedMoveDescendant(
                 request,
                 target,
                 targetParentPath,
                 request.TargetSemantics,
-                endpoints.TargetDirectoryObjectIdentity,
                 sourceEndpoint: false);
             using var targetEntry = targetParent.TryOpenExistingFile(
                 Path.GetFileName(targetPath),
@@ -121,10 +114,7 @@ internal sealed partial class AudiobookContentMoveService
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     targetParent,
                     $"The markerless native-rename target parent is temporarily unavailable: {entry.RelativePath}")
-                || !PinnedFileLengthMatchesManifest(stableEntry, entry)
-                || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                || !stableEntry.MatchesObjectIdentity(
-                    entry.SourcePhysicalObjectIdentity))
+                || !PinnedFileLengthMatchesManifest(stableEntry, entry))
             {
                 throw new MoveNeedsAttentionException(
                     $"The markerless source changed before stable native-rename publication: {entry.RelativePath}");
@@ -178,13 +168,15 @@ internal sealed partial class AudiobookContentMoveService
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     targetParent,
                     $"The markerless native-rename target parent is temporarily unavailable before publication: {entry.RelativePath}")
-                || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                || !renameEntry.MatchesObjectIdentity(
-                    entry.SourcePhysicalObjectIdentity))
+                || !await PinnedFileMatchesManifestAsync(
+                    renameEntry,
+                    entry,
+                    cancellationToken))
             {
                 return (false, null);
             }
 
+            var liveSourceIdentity = renameEntry.GetObjectIdentity();
             await EnsureMutationAuthorizedAsync(
                 request,
                 source,
@@ -232,7 +224,7 @@ internal sealed partial class AudiobookContentMoveService
                     Path.GetFileName(sourceEntry.FullPath),
                     targetParent,
                     targetName,
-                    entry.SourcePhysicalObjectIdentity!);
+                    liveSourceIdentity);
                 if (observation == MarkerlessNativeRenameFailureObservation.Published)
                 {
                     return await RecoverObservedMarkerlessNativeRenameAsync(
@@ -241,6 +233,7 @@ internal sealed partial class AudiobookContentMoveService
                         sourceParent,
                         targetParent,
                         targetName,
+                        liveSourceIdentity,
                         cancellationToken);
                 }
                 if (observation == MarkerlessNativeRenameFailureObservation.NotApplied
@@ -302,11 +295,10 @@ internal sealed partial class AudiobookContentMoveService
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     targetParent,
                     $"The markerless native-rename target parent is temporarily unavailable after publication: {entry.RelativePath}")
-                || !renameEntry.MatchesObjectIdentity(
-                    entry.SourcePhysicalObjectIdentity!))
+                || !renameEntry.MatchesObjectIdentity(liveSourceIdentity))
             {
                 throw new MoveNeedsAttentionException(
-                    $"The markerless native rename target changed physical generation: {entry.RelativePath}");
+                    $"The markerless native rename target changed during the live publication operation: {entry.RelativePath}");
             }
 
             verificationLease = targetParent.OpenExistingFileForVerificationLease(
@@ -320,16 +312,17 @@ internal sealed partial class AudiobookContentMoveService
                     $"The markerless native rename verification lease did not capture the published generation: {entry.RelativePath}");
             }
 
-            var durableTargetIdentity = entry.SourcePhysicalObjectIdentity!;
             await UpdateTargetEntryStateAsync(
                 request.JobId,
                 request.LeaseToken,
                 entry.RelativePath,
                 MoveJobEntryCopyState.Verified,
-                durableTargetIdentity,
+                liveSourceIdentity,
                 cancellationToken);
             entry.CopyState = MoveJobEntryCopyState.Verified;
-            entry.TargetPhysicalObjectIdentity = durableTargetIdentity;
+            // Persisted identity is diagnostic only; this value was captured from
+            // the live entry participating in this operation.
+            entry.TargetPhysicalObjectIdentity = liveSourceIdentity;
             var result = (Published: true, VerificationLease: verificationLease);
             verificationLease = null;
             return result;
@@ -346,21 +339,12 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedFileEntry targetEntry,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !PinnedFileVisibleOrThrowUnavailable(
+        if (!PinnedFileVisibleOrThrowUnavailable(
                 targetEntry,
-                $"The interrupted markerless native-rename target is temporarily unavailable: {entry.RelativePath}")
-            || !targetEntry.MatchesObjectIdentity(
-                entry.SourcePhysicalObjectIdentity)
+                $"The interrupted markerless publication target is temporarily unavailable: {entry.RelativePath}")
             || entry.CopyState is not (
                 MoveJobEntryCopyState.Pending or MoveJobEntryCopyState.Verified)
-            || (entry.CopyState == MoveJobEntryCopyState.Pending
-                && !string.IsNullOrWhiteSpace(
-                    entry.TargetPhysicalObjectIdentity))
-            || (entry.CopyState == MoveJobEntryCopyState.Verified
-                && (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-                    || !targetEntry.MatchesObjectIdentity(
-                        entry.TargetPhysicalObjectIdentity)))
+            || string.IsNullOrWhiteSpace(entry.Sha256)
             || !await PinnedFileMatchesManifestAsync(
                 targetEntry,
                 entry,
@@ -371,16 +355,16 @@ internal sealed partial class AudiobookContentMoveService
 
         if (entry.CopyState == MoveJobEntryCopyState.Pending)
         {
+            var observedTargetIdentity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(targetEntry.GetObjectIdentity);
             await UpdateTargetEntryStateAsync(
                 request.JobId,
                 request.LeaseToken,
                 entry.RelativePath,
                 MoveJobEntryCopyState.Verified,
-                entry.SourcePhysicalObjectIdentity,
+                observedTargetIdentity,
                 cancellationToken);
             entry.CopyState = MoveJobEntryCopyState.Verified;
-            entry.TargetPhysicalObjectIdentity =
-                entry.SourcePhysicalObjectIdentity;
+            entry.TargetPhysicalObjectIdentity = observedTargetIdentity;
         }
 
         return true;
@@ -393,8 +377,7 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         if (entry.CopyState != MoveJobEntryCopyState.Verified
-            || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
+            || string.IsNullOrWhiteSpace(entry.Sha256))
         {
             return false;
         }
@@ -402,19 +385,13 @@ internal sealed partial class AudiobookContentMoveService
         var targetParentPath = Path.GetDirectoryName(targetPath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless native-rename target has no parent.");
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            return false;
-        }
+
+
         using var targetParent = OpenPinnedMoveDescendant(
             request,
             request.Target,
             targetParentPath,
             request.TargetSemantics,
-            endpoints.TargetDirectoryObjectIdentity,
             sourceEndpoint: false);
         using var targetEntry = targetParent.TryOpenExistingFile(
             Path.GetFileName(targetPath),
@@ -451,9 +428,6 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedFileEntry targetEntry) =>
         PinnedFileVisibleOrThrowUnavailable(
             targetEntry,
-            $"The markerless native-rename target is temporarily unavailable during cleanup: {entry.RelativePath}")
-        && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-        && !string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-        && targetEntry.MatchesObjectIdentity(entry.SourcePhysicalObjectIdentity)
-        && targetEntry.MatchesObjectIdentity(entry.TargetPhysicalObjectIdentity);
+            $"The markerless publication target is temporarily unavailable during cleanup: {entry.RelativePath}")
+        && targetEntry.IsRegularFile();
 }

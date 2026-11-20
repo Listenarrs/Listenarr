@@ -8,31 +8,28 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
 {
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_UnconfirmedVisibleGeneration_CommitsAuthorization()
+    public async Task ConfirmCurrentFolderAsync_HealthyRoot_DoesNotRequirePhysicalAuthorization()
     {
         var fixture = await CreateFixtureAsync("confirm-current-folder");
         await using var cleanup = fixture;
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
-        Assert.Equal(RootFolderStorageState.Unconfirmed, observation.State);
-        Assert.NotNull(observation.ConfirmationToken);
+        Assert.Equal(RootFolderStorageState.Healthy, observation.State);
+        Assert.Null(observation.ConfirmationToken);
 
-        var confirmed = await fixture.Service.ConfirmCurrentFolderAsync(
-            root.Id,
-            root.Path,
-            observation.ConfirmationToken!);
+        var confirmed = await fixture.ConfirmCurrentAsync(root);
 
-        Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, confirmed.DirectoryObjectIdentityVersion);
-        Assert.False(string.IsNullOrWhiteSpace(confirmed.DirectoryObjectIdentity));
-        Assert.Null(confirmed.DirectoryObjectIdentityUnavailableReason);
+        Assert.Null(confirmed.DirectoryObjectIdentityVersion);
+        Assert.Null(confirmed.DirectoryObjectIdentity);
         Assert.Equal(1, confirmed.StorageContractRevision);
         var persisted = await fixture.LoadRootAsync();
         var refreshed = await fixture.HealthResolver.ResolveAsync(persisted);
         Assert.Equal(RootFolderStorageState.Healthy, refreshed.State);
+        Assert.True(refreshed.CanMutateFilesystem);
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_LegacyRootBootstrapsFilesystemSemanticsAndPhysicalAuthorization()
+    public async Task ConfirmCurrentFolderAsync_LegacyRootBootstrapsFilesystemSemanticsWithoutPhysicalAuthorization()
     {
         var fixture = await CreateFixtureAsync("confirm-legacy-root");
         await using var cleanup = fixture;
@@ -51,35 +48,40 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var confirmed = await fixture.Service.ConfirmCurrentFolderAsync(
             root.Id,
             root.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
         Assert.Equal(PathIdentityState.Valid, confirmed.PathIdentityState);
         Assert.NotEqual(FileSystemCaseSensitivity.Unknown, confirmed.ResolvedCaseSensitivity);
         Assert.False(string.IsNullOrWhiteSpace(confirmed.PathIdentityKey));
-        Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, confirmed.DirectoryObjectIdentityVersion);
-        Assert.False(string.IsNullOrWhiteSpace(confirmed.DirectoryObjectIdentity));
+        Assert.Null(confirmed.DirectoryObjectIdentityVersion);
+        Assert.Null(confirmed.DirectoryObjectIdentity);
         var refreshed = await fixture.HealthResolver.ResolveAsync(await fixture.LoadRootAsync());
         Assert.Equal(RootFolderStorageState.Healthy, refreshed.State);
         Assert.True(refreshed.CanMutateFilesystem);
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_StaleObservationToken_DoesNotAuthorizeReplacement()
+    public async Task ConfirmCurrentFolderAsync_StaleConfigurationToken_DoesNotAuthorizeUpdatedContract()
     {
         var fixture = await CreateFixtureAsync("confirm-stale-token");
         await using var cleanup = fixture;
         var root = await fixture.LoadRootAsync();
-        var observation = await fixture.HealthResolver.ResolveAsync(root);
-        Assert.NotNull(observation.ConfirmationToken);
-        fixture.ReplaceVisibleRoot();
+        var staleToken =
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root);
+        await fixture.UpdateRootAsync(candidate =>
+            candidate.StorageContractRevision++);
+        var current = await fixture.LoadRootAsync();
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
-                root.Id,
-                root.Path,
-                observation.ConfirmationToken!));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
+                current.Id,
+                current.Path,
+                staleToken));
 
-        Assert.Contains("changed after it was displayed", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "changed after it was displayed",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentityVersion);
         Assert.Null(persisted.DirectoryObjectIdentity);
@@ -108,8 +110,8 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         });
         var root = await fixture.LoadRootAsync();
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
                 "stale-observation-token"));
@@ -138,11 +140,11 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
@@ -167,14 +169,30 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentFolderAsync_ActiveVerifiedOrganizeRecovery_BlocksStorageRevisionChange()
+    {
+        var fixture = await CreateFixtureAsync("confirm-verified-organize-recovery");
+        await using var cleanup = fixture;
+        await fixture.AddVerifiedOrganizeRecoveryAsync();
+        var root = await fixture.LoadRootAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.ConfirmCurrentAsync(root));
+
+        Assert.Contains("verified organize recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Equal(root.StorageContractRevision, persisted.StorageContractRevision);
     }
 
     [Fact]
@@ -186,13 +204,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -206,13 +225,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -226,13 +246,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -249,9 +270,10 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var confirmed = await fixture.Service.ConfirmCurrentFolderAsync(
             root.Id,
             root.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
-        Assert.False(string.IsNullOrWhiteSpace(confirmed.DirectoryObjectIdentity));
+        Assert.Null(confirmed.DirectoryObjectIdentity);
+        Assert.Equal(PathIdentityState.Valid, confirmed.PathIdentityState);
     }
 
     [Fact]
@@ -263,11 +285,11 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         Assert.Contains("deletion recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
         var persisted = await fixture.LoadRootAsync();
@@ -283,11 +305,11 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var observation = await fixture.HealthResolver.ResolveAsync(root);
         fixture.Service.BeforeCommitForTest = fixture.ReplaceVisibleRoot;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentityVersion);
@@ -295,7 +317,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_ReplacementAfterCommit_PreservesAuthorityButMarksUnavailable()
+    public async Task ConfirmCurrentFolderAsync_ReplacementAfterCommit_PreservesPathContractAndRecordsDiagnostic()
     {
         var fixture = await CreateFixtureAsync("confirm-replaced-after-commit");
         await using var cleanup = fixture;
@@ -303,25 +325,25 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var observation = await fixture.HealthResolver.ResolveAsync(root);
         fixture.Service.AfterCommitForTest = fixture.ReplaceVisibleRoot;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         var persisted = await fixture.LoadRootAsync();
-        Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, persisted.DirectoryObjectIdentityVersion);
-        Assert.False(string.IsNullOrWhiteSpace(persisted.DirectoryObjectIdentity));
+        Assert.Null(persisted.DirectoryObjectIdentityVersion);
+        Assert.Null(persisted.DirectoryObjectIdentity);
         Assert.Contains(
-            "changed immediately after authorization",
+            "changed immediately after confirmation",
             persisted.DirectoryObjectIdentityUnavailableReason ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
         var refreshed = await fixture.HealthResolver.ResolveAsync(persisted);
-        Assert.Equal(RootFolderStorageState.Changed, refreshed.State);
+        Assert.Equal(RootFolderStorageState.Healthy, refreshed.State);
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_ReplacementGeneration_RetiresOldChildAuthorityAndAllowsCreationBelowExistingReplacementChild()
+    public async Task ConfirmCurrentFolderAsync_PhysicalReplacement_PreservesChildPathOwnershipAndAllowsCreationBelowIt()
     {
         var fixture = await CreateFixtureAsync("confirm-replacement-ownership");
         await using var cleanup = fixture;
@@ -337,18 +359,18 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await File.WriteAllTextAsync(replacementSentinel, "replacement generation");
         var changedRoot = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(changedRoot);
-        Assert.Equal(RootFolderStorageState.Changed, observation.State);
+        Assert.Equal(RootFolderStorageState.Healthy, observation.State);
 
         await fixture.Service.ConfirmCurrentFolderAsync(
             changedRoot.Id,
             changedRoot.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(
+                changedRoot));
 
-        var retired = await fixture.LoadOwnershipAsync(oldOwnership.Id);
-        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
-        Assert.Null(retired.PathOwnershipKey);
-        Assert.Null(retired.ManagedRootFolderId);
-        Assert.Contains("different physical directory generation", retired.StateReason ?? string.Empty);
+        var persisted = await fixture.LoadOwnershipAsync(oldOwnership.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Owned, persisted.State);
+        Assert.Equal(oldOwnershipKey, persisted.PathOwnershipKey);
+        Assert.Equal(changedRoot.Id, persisted.ManagedRootFolderId);
         var refreshed = await fixture.HealthResolver.ResolveAsync(await fixture.LoadRootAsync());
         Assert.Equal(RootFolderStorageState.Healthy, refreshed.State);
         Assert.True(refreshed.CanMutateFilesystem);
@@ -356,9 +378,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var replacementResolution = await fixture.OwnershipStore.ResolveOwnedAsync(
             oldAuthorPath,
             semantics);
-        Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, replacementResolution.State);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.OwnershipStore.BeginRemovalAsync(oldOwnership.Id, oldOwnershipKey));
+        Assert.Equal(LibraryDirectoryOwnershipResolutionState.Owned, replacementResolution.State);
 
         var newBookPath = Path.Join(oldAuthorPath, "New Book");
         var created = await fixture.OwnershipStore.EnsureCreatedHierarchyAsync(
@@ -427,11 +447,12 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         fixture.Service.BeforeCommitForTest = () =>
             throw new InvalidOperationException("Injected confirmation commit failure.");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 changedRoot.Id,
                 changedRoot.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(
+                    changedRoot)));
 
         Assert.Contains("Injected", exception.Message);
         var persistedRoot = await fixture.LoadRootAsync();
@@ -458,11 +479,12 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         using var cancellation = new CancellationTokenSource();
         fixture.Service.BeforeCommitForTest = cancellation.Cancel;
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 changedRoot.Id,
                 changedRoot.Path,
-                observation.ConfirmationToken!,
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(
+                    changedRoot),
                 cancellation.Token));
 
         var persistedRoot = await fixture.LoadRootAsync();
@@ -474,7 +496,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_ReplacementTokenBecomesStale_DoesNotRetireOldOwnership()
+    public async Task ConfirmCurrentFolderAsync_PhysicalReplacementAlone_DoesNotInvalidatePathContractToken()
     {
         var fixture = await CreateFixtureAsync("confirm-replacement-stale-token-ownership");
         await using var cleanup = fixture;
@@ -487,12 +509,12 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var observation = await fixture.HealthResolver.ResolveAsync(changedRoot);
         fixture.ReplaceVisibleRoot();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
-                changedRoot.Id,
-                changedRoot.Path,
-                observation.ConfirmationToken!));
+        var confirmed = await fixture.Service.ConfirmCurrentFolderAsync(
+            changedRoot.Id,
+            changedRoot.Path,
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
+        Assert.Equal(PathIdentityState.Valid, confirmed.PathIdentityState);
         var persistedOwnership = await fixture.LoadOwnershipAsync(ownership.Id);
         Assert.Equal(LibraryDirectoryOwnershipState.Owned, persistedOwnership.State);
         Assert.Equal(ownershipKey, persistedOwnership.PathOwnershipKey);
@@ -500,7 +522,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_ReplacementGeneration_RetiresAllClaimsFromPriorGeneration()
+    public async Task ConfirmCurrentFolderAsync_PhysicalReplacement_PreservesPathOwnershipClaims()
     {
         var fixture = await CreateFixtureAsync("confirm-replacement-multiple-ownerships");
         await using var cleanup = fixture;
@@ -522,14 +544,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await fixture.Service.ConfirmCurrentFolderAsync(
             changedRoot.Id,
             changedRoot.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
         foreach (var ownershipId in ownershipIds)
         {
-            var retired = await fixture.LoadOwnershipAsync(ownershipId);
-            Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
-            Assert.Null(retired.PathOwnershipKey);
-            Assert.Null(retired.ManagedRootFolderId);
+            var persisted = await fixture.LoadOwnershipAsync(ownershipId);
+            Assert.Equal(LibraryDirectoryOwnershipState.Owned, persisted.State);
+            Assert.False(string.IsNullOrWhiteSpace(persisted.PathOwnershipKey));
+            Assert.Equal(root.Id, persisted.ManagedRootFolderId);
         }
     }
 
@@ -538,7 +560,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
     [InlineData(LibraryDirectoryOwnershipState.Removing)]
     [InlineData(LibraryDirectoryOwnershipState.Conflict)]
     [InlineData(LibraryDirectoryOwnershipState.Unavailable)]
-    public async Task ConfirmCurrentFolderAsync_ReplacementGeneration_RetiresEveryNonTerminalOwnershipState(
+    public async Task ConfirmCurrentFolderAsync_PhysicalReplacement_PreservesNonTerminalOwnershipState(
         LibraryDirectoryOwnershipState state)
     {
         var fixture = await CreateFixtureAsync($"confirm-replacement-state-{state}");
@@ -561,12 +583,19 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await fixture.Service.ConfirmCurrentFolderAsync(
             changedRoot.Id,
             changedRoot.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
-        var retired = await fixture.LoadOwnershipAsync(ownership.Id);
-        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
-        Assert.Null(retired.PathOwnershipKey);
-        Assert.Null(retired.ManagedRootFolderId);
+        var persisted = await fixture.LoadOwnershipAsync(ownership.Id);
+        Assert.Equal(state, persisted.State);
+        if (state == LibraryDirectoryOwnershipState.Conflict)
+        {
+            Assert.Null(persisted.PathOwnershipKey);
+        }
+        else
+        {
+            Assert.Equal(ownership.PathOwnershipKey, persisted.PathOwnershipKey);
+        }
+        Assert.Equal(root.Id, persisted.ManagedRootFolderId);
     }
 
     [Fact]
@@ -582,11 +611,11 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var changedRoot = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(changedRoot);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.ConfirmCurrentFolderAsync(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await fixture.Service.ConfirmCurrentFolderAsync(
                 changedRoot.Id,
                 changedRoot.Path,
-                observation.ConfirmationToken!));
+                await fixture.CreateCurrentGenerationConfirmationTokenAsync(root)));
 
         Assert.Contains("ownership path migration recovery is incomplete", exception.Message);
         var persistedRoot = await fixture.LoadRootAsync();
@@ -597,7 +626,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ConfirmCurrentFolderAsync_ReplacementGeneration_RemainsSafeAfterServiceRecreation()
+    public async Task ConfirmCurrentFolderAsync_ReplacementGeneration_DoesNotRetireOwnershipFromPersistedIdentity()
     {
         var fixture = await CreateFixtureAsync("confirm-replacement-restart");
         await using var cleanup = fixture;
@@ -611,15 +640,19 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         await fixture.Service.ConfirmCurrentFolderAsync(
             changedRoot.Id,
             changedRoot.Path,
-            observation.ConfirmationToken!);
+            await fixture.CreateCurrentGenerationConfirmationTokenAsync(root));
 
         var recreatedStore = fixture.CreateOwnershipStore();
         var replacementResolution = await recreatedStore.ResolveOwnedAsync(
             authorPath,
             FileSystemPathSemantics.CurrentHostDefault);
-        Assert.Equal(LibraryDirectoryOwnershipResolutionState.Unowned, replacementResolution.State);
-        var retired = await fixture.LoadOwnershipAsync(ownership.Id);
-        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+        Assert.Equal(
+            LibraryDirectoryOwnershipResolutionState.Owned,
+            replacementResolution.State);
+        var persistedOwnership = await fixture.LoadOwnershipAsync(ownership.Id);
+        Assert.Equal(
+            LibraryDirectoryOwnershipState.Owned,
+            persistedOwnership.State);
 
         var childPath = Path.Join(authorPath, "After Restart");
         var created = await recreatedStore.EnsureCreatedHierarchyAsync(
@@ -690,12 +723,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var mutationCoordinator = new FilesystemMutationCoordinator();
         var audiobookCoordinator = new AudiobookOperationCoordinator();
         var identityResolver = new DirectoryObjectIdentityResolver();
+        var recoveryProbe = new FileRegistrationRecoveryProbe(dbFactory);
         var service = new RootFolderStorageConfirmationService(
             dbFactory,
             new FileSystemSemanticsResolver(),
             moveQueue.Object,
             mutationCoordinator,
-            audiobookCoordinator);
+            audiobookCoordinator,
+            recoveryProbe);
         var healthResolver = new RootFolderStorageHealthResolver(identityResolver);
         var ownershipStore = new EfLibraryDirectoryOwnershipStore(
             dbFactory,
@@ -706,7 +741,6 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
             dbFactory,
             service,
             healthResolver,
-            identityResolver,
             ownershipStore,
             mutationCoordinator,
             audiobookCoordinator);
@@ -718,7 +752,6 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         TestDbFactory dbFactory,
         RootFolderStorageConfirmationService service,
         RootFolderStorageHealthResolver healthResolver,
-        DirectoryObjectIdentityResolver identityResolver,
         EfLibraryDirectoryOwnershipStore ownershipStore,
         FilesystemMutationCoordinator mutationCoordinator,
         AudiobookOperationCoordinator audiobookCoordinator)
@@ -733,17 +766,19 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         public async Task<RootFolder> ConfirmInitialGenerationAsync()
         {
             var root = await LoadRootAsync();
-            var observation = await HealthResolver.ResolveAsync(root);
-            if (string.IsNullOrWhiteSpace(observation.ConfirmationToken))
-            {
-                throw new InvalidOperationException(
-                    "The fixture root did not expose an initial confirmation token.");
-            }
+            return await ConfirmCurrentAsync(root);
+        }
 
+        public async Task<RootFolder> ConfirmCurrentAsync(
+            RootFolder root,
+            CancellationToken cancellationToken = default)
+        {
+            var token = await CreateCurrentGenerationConfirmationTokenAsync(root);
             return await Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
-                observation.ConfirmationToken);
+                token,
+                cancellationToken);
         }
 
         public async Task<string> CreateCurrentGenerationConfirmationTokenAsync(RootFolder root)
@@ -756,15 +791,39 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
                 throw new InvalidOperationException(reason);
             }
 
-            var observedIdentity = await identityResolver.ResolveAsync(canonicalPath);
+            var semantics = await new FileSystemSemanticsResolver().ResolveAsync(
+                canonicalPath,
+                root.CaseSensitivityMode);
+            if (semantics.State != PathIdentityState.Valid)
+            {
+                throw new InvalidOperationException(
+                    semantics.Reason
+                        ?? "The fixture root filesystem semantics could not be resolved.");
+            }
+
             return RootFolderStorageHealthResolver.CreateConfirmationToken(
                 root,
                 canonicalPath,
-                observedIdentity);
+                semantics.Semantics);
         }
 
         public EfLibraryDirectoryOwnershipStore CreateOwnershipStore() =>
             new(dbFactory, TimeProvider.System);
+
+        public async Task AddVerifiedOrganizeRecoveryAsync()
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.VerifiedFileRenameJournals.Add(new VerifiedFileRenameJournal
+            {
+                OperationId = Guid.NewGuid(),
+                BatchId = Guid.NewGuid(),
+                AudiobookId = 42,
+                SourcePath = Path.Join(rootPath, "Author", "Book", "book.m4b"),
+                DestinationPath = Path.Join(rootPath, "Author", "Book", "organized.m4b"),
+                State = VerifiedFileRenameState.NeedsAttention
+            });
+            await db.SaveChangesAsync();
+        }
 
         public async Task AddRegistrationRecoveryAsync()
         {

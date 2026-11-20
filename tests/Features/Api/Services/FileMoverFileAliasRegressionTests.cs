@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,6 +12,84 @@ namespace Listenarr.Tests.Features.Api.Services;
 [Trait("Category", "FileSystem")]
 public sealed class FileMoverFileAliasRegressionTests : BaseTests
 {
+    [NetworkStorageTheory]
+    [InlineData(false, "source")]
+    [InlineData(true, "source")]
+    [InlineData(false, "ownership")]
+    [InlineData(true, "ownership")]
+    [InlineData(false, "cleanup")]
+    [InlineData(true, "cleanup")]
+    public async Task MountedRootCaseAlias_UsesConfiguredSemantics(bool nested, string operation)
+    {
+        var mount = Environment.GetEnvironmentVariable(NetworkStorageTheoryAttribute.PathEnvironmentVariable)!;
+        var rootPath = Path.Join(mount, "SourceCapability-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(rootPath);
+        var alias = Path.Join(mount, Path.GetFileName(rootPath).ToLowerInvariant());
+        var insensitive = Directory.Exists(alias);
+        var semantics = new FileSystemPathSemantics(FileSystemPathSyntax.Unix,
+            insensitive ? FileSystemCaseSensitivity.Insensitive : FileSystemCaseSensitivity.Sensitive);
+        var root = new RootFolderBuilder()
+            .WithName("Mounted source capability case contract")
+            .WithPath(rootPath)
+            .WithCaseSensitivityMode(insensitive ? FileSystemCaseSensitivityMode.Insensitive : FileSystemCaseSensitivityMode.Sensitive)
+            .Build();
+        root.ResolvedCaseSensitivity = semantics.CaseSensitivity;
+        root.PathIdentityState = PathIdentityState.Valid;
+        root.PathIdentityKey = FileSystemPathIdentity.CreateKey("root", rootPath, semantics);
+        await _rootFolderRepository.AddAsync(root);
+        var parent = nested ? Path.Join(rootPath, "Book") : rootPath;
+        Directory.CreateDirectory(parent);
+        var source = Path.Join(parent, "source.m4b");
+        await File.WriteAllTextAsync(source, "mounted-case-alias-source");
+        var requested = Path.Join(insensitive ? alias : rootPath,
+            nested ? "Book/source.m4b" : "source.m4b");
+
+        switch (operation)
+        {
+            case "source":
+                var capability = await _provider.GetRequiredService<IFilePublicationSourceCapability>().CheckAsync(requested);
+                Assert.True(capability.IsSupported, capability.Reason);
+                Assert.NotNull(capability.SourceProof);
+                break;
+            case "ownership":
+                using (var authorization = await new Listenarr.Infrastructure.Library.Moving.LibraryDirectoryOwnershipBoundaryAuthorizer(
+                    _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>())
+                    .AuthorizeContainingRootAsync(requested, semantics, CancellationToken.None))
+                {
+                    Assert.True(authorization.ParentAnchor.VisiblePathMatches());
+                }
+                break;
+            case "cleanup":
+                var cleanup = await _provider.GetRequiredService<IMoveSourceCleanupPolicyResolver>()
+                    .ResolveAsync(Path.GetDirectoryName(requested)!, Path.Join(rootPath, "Target"));
+                Assert.Equal(root.Id, cleanup.SourceRootFolderId);
+                break;
+        }
+        Assert.Equal("mounted-case-alias-source", await File.ReadAllTextAsync(source));
+    }
+
+    [DirectoryLinkTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SourceCapability_ConfiguredLinkedBoundary_AllowsRootButRejectsLinkedDescendant(bool linkedDescendant)
+    {
+        var root = FileService.GetTempDirectory("source-capability-linked-root");
+        var physical = Directory.CreateDirectory(Path.Join(root, "physical")).FullName;
+        var linked = Path.Join(root, "linked");
+        Directory.CreateSymbolicLink(linked, physical);
+        var foreign = Directory.CreateDirectory(Path.Join(root, "foreign")).FullName;
+        var parent = Path.Join(linked, "Book");
+        if (linkedDescendant) Directory.CreateSymbolicLink(parent, foreign);
+        else Directory.CreateDirectory(parent);
+        var source = Path.Join(parent, "source.m4b");
+        await File.WriteAllTextAsync(source, "original-source");
+        await AddAuthorizedRootAsync(linked, "Linked source capability root");
+
+        var capability = await _provider.GetRequiredService<IFilePublicationSourceCapability>().CheckAsync(source);
+
+        Assert.Equal(!linkedDescendant, capability.IsSupported);
+        Assert.Equal("original-source", await File.ReadAllTextAsync(source));
+    }
     [LinuxFact]
     public async Task RegularFileIdentityProbe_NamedPipe_ReturnsWithoutBlockingAndRejectsSpecialFile()
     {

@@ -150,7 +150,7 @@ public partial class ManualImportController
 
             if (canonicalRoot.Length > bestRootLength)
             {
-                bestRootResolution = rootResolution;
+                bestRootResolution = rootResolution with { BoundaryPath = canonicalRoot };
                 bestRootLength = canonicalRoot.Length;
             }
         }
@@ -197,7 +197,10 @@ public partial class ManualImportController
             throw new InvalidOperationException(resolution.Reason ?? defaultReason);
         }
 
-        return resolution;
+        // Ownership remains fenced at the configured root, not the nearest book folder.
+        return bestRootResolution == null
+            ? resolution
+            : resolution with { BoundaryPath = bestRootResolution.BoundaryPath };
     }
 
     private async Task<FileSystemSemanticsResolution> ResolveConfiguredRootSemanticsAsync(

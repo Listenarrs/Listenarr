@@ -1,6 +1,6 @@
 using System.Net;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks.Api;
+using Listenarr.Tests.Mocks.Trackers;
 
 namespace Listenarr.Tests.Features.Api.Services.Search.Providers
 {

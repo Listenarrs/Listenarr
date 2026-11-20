@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- dotnet-coverage settings of the test host image: Listenarr's own assemblies only. -->
+<Configuration>
+  <CodeCoverage>
+    <ModulePaths>
+      <Include>
+        <ModulePath>.*Listenarr\.(Api|Application|Domain|Infrastructure)\.dll$</ModulePath>
+      </Include>
+    </ModulePaths>
+    <EnableStaticNativeInstrumentation>False</EnableStaticNativeInstrumentation>
+    <EnableDynamicNativeInstrumentation>False</EnableDynamicNativeInstrumentation>
+  </CodeCoverage>
+</Configuration>

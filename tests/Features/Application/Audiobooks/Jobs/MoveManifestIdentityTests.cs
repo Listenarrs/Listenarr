@@ -7,9 +7,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs;
 public sealed class MoveManifestIdentityTests : BaseTests
 {
     [Fact]
-    public void Version_IsTwo()
+    public void Version_IsThree()
     {
-        Assert.Equal(2, MoveManifestIdentity.Version);
+        Assert.Equal(3, MoveManifestIdentity.Version);
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public sealed class MoveManifestIdentityTests : BaseTests
     }
 
     [Fact]
-    public void CreateDeduplicationKey_TargetBoundaryGenerationChangesIdentity()
+    public void CreateDeduplicationKey_TargetBoundaryGenerationDoesNotChangeIdentity()
     {
         var semantics = new FileSystemPathSemantics(
             FileSystemPathSyntax.Unix,
@@ -82,7 +82,7 @@ public sealed class MoveManifestIdentityTests : BaseTests
             targetIdentity,
             secondEntries);
 
-        Assert.NotEqual(first, second);
+        Assert.Equal(first, second);
     }
 
     [Fact]

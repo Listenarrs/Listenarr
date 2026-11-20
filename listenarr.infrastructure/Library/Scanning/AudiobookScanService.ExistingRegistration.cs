@@ -21,7 +21,11 @@ internal sealed partial class AudiobookScanService
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!FileUtils.IsAudioFile(filePath))
+        // Extension pre-filter only. This entry point serves manual import, which has already
+        // probed an ambiguous container before calling; the content gate that actually decides
+        // sits in the file service this method delegates registration to. The scan enumeration
+        // path is unaffected: it never offers an ambiguous container in the first place.
+        if (!FileUtils.MayBeAudioPendingProbe(filePath))
         {
             return false;
         }
@@ -31,8 +35,7 @@ internal sealed partial class AudiobookScanService
             cancellationToken);
         if (!authorization.IsAuthorized
             || string.IsNullOrWhiteSpace(authorization.Path)
-            || !authorization.Identity.HasValue
-            || !authorization.PhysicalIdentity.HasValue)
+            || !authorization.Identity.HasValue)
         {
             logger.LogWarning(
                 "Refused in-place audiobook file registration because the audiobook folder is not scan-authorized. AudiobookId={AudiobookId} BasePath={BasePath} Reason={Reason}",
@@ -46,7 +49,6 @@ internal sealed partial class AudiobookScanService
             audiobookId,
             authorization.Path,
             authorization.Identity.Value,
-            authorization.PhysicalIdentity.Value,
             AllowReconciliation: false,
             IsAuthoritativeScope: false,
             Source: source,
@@ -120,17 +122,10 @@ internal sealed partial class AudiobookScanService
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(existingFile.PhysicalObjectIdentity))
-            {
-                return true;
-            }
-
-            // Path equality alone cannot prove that a path-only observation is the
-            // same generation as a previously durable ownership record. Preserve
-            // the stronger evidence and require repair rather than silently erasing it.
-            return registrationLease.HasDurablePhysicalObjectIdentity
-                && registrationLease.MatchesPhysicalObjectIdentity(
-                    existingFile.PhysicalObjectIdentity);
+            // Existing registration is path-authority based. The live
+            // pinned publication was verified above; a persisted physical token from
+            // an earlier process is diagnostic only.
+            return true;
         }
 
         return await fileService.EnsureAudiobookFileAsync(

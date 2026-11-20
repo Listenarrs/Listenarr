@@ -9,7 +9,8 @@ internal sealed class RootFolderStorageConfirmationService(
     IFileSystemSemanticsResolver semanticsResolver,
     IMoveQueueService moveQueueService,
     IFilesystemMutationCoordinator mutationCoordinator,
-    IAudiobookOperationCoordinator audiobookOperationCoordinator)
+    IAudiobookOperationCoordinator audiobookOperationCoordinator,
+    IFileRegistrationRecoveryProbe fileRegistrationRecoveryProbe)
     : IRootFolderStorageConfirmationService
 {
     internal Action? BeforeCommitForTest { get; set; }
@@ -75,6 +76,19 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder cannot be confirmed while a path change is active.");
         }
 
+        if (await db.LibraryDirectoryOwnershipPathMigrations
+                .AsNoTracking()
+                .AnyAsync(
+                    migration =>
+                        migration.Relocation.RootFolderId == rootFolderId
+                        || migration.Relocation.ActiveRootFolderId
+                            == rootFolderId,
+                    cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "The root folder cannot be confirmed while ownership path migration recovery is incomplete.");
+        }
+
         if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                 root.Path,
                 out var canonicalRootPath,
@@ -94,12 +108,9 @@ internal sealed class RootFolderStorageConfirmationService(
                     ?? "The root folder filesystem semantics could not be resolved.");
         }
 
-        var hasAuthorizedIdentity = root.DirectoryObjectIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity);
         var persistedSemantics = RootFolderPathSemantics.ResolvePersisted(root);
-        var canBootstrapSemantics = !hasAuthorizedIdentity
-            && (persistedSemantics == null
-                || persistedSemantics.Value.DetectAmbiguousCaseMatches);
+        var canBootstrapSemantics = persistedSemantics == null
+            || persistedSemantics.Value.DetectAmbiguousCaseMatches;
         if (!canBootstrapSemantics
             && (persistedSemantics == null
                 || persistedSemantics.Value.DetectAmbiguousCaseMatches
@@ -142,17 +153,16 @@ internal sealed class RootFolderStorageConfirmationService(
         }
 
         using var pinned = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalRootPath);
-        var observedIdentity = CreateObservedIdentity(pinned);
         if (!pinned.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                "The root folder changed while its physical directory was being confirmed.");
+                "The root folder path changed while its filesystem settings were being confirmed.");
         }
 
         var expectedToken = RootFolderStorageHealthResolver.CreateConfirmationToken(
             root,
             canonicalRootPath,
-            observedIdentity);
+            semantics.Semantics);
         if (!string.Equals(
                 expectedToken,
                 confirmationToken,
@@ -162,20 +172,6 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder changed after it was displayed for confirmation. Refresh and review the current folder before confirming it.");
         }
 
-        var preservesAuthorizedGeneration = hasAuthorizedIdentity
-            && root.DirectoryObjectIdentityVersion
-                == ManagedDirectoryIdentity.CurrentVersion
-            && pinned.MatchesManagedDirectoryIdentity(
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity);
-        var committedIdentity = preservesAuthorizedGeneration
-            ? new DirectoryObjectIdentityResolution(
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                null)
-            : observedIdentity;
-        var replacesAuthorizedGeneration = hasAuthorizedIdentity
-            && !preservesAuthorizedGeneration;
         var committed = false;
         try
         {
@@ -183,17 +179,9 @@ internal sealed class RootFolderStorageConfirmationService(
                 ? await db.Database.BeginTransactionAsync(cancellationToken)
                 : null;
 
-            if (replacesAuthorizedGeneration)
-            {
-                await RetireSupersededOwnershipAuthorityAsync(
-                    db,
-                    rootFolderId,
-                    cancellationToken);
-            }
-
-            root.DirectoryObjectIdentityVersion = committedIdentity.Version;
-            root.DirectoryObjectIdentity = committedIdentity.Value;
-            root.DirectoryObjectIdentityUnavailableReason = null;
+            // Confirmation authorizes the configured path/case contract only.
+            // Legacy physical-directory observations are deliberately preserved
+            // as diagnostics and are not enrolled, replaced, or retired here.
             root.ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity;
             root.PathIdentityState = PathIdentityState.Valid;
             root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
@@ -205,7 +193,7 @@ internal sealed class RootFolderStorageConfirmationService(
             await db.SaveChangesAsync(cancellationToken);
 
             BeforeCommitForTest?.Invoke();
-            RevalidatePinnedGeneration(pinned, committedIdentity, cancellationToken);
+            RevalidatePinnedPath(pinned, cancellationToken);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
                 root.CaseSensitivityMode,
@@ -221,10 +209,7 @@ internal sealed class RootFolderStorageConfirmationService(
             committed = true;
 
             AfterCommitForTest?.Invoke();
-            RevalidatePinnedGeneration(
-                pinned,
-                committedIdentity,
-                CancellationToken.None);
+            RevalidatePinnedPath(pinned, CancellationToken.None);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
                 root.CaseSensitivityMode,
@@ -239,7 +224,6 @@ internal sealed class RootFolderStorageConfirmationService(
             {
                 await MarkPostCommitConfirmationUnstableAsync(
                     rootFolderId,
-                    committedIdentity,
                     exception);
             }
 
@@ -247,26 +231,42 @@ internal sealed class RootFolderStorageConfirmationService(
         }
     }
 
-    private static async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+    private async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
         ListenArrDbContext db,
         int rootFolderId,
         string canonicalRootPath,
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken)
     {
-        var audiobooks = await db.Audiobooks
+        var audiobookPaths = await db.Audiobooks
             .AsNoTracking()
-            .AsSplitQuery()
-            .Include(audiobook => audiobook.Files)
+            .Select(audiobook => new
+            {
+                audiobook.Id,
+                audiobook.BasePath,
+                audiobook.FilePath
+            })
             .ToListAsync(cancellationToken);
-        var audiobookIds = audiobooks
+        var audiobookIds = audiobookPaths
             .Where(audiobook =>
                 PathTouchesConfirmedRoot(audiobook.BasePath, canonicalRootPath, semantics)
-                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics)
-                || (audiobook.Files?.Any(file =>
-                    PathTouchesConfirmedRoot(file.Path, canonicalRootPath, semantics)) ?? false))
+                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics))
             .Select(audiobook => audiobook.Id)
             .ToHashSet();
+        var audiobookFilePaths = await db.AudiobookFiles
+            .AsNoTracking()
+            .Select(file => new
+            {
+                file.AudiobookId,
+                file.Path
+            })
+            .ToListAsync(cancellationToken);
+        audiobookIds.UnionWith(audiobookFilePaths
+            .Where(file => PathTouchesConfirmedRoot(
+                file.Path,
+                canonicalRootPath,
+                semantics))
+            .Select(file => file.AudiobookId));
         audiobookIds.UnionWith(await db.LibraryDirectoryOwnerships
             .AsNoTracking()
             .Where(ownership => ownership.ManagedRootFolderId == rootFolderId
@@ -274,18 +274,46 @@ internal sealed class RootFolderStorageConfirmationService(
                 && ownership.State != LibraryDirectoryOwnershipState.Removed)
             .Select(ownership => ownership.AudiobookId!.Value)
             .ToListAsync(cancellationToken));
+        var registrationBlocker = (await fileRegistrationRecoveryProbe
+                .GetBlockingBoundaryAsync(
+                    canonicalRootPath,
+                    semantics,
+                    cancellationToken))
+            .FirstOrDefault();
+        if (registrationBlocker != null)
+        {
+            throw new RootFolderRecoveryBlockedException(registrationBlocker);
+        }
+        var verifiedRenames = await db.VerifiedFileRenameJournals.AsNoTracking()
+            .Where(journal => journal.State != VerifiedFileRenameState.Completed
+                && journal.State != VerifiedFileRenameState.CompletedSourceRetained
+                && journal.State != VerifiedFileRenameState.RolledBack)
+            .ToListAsync(cancellationToken);
+        if (verifiedRenames.Any(journal => audiobookIds.Contains(journal.AudiobookId)
+                || journal.SourceRootFolderId == rootFolderId
+                || journal.DestinationRootFolderId == rootFolderId
+                || PathTouchesConfirmedRoot(journal.SourcePath, canonicalRootPath, semantics)
+                || PathTouchesConfirmedRoot(journal.DestinationPath, canonicalRootPath, semantics)))
+        {
+            throw new InvalidOperationException(
+                "Resolve interrupted verified organize recovery under this root before confirming its storage folder.");
+        }
+
         var activeMutationJournals = await db.FileMutationJournals
             .AsNoTracking()
             .Where(journal =>
-                (journal.AudiobookFileId == null
-                    && journal.State != FileMutationJournalState.Completed)
-                || (journal.AudiobookId != null
+                journal.AudiobookId != null
                     && journal.AudiobookFileId != null
                     && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
                         || journal.AudiobookFileId
                             == FileMutationOwner.RegistrationCompanionFile
                         ? journal.State != FileMutationJournalState.Completed
-                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled)))
+                            && journal.State
+                                != FileMutationJournalState.CompletedSourceRetained
+                            && journal.State != FileMutationJournalState.RolledBack
+                        : journal.State
+                                != FileMutationJournalState.OwnerMetadataReconciled
+                            && journal.State != FileMutationJournalState.RolledBack))
             .ToListAsync(cancellationToken);
         if (activeMutationJournals.Any(journal =>
                 (journal.AudiobookId.HasValue
@@ -325,50 +353,6 @@ internal sealed class RootFolderStorageConfirmationService(
             semantics);
     }
 
-    private static DirectoryObjectIdentityResolution CreateObservedIdentity(
-        PinnedDirectoryCreation.PinnedDirectoryAnchor pinned) =>
-        new(
-            ManagedDirectoryIdentity.CurrentVersion,
-            ManagedDirectoryIdentity.CreateMarkerless(
-                pinned.GetDirectoryObjectIdentity()),
-            null);
-
-    private static async Task RetireSupersededOwnershipAuthorityAsync(
-        ListenArrDbContext db,
-        int rootFolderId,
-        CancellationToken cancellationToken)
-    {
-        if (await db.LibraryDirectoryOwnershipPathMigrations.AnyAsync(
-                migration => migration.Ownership.ManagedRootFolderId == rootFolderId
-                    && migration.Ownership.State != LibraryDirectoryOwnershipState.Removed,
-                cancellationToken))
-        {
-            throw new InvalidOperationException(
-                "The root folder cannot be confirmed while directory ownership path migration recovery is incomplete.");
-        }
-
-        var ownerships = await db.LibraryDirectoryOwnerships
-            .Where(ownership => ownership.ManagedRootFolderId == rootFolderId
-                && ownership.State != LibraryDirectoryOwnershipState.Removed)
-            .ToListAsync(cancellationToken);
-        if (ownerships.Count == 0)
-        {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        foreach (var ownership in ownerships)
-        {
-            ownership.State = LibraryDirectoryOwnershipState.Removed;
-            ownership.PathOwnershipKey = null;
-            ownership.ManagedRootFolderId = null;
-            ownership.DirectoryObjectIdentityUnavailableReason = null;
-            ownership.StateReason =
-                "Retired because the managed root was explicitly confirmed as a different physical directory generation.";
-            ownership.UpdatedAt = now;
-        }
-    }
-
     private async Task RevalidateFilesystemSemanticsAsync(
         string canonicalRootPath,
         FileSystemCaseSensitivityMode requestedMode,
@@ -388,25 +372,20 @@ internal sealed class RootFolderStorageConfirmationService(
         }
     }
 
-    private static void RevalidatePinnedGeneration(
+    private static void RevalidatePinnedPath(
         PinnedDirectoryCreation.PinnedDirectoryAnchor pinned,
-        DirectoryObjectIdentityResolution expectedIdentity,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!pinned.MatchesManagedDirectoryIdentity(
-                expectedIdentity.Version,
-                expectedIdentity.Value)
-            || !pinned.VisiblePathMatches())
+        if (!pinned.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                "The root folder changed while its physical directory confirmation was being committed.");
+                "The root folder path changed while its filesystem settings were being committed.");
         }
     }
 
     private async Task MarkPostCommitConfirmationUnstableAsync(
         int rootFolderId,
-        DirectoryObjectIdentityResolution committedIdentity,
         Exception exception)
     {
         await using var repair =
@@ -414,18 +393,15 @@ internal sealed class RootFolderStorageConfirmationService(
         var persisted = await repair.RootFolders.SingleOrDefaultAsync(
             candidate => candidate.Id == rootFolderId,
             CancellationToken.None);
-        if (persisted == null
-            || persisted.DirectoryObjectIdentityVersion != committedIdentity.Version
-            || !string.Equals(
-                persisted.DirectoryObjectIdentity,
-                committedIdentity.Value,
-                StringComparison.Ordinal))
+        if (persisted == null)
         {
             return;
         }
 
+        persisted.PathIdentityState = PathIdentityState.Unavailable;
         persisted.DirectoryObjectIdentityUnavailableReason =
-            "The confirmed storage folder changed immediately after authorization; refresh the root folder state before performing filesystem operations.";
+            "The root path or filesystem semantics changed immediately after confirmation; refresh the root folder state before performing filesystem operations. "
+            + exception.Message;
         persisted.UpdatedAt = DateTime.UtcNow;
         await repair.SaveChangesAsync(CancellationToken.None);
     }

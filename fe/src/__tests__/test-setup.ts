@@ -56,6 +56,11 @@ try {
 // Provide default component stubs for Modal teleporting components so unit tests
 // render modal content inline instead of using real teleport behavior.
 import { config as vtConfig } from '@vue/test-utils'
+import { resultsReveal } from '@/utils/resultsReveal'
+
+// Results show at once in tests; the tests about their reveal set its duration
+resultsReveal.holdMs = 0
+resultsReveal.fadeMs = 0
 const globalConfig = (vtConfig.global ??= {} as unknown) as unknown
 globalConfig.components = {
   ...(globalConfig.components || {}),
@@ -125,7 +130,12 @@ vi.mock('@/components/feedback', async (importOriginal) => {
         '<div class="modal-header"><component v-if="icon" :is="icon" /><h2 v-if="title">{{title}}</h2><button @click="$emit(\'close\')" class="close-btn">x</button></div>',
     },
     ModalBody: { template: '<div class="modal-body"><slot /></div>' },
-    ModalFooter: { template: '<div class="modal-footer"><slot /></div>' },
+    // The real footer's two groups, which layouts measure
+    ModalFooter: {
+      template:
+        '<div class="modal-footer"><div class="modal-footer-left"><slot name="left" /></div>' +
+        '<div class="modal-footer-actions"><slot /></div></div>',
+    },
   }
 })
 
@@ -196,7 +206,7 @@ vi.mock('@/services/api', () => {
         verifiedSourceDeletionEnabled: false,
         sourceIsManagedRoot: false,
         sourceCleanupMessage:
-          'Source files will be retained because verified source deletion is not enabled.',
+          'Source files will be retained because safe source cleanup is unavailable.',
       }
     }),
   }

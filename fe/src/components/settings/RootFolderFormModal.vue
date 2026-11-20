@@ -41,16 +41,6 @@
               <strong>{{ filesystemBehaviorTitle }}</strong>
               <small class="semantics-help">{{ filesystemBehaviorDetail }}</small>
             </div>
-
-            <button
-              v-if="needsCaseSettingConfirmation"
-              type="button"
-              class="btn btn-primary detected-semantics-action"
-              :disabled="rootFilesystemMutationLocked"
-              @click="useDetectedCaseSetting"
-            >
-              Use detected setting: {{ detectedCaseSettingLabel }}
-            </button>
           </div>
 
           <details class="advanced-semantics">
@@ -107,20 +97,6 @@
         </FormRow>
 
         <CheckboxCard v-model="form.isDefault" title="Set as default root folder" />
-
-        <CheckboxCard
-          v-if="root?.id"
-          v-model="form.allowVerifiedWeakStorageDelete"
-          title="Allow verified source deletion on weak storage"
-          description="For Move operations only, Listenarr copies and verifies every destination before removing sources. If both endpoints are configured root folders, enable this on both roots. Copy, hardlink-copy, seeding, incomplete batches, and verification failures retain the source."
-        />
-        <p
-          v-if="root?.id && form.allowVerifiedWeakStorageDelete"
-          class="destructive-policy-warning"
-        >
-          This is an advanced compatibility option. Cleanup fails closed whenever the source cannot
-          be proven safe to remove.
-        </p>
       </FormSection>
     </template>
 
@@ -171,11 +147,6 @@ import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
 import { persistedRootPathKind, rootFolderPathChanged } from '@/utils/rootFolderPath'
-import {
-  caseSensitivityLabel,
-  detectedMutationSemantics,
-  needsMutationSemanticsConfirmation,
-} from '@/composables/useMutationSemanticsConfirmation'
 
 const { root } = defineProps<{ root?: RootFolder }>()
 const emit = defineEmits<{
@@ -197,48 +168,26 @@ const form = ref({
   path: root?.path || '',
   isDefault: !!root?.isDefault,
   caseSensitivityMode: root?.caseSensitivityMode ?? ('Auto' as const),
-  allowVerifiedWeakStorageDelete:
-    root?.weakStorageSourceCleanupPolicy === 'DeleteSourceAfterVerifiedCopy',
 })
 
 const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
 
-const detectedCaseSetting = computed(() => (root ? detectedMutationSemantics(root) : null))
-const needsCaseSettingConfirmation = computed(
-  () =>
-    Boolean(root) &&
-    form.value.caseSensitivityMode === 'Auto' &&
-    needsMutationSemanticsConfirmation(root!),
-)
-const detectedCaseSettingLabel = computed(() =>
-  detectedCaseSetting.value ? caseSensitivityLabel(detectedCaseSetting.value) : 'unknown',
-)
 const filesystemBehaviorTitle = computed(() => {
-  if (needsCaseSettingConfirmation.value) return 'Confirmation needed'
   if (form.value.caseSensitivityMode === 'Sensitive') return 'Case-sensitive'
   if (form.value.caseSensitivityMode === 'Insensitive') return 'Case-insensitive'
   return 'Automatic when supported'
 })
 const filesystemBehaviorDetail = computed(() => {
-  if (needsCaseSettingConfirmation.value) {
-    return `Listenarr detected ${detectedCaseSettingLabel.value} behavior, but this storage cannot report it reliably enough for file moves and deletes. Confirm the detected setting to enable those operations.`
-  }
   if (form.value.caseSensitivityMode !== 'Auto') {
     return 'File operations will use this explicitly configured behavior.'
   }
   if (root?.resolvedCaseSensitivity && root.resolvedCaseSensitivity !== 'Unknown') {
-    return `Detected ${caseSensitivityLabel(root.resolvedCaseSensitivity)} behavior automatically.`
+    return `Detected ${root.resolvedCaseSensitivity === 'Sensitive' ? 'case-sensitive' : 'case-insensitive'} behavior automatically.`
   }
   return 'Listenarr will detect case behavior automatically when the storage provides reliable evidence.'
 })
-
-function useDetectedCaseSetting() {
-  if (detectedCaseSetting.value) {
-    form.value.caseSensitivityMode = detectedCaseSetting.value
-  }
-}
 
 // Local state for showing the inline folder browser
 const showBrowser = ref(false)
@@ -313,7 +262,6 @@ async function save() {
         },
         { expectedCurrentPath: root.path },
       )
-      newRoot = await persistWeakStoragePolicy(newRoot)
       if (newRoot.activeRelocation?.status === 'NeedsAttention') {
         toast.warning(
           'Root folder changed',
@@ -340,7 +288,7 @@ async function save() {
 async function confirmChange(moveFiles: boolean) {
   showConfirm.value = false
   try {
-    let updated = await store.update(
+    const updated = await store.update(
       root!.id,
       {
         id: root!.id,
@@ -356,7 +304,6 @@ async function confirmChange(moveFiles: boolean) {
         deleteEmptySource: modalDeleteEmpty.value,
       },
     )
-    updated = await persistWeakStoragePolicy(updated)
     if (!moveFiles && updated.activeRelocation?.status === 'NeedsAttention') {
       toast.warning(
         'Root folder changed',
@@ -369,21 +316,6 @@ async function confirmChange(moveFiles: boolean) {
   } catch (e: unknown) {
     toast.error('Error', rootFolderSaveError(e))
   }
-}
-
-async function persistWeakStoragePolicy(updated: RootFolder): Promise<RootFolder> {
-  if (!root?.id) return updated
-  const requestedPolicy = form.value.allowVerifiedWeakStorageDelete
-    ? 'DeleteSourceAfterVerifiedCopy'
-    : 'RetainSource'
-  if (requestedPolicy === (root.weakStorageSourceCleanupPolicy ?? 'RetainSource')) {
-    return updated
-  }
-  return store.updateWeakStoragePolicy(
-    root.id,
-    requestedPolicy,
-    root.weakStoragePolicyRevision ?? 0,
-  )
 }
 </script>
 
@@ -704,17 +636,6 @@ async function persistWeakStoragePolicy(updated: RootFolder): Promise<RootFolder
   margin: 0.75rem 0 0.35rem;
   color: var(--text-secondary, #bbb);
   font-size: 0.875rem;
-}
-
-.destructive-policy-warning {
-  margin: -0.25rem 0 0;
-  padding: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--warning-500) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
-  color: var(--text-secondary, #bbb);
-  font-size: 0.85rem;
-  line-height: 1.45;
 }
 
 /* Form input styling to match login and other forms */

@@ -188,17 +188,21 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 var canonicalFile = FileSystemPathIdentity.Canonicalize(
                     file,
                     semantics.Syntax);
-                if (!fileObjectIdentities.TryGetValue(
-                        canonicalFile,
-                        out var expectedPhysicalObjectIdentity))
+                fileObjectIdentities.TryGetValue(
+                    canonicalFile,
+                    out var expectedPhysicalObjectIdentity);
+                if (string.Equals(
+                        expectedPhysicalObjectIdentity,
+                        ScanFileDiscovery.PinnedPathOnlyIdentity,
+                        StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException(
-                        "The unmatched metadata candidate lacks its enumerated physical generation.");
+                    expectedPhysicalObjectIdentity = null;
                 }
 
-                using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                    file,
-                    expectedPhysicalObjectIdentity);
+                using var lease =
+                    PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+                        file,
+                        expectedPhysicalObjectIdentity);
                 result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(
                     lease.MetadataPath,
                     ffprobePath,
@@ -229,23 +233,29 @@ namespace Listenarr.Infrastructure.Library.Scanning
             var canonicalFolder = FileSystemPathIdentity.Canonicalize(
                 bookFolder,
                 semantics.Syntax);
-            if (!enumeration.DirectoryObjectIdentities.TryGetValue(
-                    canonicalFolder,
-                    out var expectedDirectoryIdentity))
+            enumeration.DirectoryObjectIdentities.TryGetValue(
+                canonicalFolder,
+                out var expectedDirectoryIdentity);
+            if (string.Equals(
+                    expectedDirectoryIdentity,
+                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                    StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    "The unmatched metadata folder lacks its authoritative enumeration proof.");
+                expectedDirectoryIdentity = null;
             }
 
             using var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 bookFolder,
                 createMissing: false);
-            if (!folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity))
+            if (!string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
+                && !folder.MatchesDirectoryObjectIdentity(
+                    expectedDirectoryIdentity))
             {
                 throw new InvalidOperationException(
                     "The unmatched metadata folder changed after filesystem enumeration.");
             }
-            var expectedNamespaceChangeToken = folder.GetNamespaceChangeToken();
+            var expectedNamespaceChangeToken =
+                TryCapturePinnedFolderChangeToken(folder);
             EnsurePinnedFolderMatches(
                 folder,
                 expectedDirectoryIdentity,
@@ -374,23 +384,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             return new string(buffer, 0, Math.Min(totalRead, maxCharacters));
         }
 
-        private static void EnsurePinnedFolderMatches(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor folder,
-            string expectedDirectoryIdentity,
-            string expectedNamespaceChangeToken)
-        {
-            if (!folder.VisiblePathMatches()
-                || !folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity)
-                || !string.Equals(
-                    folder.GetNamespaceChangeToken(),
-                    expectedNamespaceChangeToken,
-                    StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "The unmatched metadata folder changed after filesystem enumeration.");
-            }
-        }
-
         private static void ApplyEmbeddedTags(PathParsedMetadata target, PathParsedMetadata tags)
         {
             if (!string.IsNullOrEmpty(tags.Title)) target.Title = tags.Title;
@@ -405,15 +398,35 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
         /// <summary>
         /// Extracts a normalized title stem from a filename for grouping purposes.
-        /// Strips leading track numbers, trailing Part/CD/Disc numbers, year and
-        /// series decorations in brackets. Files that resolve to the same stem are
-        /// treated as parts of the same audiobook. Returns the folder name as fallback
-        /// when the stem would otherwise be empty (for example purely numeric filenames).
+        /// Strips a trailing "N of M" index, leading track numbers, trailing
+        /// Part/CD/Disc numbers, year and series decorations in brackets. Files that
+        /// resolve to the same stem are treated as parts of the same audiobook. Returns
+        /// the folder name as fallback when the stem would otherwise be empty (for
+        /// example purely numeric filenames).
         /// </summary>
         private static string ExtractTitleStem(string filePath, string folderPath)
         {
             var name = Path.GetFileNameWithoutExtension(filePath);
 
+            // Strip a trailing "N of M" index: "Title 001 of 498", "Title - 3 of 12".
+            //
+            // This runs BEFORE the leading-track strip on purpose. A file named "001 of 498"
+            // with no title in it would otherwise lose its leading "001 " first, leaving
+            // "of 498" — a different stem in every file, and no longer numeric, so the
+            // folder-name fallback at the end never gets the chance to group them.
+            //
+            // Unlike a bare "(N)", this form carries its own total, so it usually says the
+            // file is one part of a set rather than one entry among separate works. A series
+            // word in front of it says the opposite: "Barsoom Book 1 of 6" is one work
+            // out of six in a boxed set, and collapsing that folder also denies it the
+            // embedded-tag pass, which only runs when filename grouping produced more than one
+            // group. So the index is left alone when Book, Bk, Vol or Volume introduces it,
+            // however it is punctuated: "Book 11", "Vol. 11", "Book #11", "Book011".
+            //
+            // N must not start after another digit. Otherwise the match can begin inside the
+            // number: in "Book 11 of 20" the "1 of 20" after "Book 1" is not introduced by the
+            // series word, so every "Book 1x of 20" would strip to the same "Book 1".
+            name = Regex.Replace(name, @"[\s\-_]*(?<!\d)(?<!\b(?:book|bk|vol|volume)[^\p{L}\d]*)\d+\s*of\s*\d+$", "", RegexOptions.IgnoreCase);
             // Strip leading track/disc number prefix: "01 - ", "Track 01 - ", "1. "
             name = Regex.Replace(name, @"^(track\s*)?\d+[\s\-_\.]+", "", RegexOptions.IgnoreCase);
             // Strip trailing Part/CD/Disc/Chapter number: "- Part 1", "CD2", "Disc 2", "pt00"

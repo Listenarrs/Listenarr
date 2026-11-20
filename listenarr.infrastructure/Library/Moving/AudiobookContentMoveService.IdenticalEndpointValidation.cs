@@ -14,6 +14,7 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
         await EnsureCurrentExecutionProtocolAsync(
             request.JobId,
+            request.LeaseToken,
             cancellationToken);
 
         var source = NormalizeMoveDirectoryEndpoint(request.Source);

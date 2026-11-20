@@ -43,118 +43,18 @@ internal sealed partial class AudiobookContentMoveService
                     $"A markerless move-created directory path is occupied by a file or link: {planned.Path}");
             }
 
-            var parentPath = Path.GetDirectoryName(planned.Path)
-                ?? throw new MoveNeedsAttentionException(
-                    "A markerless move-created directory has no parent.");
-            if (planned.State == MoveCreatedDirectoryState.Planned
-                && string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity))
-            {
-                using var parent = OpenPinnedMoveBoundaryDescendant(
-                    request,
-                    parentPath,
-                    request.TargetSemantics,
-                    sourceBoundary: false);
-                using var directory = parent.OpenExistingChild(
-                    Path.GetFileName(planned.Path));
-                if (!PinnedDirectoryVisibleOrThrowUnavailable(
-                        directory,
-                        "An unproven markerless target directory is temporarily unavailable while being retained.")
-                    || !PinnedDirectoryVisibleOrThrowUnavailable(
-                        parent,
-                        "The parent of an unproven markerless target directory is temporarily unavailable while being retained."))
-                {
-                    throw new MoveNeedsAttentionException(
-                        "An unproven markerless target directory changed while it was being retained.");
-                }
-
-                await UpdateCreatedDirectoryPublicationAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    planned.Path,
-                    MoveCreatedDirectoryState.Retained,
-                    directory.GetDirectoryObjectIdentity(),
-                    cancellationToken);
-                planned.State = MoveCreatedDirectoryState.Retained;
-                continue;
-            }
-            if (planned.State != MoveCreatedDirectoryState.Created
-                || string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A markerless move-created directory has inconsistent durable state: {planned.Path}");
-            }
-
-            using var pinnedParent = OpenPinnedMoveBoundaryDescendant(
-                request,
-                parentPath,
-                request.TargetSemantics,
-                sourceBoundary: false);
-            using var publication = pinnedParent.OpenExistingChildForPublication(
-                Path.GetFileName(planned.Path));
-            using var parentAnchor = publication.OpenParentDirectoryAnchor();
-            using var directoryAnchor = publication.OpenCreatedDirectoryAnchor();
-            if (!directoryAnchor.MatchesDirectoryObjectIdentity(
-                    planned.DirectoryObjectIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
-                    directoryAnchor,
-                    $"A markerless move-created directory is temporarily unavailable before terminal cleanup: {planned.Path}")
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
-                    parentAnchor,
-                    $"The parent of a markerless move-created directory is temporarily unavailable before terminal cleanup: {planned.Path}"))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A markerless move-created directory changed physical generation before terminal cleanup: {planned.Path}");
-            }
-            if (Directory.EnumerateFileSystemEntries(planned.Path).Any())
-            {
-                await UpdateCreatedDirectoryStateAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    planned.Path,
-                    MoveCreatedDirectoryState.Retained,
-                    cancellationToken);
-                planned.State = MoveCreatedDirectoryState.Retained;
-                continue;
-            }
-
-            await EnsureMutationAuthorizedAsync(
-                request,
-                request.Source,
-                request.Target,
-                cancellationToken);
-            if (!directoryAnchor.MatchesDirectoryObjectIdentity(
-                    planned.DirectoryObjectIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
-                    directoryAnchor,
-                    $"A markerless move-created directory is temporarily unavailable before terminal retirement: {planned.Path}")
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
-                    parentAnchor,
-                    $"The parent of a markerless move-created directory is temporarily unavailable before terminal retirement: {planned.Path}"))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A markerless move-created directory changed before terminal retirement: {planned.Path}");
-            }
-            if (Directory.EnumerateFileSystemEntries(planned.Path).Any())
-            {
-                await UpdateCreatedDirectoryStateAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    planned.Path,
-                    MoveCreatedDirectoryState.Retained,
-                    cancellationToken);
-                planned.State = MoveCreatedDirectoryState.Retained;
-                continue;
-            }
-
-            publication.DeletePinnedEmptyDirectoryImmediately(
-                Path.GetFileName(planned.Path));
+            // Created-directory rows survive process boundaries. They prove
+            // historical provenance, not current authority to remove the pathname.
+            // Preserve any directory that still exists and retire only the recovery
+            // metadata; empty scaffolding is safer than deleting a path that may have
+            // been reused since the creating operation lost its live handle.
             await UpdateCreatedDirectoryStateAsync(
                 request.JobId,
                 request.LeaseToken,
                 planned.Path,
-                MoveCreatedDirectoryState.Removed,
+                MoveCreatedDirectoryState.Retained,
                 cancellationToken);
-            planned.State = MoveCreatedDirectoryState.Removed;
+            planned.State = MoveCreatedDirectoryState.Retained;
         }
     }
 }

@@ -224,6 +224,58 @@ public sealed class ScanFileDiscoveryRegressionTests : BaseTests, IDisposable
         Assert.Empty(found);
     }
 
+    [Fact]
+    public void Discover_AuthorFolderCarriesRoleSuffix_StillMatchesCleanedAuthor()
+    {
+        // B076PQXBV7. The stored author has its role removed, the folder on disk may not.
+        var expected = CreateAudioFile(
+            "George Makepeace Towle - translator",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "George Makepeace Towle"));
+
+        Assert.Equal([expected], found);
+    }
+
+    [Fact]
+    public void Discover_AuthorFolderCarriesRoleSuffix_DoesNotClaimSameTitleUnderAnotherAuthor()
+    {
+        var expected = CreateAudioFile(
+            "George Makepeace Towle - translator",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+        _ = CreateAudioFile(
+            "Jules Verne",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "George Makepeace Towle"));
+
+        Assert.Equal([expected], found);
+    }
+
+    [Fact]
+    public void Discover_LegacyRowStillCarriesRoleSuffix_MatchesItsOwnFolder()
+    {
+        // B00EZAXAF8. A row stored before roles were removed still holds the provider string,
+        // and the add path named its folder from that same string.
+        var expected = CreateAudioFile(
+            "Constance Garnett - translator",
+            "The Brothers Karamazov [Naxos AudioBooks Edition]",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "The Brothers Karamazov [Naxos AudioBooks Edition]",
+            "Constance Garnett - translator"));
+
+        Assert.Equal([expected], found);
+    }
+
     private IReadOnlyList<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook, FileSystemPathSemantics.CurrentHostDefault)
             .AttributedFiles;

@@ -102,7 +102,9 @@ public partial class FileMover
                 plan.DestinationRootFolderId,
                 plan.DestinationPolicyRevision,
                 plan.SourceStorageContractRevision,
-                plan.DestinationStorageContractRevision),
+                plan.DestinationStorageContractRevision,
+                plan.ExpectedBatchMemberCount,
+                plan.ExpectedBatchSourceManifestSha256),
             cancellationToken);
         if (journal.State == CompatibilityFilePublicationState.NeedsAttention)
         {

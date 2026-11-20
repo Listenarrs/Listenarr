@@ -178,6 +178,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
         private sealed record StemGroup(string Stem, List<string> Files);
         private sealed record GroupCandidate(string FilePath, string Stem, bool IsAncillary, string TitleKey, string AuthorKey);
+        private sealed record UnmatchedScanOutcome(
+            List<UnmatchedFileResult> Results,
+            List<string> Warnings);
 
         private readonly IUnmatchedScanQueueService _queue;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -207,18 +210,31 @@ namespace Listenarr.Infrastructure.Library.Scanning
             _logger.LogInformation("Processing unmatched scan job {JobId} for {Path}", job.Id, job.RootFolderPath);
             _queue.UpdateJob(job.Id, "Processing");
 
-            var results = await ScanAsync(job.RootFolderPath, cancellationToken);
+            var outcome = await ScanAsync(job.RootFolderPath, cancellationToken);
 
-            _queue.UpdateJob(job.Id, "Completed", results);
-            _logger.LogInformation("Unmatched scan job {JobId} completed: {Count} unmatched items", job.Id, results.Count);
+            _queue.UpdateJob(
+                job.Id,
+                "Completed",
+                outcome.Results,
+                warnings: outcome.Warnings);
+            _logger.LogInformation(
+                "Unmatched scan job {JobId} completed: {Count} unmatched items, {WarningCount} warning(s)",
+                job.Id,
+                outcome.Results.Count,
+                outcome.Warnings.Count);
 
             await _hubContext.Clients.All.SendAsync(
                 "UnmatchedScanComplete",
-                new { jobId = job.Id.ToString(), count = results.Count },
+                new
+                {
+                    jobId = job.Id.ToString(),
+                    count = outcome.Results.Count,
+                    warningCount = outcome.Warnings.Count
+                },
                 cancellationToken);
         }
 
-        private async Task<List<UnmatchedFileResult>> ScanAsync(string rootFolderPath, CancellationToken ct)
+        private async Task<UnmatchedScanOutcome> ScanAsync(string rootFolderPath, CancellationToken ct)
         {
             using var scope = _scopeFactory.CreateScope();
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
@@ -234,8 +250,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 ct);
             if (!authorization.IsAuthorized
                 || authorization.Path == null
-                || !authorization.Identity.HasValue
-                || !authorization.PhysicalIdentity.HasValue)
+                || !authorization.Identity.HasValue)
             {
                 throw new InvalidOperationException(
                     authorization.Error
@@ -244,8 +259,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var canonicalRootFolderPath = authorization.Path;
             var semantics = authorization.Identity.Value.Semantics;
-            var hasDurableGenerationProof =
-                authorization.PhysicalIdentity.Value.HasDurableGenerationProof;
 
             // Load all tracked file paths (normalized) from DB.
             // Check BOTH AudiobookFiles (multi-file imports) AND Audiobook.FilePath (single-file imports)
@@ -267,10 +280,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
             // enumeration primitive used by authoritative audiobook scans.
             using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalRootFolderPath);
-            if (!pinnedRoot.VisiblePathMatches()
-                || (authorization.PhysicalIdentity.Value.HasDurableGenerationProof
-                    && !pinnedRoot.MatchesDirectoryObjectIdentity(
-                        authorization.PhysicalIdentity.Value.ScanRootObjectIdentity!)))
+            if (!pinnedRoot.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
                     "The unmatched scan root changed after authorization.");
@@ -282,14 +292,38 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 _logger,
                 semantics,
                 pinnedRoot,
-                authorization.PhysicalIdentity.Value.HasDurableGenerationProof);
-            if (enumeration.Issues.Any(issue => issue.Kind is
-                    ScanDiscoveryIssueKind.DirectoryGenerationChanged
-                    or ScanDiscoveryIssueKind.EnumerationFailure))
+                requireDurableGenerationProof: false);
+            if (enumeration.Issues.Any(issue =>
+                    issue.Kind == ScanDiscoveryIssueKind.DirectoryGenerationChanged))
             {
                 throw new InvalidOperationException(
-                    "The unmatched scan root changed or became unavailable during enumeration.");
+                    "The unmatched scan root changed during enumeration.");
             }
+
+            var rootEnumerationFailure = enumeration.Issues.Any(issue =>
+                issue.Kind == ScanDiscoveryIssueKind.EnumerationFailure
+                && !string.IsNullOrWhiteSpace(issue.Path)
+                && FileSystemPathIdentity.AreEquivalent(
+                    issue.Path!,
+                    canonicalRootFolderPath,
+                    semantics));
+            if (rootEnumerationFailure)
+            {
+                throw new InvalidOperationException(
+                    "The unmatched scan root became unavailable during enumeration.");
+            }
+
+            var skippedPathCount = enumeration.Issues.Count(issue =>
+                issue.Kind == ScanDiscoveryIssueKind.EnumerationFailure);
+            var warnings = new List<string>();
+            if (skippedPathCount > 0)
+            {
+                warnings.Add(
+                    skippedPathCount == 1
+                        ? "One path could not be read and was skipped. Other readable library-import results were preserved."
+                        : $"{skippedPathCount} paths could not be read and were skipped. Other readable library-import results were preserved.");
+            }
+
             var candidates = enumeration.Candidates.ToList();
 
             // Filter to untracked files
@@ -311,10 +345,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             // Resolve ffprobe path once for the whole scan (null = not available)
-            var ffprobePath = hasDurableGenerationProof
-                && (OperatingSystem.IsWindows()
+            var ffprobePath =
+                OperatingSystem.IsWindows()
                     || OperatingSystem.IsLinux()
-                    || OperatingSystem.IsMacOS())
+                    || OperatingSystem.IsMacOS()
                     ? await _ffmpegService.GetFfprobePathAsync()
                     : null;
 
@@ -356,15 +390,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             representative,
                             rootFolderPath,
                             semantics);
-                        if (hasDurableGenerationProof)
-                        {
-                            await ApplyPinnedFolderMetadataAsync(
-                                parsed,
-                                parsed.BookFolderPath ?? string.Empty,
-                                enumeration,
-                                semantics,
-                                token);
-                        }
+                        await ApplyPinnedFolderMetadataAsync(
+                            parsed,
+                            parsed.BookFolderPath ?? string.Empty,
+                            enumeration,
+                            semantics,
+                            token);
 
                         PathParsedMetadata? tags = null;
                         if (embeddedTagsByFile != null && embeddedTagsByFile.TryGetValue(representative, out var cachedTags))
@@ -376,17 +407,21 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             var canonicalRepresentative = FileSystemPathIdentity.Canonicalize(
                                 representative,
                                 semantics.Syntax);
-                            if (!enumeration.FileObjectIdentities.TryGetValue(
-                                    canonicalRepresentative,
-                                    out var expectedPhysicalObjectIdentity))
+                            enumeration.FileObjectIdentities.TryGetValue(
+                                canonicalRepresentative,
+                                out var expectedPhysicalObjectIdentity);
+                            if (string.Equals(
+                                    expectedPhysicalObjectIdentity,
+                                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                                    StringComparison.Ordinal))
                             {
-                                throw new InvalidOperationException(
-                                    "The unmatched metadata candidate lacks its enumerated physical generation.");
+                                expectedPhysicalObjectIdentity = null;
                             }
 
-                            using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                                representative,
-                                expectedPhysicalObjectIdentity);
+                            using var lease =
+                                PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+                                    representative,
+                                    expectedPhysicalObjectIdentity);
                             tags = await PathMetadataParser.ReadEmbeddedTagsAsync(
                                 lease.MetadataPath,
                                 ffprobePath,
@@ -434,7 +469,13 @@ namespace Listenarr.Infrastructure.Library.Scanning
                     }
                 });
 
-            return results.OrderBy(r => r.Author).ThenBy(r => r.Series).ThenBy(r => r.Title).ToList();
+            return new UnmatchedScanOutcome(
+                results
+                    .OrderBy(r => r.Author)
+                    .ThenBy(r => r.Series)
+                    .ThenBy(r => r.Title)
+                    .ToList(),
+                warnings);
         }
 
     }

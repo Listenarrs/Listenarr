@@ -26,57 +26,6 @@ internal sealed partial class AudiobookScanService
             return [];
         }
 
-        if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
-        {
-            var candidates = new List<WeakStorageMissingFileCandidate>();
-            if (discovery.CanReconcile && weakStorageScanCandidateStore != null)
-            {
-                foreach (var file in existingFiles)
-                {
-                    if (!resolvedPaths.TryGetValue(file.Id, out var resolvedPath)
-                        || !FileSystemPathIdentity.IsSameOrInside(
-                            resolvedPath,
-                            command.ScanRoot,
-                            semantics))
-                    {
-                        continue;
-                    }
-                    ValidateNearestDirectorySnapshot(
-                        command,
-                        pinnedAuthority,
-                        discovery,
-                        resolvedPath);
-                    if (!PinnedFileExists(command, pinnedAuthority, resolvedPath))
-                    {
-                        candidates.Add(new WeakStorageMissingFileCandidate(
-                            file.Id,
-                            file.Path ?? string.Empty,
-                            resolvedPath,
-                            file.PhysicalObjectIdentity));
-                    }
-                }
-
-                var scanToken = await weakStorageScanCandidateStore.ReplaceAsync(
-                    audiobook.Id,
-                    candidates,
-                    cancellationToken);
-                diagnostics.Add(new AudiobookScanDiagnostic(
-                    "WeakStorageMissingFilesRequireConfirmation",
-                    command.ScanRoot,
-                    candidates.Count == 0
-                        ? "No missing tracked files were found on compatibility storage."
-                        : $"{candidates.Count} missing tracked file record(s) require explicit confirmation. Scan token: {scanToken:N}."));
-            }
-            else
-            {
-                diagnostics.Add(new AudiobookScanDiagnostic(
-                    "ReconciliationNotAuthorized",
-                    command.ScanRoot,
-                    "Tracked-file removal was skipped because this storage does not expose durable generation identity."));
-            }
-            return [];
-        }
-
         if (!discovery.CanReconcile)
         {
             diagnostics.Add(new AudiobookScanDiagnostic(
@@ -134,102 +83,9 @@ internal sealed partial class AudiobookScanService
                 resolvedPath);
             if (PinnedFileExists(command, pinnedAuthority, resolvedPath))
             {
-                var canonicalResolvedPath = FileSystemPathIdentity.Canonicalize(
-                    resolvedPath,
-                    command.ScanIdentity.Syntax);
                 var isAttributed = discovery.AttributedFiles.Contains(
                     resolvedPath,
                     semantics.Comparer);
-                var hasDiscoveredIdentity = discovery.FileObjectIdentities.TryGetValue(
-                    canonicalResolvedPath,
-                    out var discoveredPhysicalIdentity);
-                var physicalGenerationChanged = hasDiscoveredIdentity
-                    && !string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
-                    && !PinnedFileIdentityMatches(
-                        command,
-                        pinnedAuthority,
-                        resolvedPath,
-                        file.PhysicalObjectIdentity);
-                var physicalIdentityMissing = hasDiscoveredIdentity
-                    && string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity);
-                if ((physicalGenerationChanged || physicalIdentityMissing)
-                    && !isAttributed)
-                {
-                    diagnostics.Add(new AudiobookScanDiagnostic(
-                        physicalGenerationChanged
-                            ? "TrackedFileGenerationChangedWithoutAttribution"
-                            : "TrackedFilePhysicalIdentityNotBackfilled",
-                        resolvedPath,
-                        physicalGenerationChanged
-                            ? "The tracked pathname identifies a replacement generation, but attribution was inconclusive; the existing row was preserved for operator review."
-                            : "The tracked file was not attributed confidently enough to backfill its physical identity."));
-                    continue;
-                }
-
-                if ((physicalGenerationChanged || physicalIdentityMissing)
-                    && isAttributed)
-                {
-                    await ValidateCommandAsync(command, cancellationToken);
-                    ValidateDiscoveredPathParent(
-                        command,
-                        pinnedAuthority,
-                        discovery,
-                        resolvedPath);
-                    using var registrationLease = OpenPinnedMetadataFile(
-                        command,
-                        pinnedAuthority,
-                        discovery,
-                        resolvedPath);
-                    var refreshed = await fileService.RefreshPhysicalGenerationAsync(
-                        audiobook,
-                        file.Id,
-                        file.PhysicalObjectIdentity,
-                        registrationLease,
-                        physicalGenerationChanged
-                            ? command.Source + "-replacement"
-                            : file.Source ?? command.Source,
-                        cancellationToken);
-                    if (!refreshed)
-                    {
-                        diagnostics.Add(new AudiobookScanDiagnostic(
-                            physicalGenerationChanged
-                                ? "TrackedFileGenerationReplacementDeferred"
-                                : "TrackedFilePhysicalIdentityBackfillDeferred",
-                            resolvedPath,
-                            "The physical file generation changed before its durable row could be updated; the existing row was preserved."));
-                        continue;
-                    }
-
-                    diagnostics.Add(new AudiobookScanDiagnostic(
-                        physicalGenerationChanged
-                            ? "TrackedFileGenerationReplaced"
-                            : "TrackedFilePhysicalIdentityBackfilled",
-                        resolvedPath,
-                        physicalGenerationChanged
-                            ? "The tracked pathname now identifies a different physical file generation; the existing row was updated atomically."
-                            : "The tracked file row was enrolled with its verified physical object identity."));
-                    if (physicalGenerationChanged)
-                    {
-                        await TryAddHistoryAsync(new History
-                        {
-                            AudiobookId = audiobook.Id,
-                            AudiobookTitle = audiobook.Title ?? "Unknown",
-                            EventType = "File Replaced",
-                            Message = $"Tracked file generation replaced: {Path.GetFileName(file.Path)}",
-                            Source = command.Source,
-                            CorrelationId = command.CorrelationId,
-                            Data = JsonSerializer.Serialize(new
-                            {
-                                StoredPath = file.Path,
-                                ResolvedPath = resolvedPath,
-                                PreviousPhysicalObjectIdentity = file.PhysicalObjectIdentity,
-                                CurrentPhysicalObjectIdentity = discoveredPhysicalIdentity
-                            }),
-                            Timestamp = DateTime.UtcNow
-                        }, CancellationToken.None);
-                    }
-                }
-
                 if (!isAttributed)
                 {
                     diagnostics.Add(new AudiobookScanDiagnostic(
@@ -238,6 +94,9 @@ internal sealed partial class AudiobookScanService
                         "The file still exists but attribution was inconclusive; its row was preserved."));
                 }
 
+                // A live scan may use physical identity transiently to prove that its
+                // own pinned snapshot stayed stable, but it never refreshes or
+                // backfills AudiobookFile.PhysicalObjectIdentity.
                 continue;
             }
 
@@ -256,11 +115,10 @@ internal sealed partial class AudiobookScanService
                 continue;
             }
 
-            if (!await fileRepository.DeletePhysicalGenerationAsync(
+            if (!await fileRepository.DeletePathStateAsync(
                     file.Id,
                     file.AudiobookId,
-                    file.Path,
-                    file.PhysicalObjectIdentity,
+                    file.CapturePathState(),
                     cancellationToken))
             {
                 diagnostics.Add(new AudiobookScanDiagnostic(
@@ -357,7 +215,6 @@ internal sealed partial class AudiobookScanService
 
         if (!command.AllowReconciliation
             || !command.IsAuthoritativeScope
-            || !command.ScanPhysicalIdentity.HasDurableGenerationProof
             || !discovery.CanReconcile
             || !FileSystemPathIdentity.IsSameOrInside(
                 resolvedPath,

@@ -289,7 +289,8 @@ namespace Listenarr.Application.Metadata.Audible
             return new AudibleSearchResponse
             {
                 Results = response.Results,
-                TotalResults = response.TotalResults
+                TotalResults = response.TotalResults,
+                ProviderUnavailable = response.ProviderUnavailable
             };
         }
 

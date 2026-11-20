@@ -810,12 +810,6 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useMoveJobsStore, type MoveRecoveryState } from '@/stores/moveJobs'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
-import {
-  confirmDetectedMutationSemantics,
-  confirmMutationSemanticsForBlockedOperation,
-  findMutationSemanticsRoot,
-  refreshAudiobookFileIdentity,
-} from '@/composables/useMutationSemanticsConfirmation'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
 if (typeof window !== 'undefined') {
@@ -1181,11 +1175,16 @@ async function syncFormFromAudiobook(audiobook: Audiobook, loadSupportingData: b
   }
 }
 
-function normalizeNumericInput(value: string | null | undefined): string {
-  return (value || '').trim()
+// NOTE: `<input type="number" v-model="formData.runtime">` makes Vue coerce the bound
+// value to a JS *number* (vModelText casts when el.type === 'number'), even though
+// formData.runtime is typed as string. So this must accept number too — calling .trim()
+// on a number throws "trim is not a function", which fired on every keystroke in the
+// Listening Length field and tore the edit modal down.
+function normalizeNumericInput(value: string | number | null | undefined): string {
+  return (value == null ? '' : String(value)).trim()
 }
 
-function parseRuntimeInput(value: string | null | undefined): number | undefined {
+function parseRuntimeInput(value: string | number | null | undefined): number | undefined {
   const normalized = normalizeNumericInput(value)
   if (!normalized) return undefined
   const parsed = Number.parseInt(normalized, 10)
@@ -1660,70 +1659,6 @@ function finishEditingDestination() {
   }
 }
 
-async function confirmKnownMoveStorageSemantics(
-  sourcePath: string,
-  destinationPath: string,
-): Promise<{ proceed: boolean; confirmedStorageSemantics: boolean }> {
-  await rootStore.load()
-  const candidates = [
-    findMutationSemanticsRoot(rootStore.folders, destinationPath),
-    findMutationSemanticsRoot(rootStore.folders, sourcePath),
-  ].filter((root): root is NonNullable<typeof root> => root != null)
-  const uniqueRoots = [...new Map(candidates.map((root) => [root.id, root])).values()]
-  let confirmedStorageSemantics = false
-
-  for (const root of uniqueRoots) {
-    const outcome = await confirmDetectedMutationSemantics(root, 'the move')
-    if (outcome === 'cancelled') {
-      return { proceed: false, confirmedStorageSemantics }
-    }
-    if (outcome === 'retry') {
-      confirmedStorageSemantics = true
-    }
-  }
-  return { proceed: true, confirmedStorageSemantics }
-}
-
-async function moveAudiobookWithStorageConfirmation(
-  audiobookId: number,
-  destinationPath: string,
-  options: { sourcePath?: string; moveFiles?: boolean; deleteEmptySource?: boolean },
-) {
-  let confirmedRetries = 0
-  let identityRefreshAttempted = false
-  while (true) {
-    try {
-      return await apiService.moveAudiobook(audiobookId, destinationPath, options)
-    } catch (error: unknown) {
-      if (options.moveFiles !== true) throw error
-
-      const validationError = getApiValidationError(error)
-      if (validationError?.code === 'move_source_unverified') {
-        if (identityRefreshAttempted) throw error
-        await refreshAudiobookFileIdentity(audiobookId)
-        identityRefreshAttempted = true
-        continue
-      }
-      if (confirmedRetries >= 2) throw error
-
-      const affectedPath =
-        validationError?.code === 'source_filesystem_mutation_unavailable'
-          ? options.sourcePath
-          : destinationPath
-      const confirmation = await confirmMutationSemanticsForBlockedOperation(error, {
-        path: affectedPath,
-        operationLabel: 'the move',
-      })
-      if (confirmation === 'cancelled') return null
-      if (confirmation !== 'retry') throw error
-
-      await refreshAudiobookFileIdentity(audiobookId)
-      identityRefreshAttempted = true
-      confirmedRetries += 1
-    }
-  }
-}
-
 async function handleSave() {
   const audiobook = baselineAudiobook.value
   if (!audiobook || !hasChanges.value) return
@@ -1782,24 +1717,6 @@ async function handleSave() {
     if (!choice || !choice.proceed) return
     userWantsMove = Boolean(choice.moveFiles)
     userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
-  }
-
-  if (basePathChanged && userWantsMove) {
-    const storageConfirmation = await confirmKnownMoveStorageSemantics(originalBase, combined || '')
-    if (!storageConfirmation.proceed) return
-    if (storageConfirmation.confirmedStorageSemantics) {
-      try {
-        await refreshAudiobookFileIdentity(audiobook.id)
-      } catch (error: unknown) {
-        toast.error(
-          'Move preparation failed',
-          error instanceof Error
-            ? error.message
-            : 'Listenarr could not refresh the audiobook file identity before moving.',
-        )
-        return
-      }
-    }
   }
 
   saving.value = true
@@ -1945,7 +1862,7 @@ async function handleSave() {
 
     if (basePathChanged) {
       try {
-        const res = await moveAudiobookWithStorageConfirmation(audiobook.id, combined ?? '', {
+        const res = await apiService.moveAudiobook(audiobook.id, combined ?? '', {
           sourcePath: originalBase || undefined,
           moveFiles: userWantsMove,
           deleteEmptySource: userWantsMove ? userWantsDeleteEmpty : false,
@@ -1960,7 +1877,7 @@ async function handleSave() {
           const resolvedTarget = typeof res.target === 'string' ? res.target : ''
           if (!jobId || !resolvedTarget) {
             throw new Error(
-              'The server did not return a durable move job ID and resolved destination.',
+              'The server did not return a valid move job ID and resolved destination.',
             )
           }
 

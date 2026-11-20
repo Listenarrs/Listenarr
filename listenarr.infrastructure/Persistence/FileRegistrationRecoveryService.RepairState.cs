@@ -1,5 +1,6 @@
 using Listenarr.Application.Common.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence;
 
@@ -17,7 +18,8 @@ public sealed partial class FileRegistrationRecoveryService
             .Where(candidate => candidate.OperationId == operationId)
             .Select(candidate => candidate.State)
             .SingleAsync(cancellationToken);
-        if (observedState == FileMutationJournalState.Completed)
+        if (FileMutationJournalLifecycle.ClearsRegistrationRecoveryBoundary(
+                observedState))
         {
             return false;
         }
@@ -46,6 +48,7 @@ public sealed partial class FileRegistrationRecoveryService
                     cancellationToken);
             if (affected == 1)
             {
+                LogParked(operationId, expectedState, reason);
                 return true;
             }
 
@@ -68,8 +71,19 @@ public sealed partial class FileRegistrationRecoveryService
         journal.Error = reason;
         journal.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        LogParked(operationId, expectedState, reason);
         return true;
     }
+
+    private void LogParked(
+        Guid operationId,
+        FileMutationJournalState reachedState,
+        string reason) =>
+        logger.LogWarning(
+            "File-registration publication {OperationId} parked as NeedsAttention after reaching {ReachedState}: {Reason}",
+            operationId,
+            reachedState,
+            reason);
 
     private async Task ThrowIfNeedsAttentionAsync(
         Guid operationId,
@@ -90,7 +104,7 @@ public sealed partial class FileRegistrationRecoveryService
     private static ApplicationConflictException RecoveryPending(Guid operationId) =>
         new(
             "registration_recovery_pending",
-            $"A previously committed file import ({operationId}) is still retiring its original source file. Retry after the source file is no longer in use.");
+            $"A previously committed file import ({operationId}) is still completing its durable publication. Retry after recovery finishes.");
 
     private static ApplicationConflictException RepairRequired(Guid operationId) =>
         new(

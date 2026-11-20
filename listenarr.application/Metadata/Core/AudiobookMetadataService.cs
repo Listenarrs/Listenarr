@@ -102,7 +102,8 @@ namespace Listenarr.Application.Metadata.Core
                                     Description = audnexusResult.Description ?? audnexusResult.Summary,
                                     Authors = audnexusResult.Authors?.Select(a => new AudibleAuthor { Asin = a.Asin, Name = a.Name, Region = audnexusResult.Region }).ToList(),
                                     Narrators = audnexusResult.Narrators?.Select(n => new AudibleNarrator { Name = n.Name }).ToList(),
-                                    Genres = audnexusResult.Genres?.Select(g => new AudibleGenre { Asin = g.Asin, Name = g.Name, Type = g.Type }).ToList()
+                                    Genres = audnexusResult.Genres?.Select(g => new AudibleGenre { Asin = g.Asin, Name = g.Name, Type = g.Type }).ToList(),
+                                    Series = AudnexusSeriesMapper.ToAudibleSeries(audnexusResult)
                                 };
                                 result = converted;
                             }

@@ -2,33 +2,45 @@ import { fileURLToPath, URL } from 'node:url'
 import type { ServerResponse } from 'node:http'
 
 import { defineConfig } from 'vite'
-import type { PluginOption } from 'vite'
+import type { PluginOption, UserConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode }): UserConfig => {
   const analyzeBundle =
     mode === 'analysis' ||
     process.env.LISTENARR_BUNDLE_ANALYZE === 'true' ||
     process.env.ANALYZE === 'true'
+
+  // The API the dev server forwards to; the browser E2E suite points it at the app in Docker.
+  const apiTarget = process.env.LISTENARR_API_URL || 'http://localhost:4545'
 
   return {
     plugins: [
       vue(),
       ...(analyzeBundle
         ? [
-            (visualizer({
+            visualizer({
               filename: 'dist/stats.html',
               title: 'Listenarr bundle analysis',
               open: false,
-            }) as unknown as PluginOption),
+            }) as unknown as PluginOption,
           ]
         : []),
     ],
     build: {
       sourcemap: analyzeBundle,
-      rollupOptions: {
+      rolldownOptions: {
+        ...(mode === 'production'
+          ? {
+              output: {
+                minify: {
+                  compress: { dropConsole: true, dropDebugger: true },
+                },
+              },
+            }
+          : {}),
         onLog(level, log, handler) {
           const code = typeof log === 'object' && log ? String(log.code ?? '') : ''
           const id = typeof log === 'object' && log ? String(log.id ?? '') : ''
@@ -55,13 +67,6 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    ...(mode === 'production'
-      ? {
-          esbuild: {
-            drop: ['console', 'debugger'],
-          },
-        }
-      : {}),
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -72,7 +77,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api': {
-          target: 'http://localhost:4545',
+          target: apiTarget,
           changeOrigin: true,
           // Rewrite cookie domains coming from the backend so the browser will
           // accept Set-Cookie when the backend sets cookies for its own host.
@@ -117,7 +122,7 @@ export default defineConfig(({ mode }) => {
           },
         },
         '/hubs': {
-          target: 'http://localhost:4545',
+          target: apiTarget,
           changeOrigin: true,
           ws: true,
           configure: (proxy) => {

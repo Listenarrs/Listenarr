@@ -3,6 +3,7 @@ global using Microsoft.Extensions.Logging;
 global using Moq;
 global using Moq.Protected;
 global using Xunit;
+global using TestAnnotationCatalog = Listenarr.Tests.Common.TestAnnotationCatalog;
 global using Listenarr.Api.Features.Configuration;
 global using Listenarr.Api.Features.DownloadClients;
 global using Listenarr.Api.Features.Downloads;

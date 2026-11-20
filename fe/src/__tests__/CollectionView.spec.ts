@@ -366,6 +366,7 @@ describe('CollectionView', () => {
         authors: ['Brandon Sanderson'],
         genres: ['Fantasy', 'Epic Fantasy'],
         imageUrl: 'fantasy-1.jpg',
+        added: '2026-06-15T00:00:00Z',
         files: [],
       },
       {
@@ -382,6 +383,7 @@ describe('CollectionView', () => {
         authors: ['Brandon Sanderson'],
         genres: ['Fantasy'],
         imageUrl: 'fantasy-2.jpg',
+        added: '2025-06-15T00:00:00Z',
         files: [],
       },
     ] as unknown as import('@/types').Audiobook[]
@@ -400,6 +402,13 @@ describe('CollectionView', () => {
     expect(wrapper.text()).toContain('The Final Empire')
     expect(wrapper.text()).toContain('The Way of Kings')
     expect(wrapper.text()).not.toContain('Project Hail Mary')
+
+    const vm = wrapper.vm as unknown as { sortKeyProxy: string }
+    vm.sortKeyProxy = 'added'
+    await wrapper.vm.$nextTick()
+    const sortedCards = wrapper.findAll('.collection-card')
+    expect(sortedCards[0]?.text()).toContain('The Way of Kings')
+    expect(sortedCards[1]?.text()).toContain('The Final Empire')
   })
 
   it('shows other audiobooks in a narrator collection', async () => {

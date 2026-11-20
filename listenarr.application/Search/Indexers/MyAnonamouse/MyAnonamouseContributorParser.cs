@@ -21,11 +21,14 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
 {
     internal static class MyAnonamouseContributorParser
     {
-        public static string? ParseContributorList(string? contributorJson)
+        public static string? ParseContributorList(string? contributorJson) =>
+            string.Join(", ", ParseContributors(contributorJson)) is { Length: > 0 } joined ? joined : null;
+
+        public static List<string> ParseContributors(string? contributorJson)
         {
             if (string.IsNullOrEmpty(contributorJson))
             {
-                return null;
+                return [];
             }
 
             using var contributorDoc = JsonDocument.Parse(contributorJson);
@@ -35,8 +38,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                 contributors.Add(prop.Value.GetString() ?? "");
             }
 
-            var joined = string.Join(", ", contributors.Where(a => !string.IsNullOrEmpty(a)));
-            return string.IsNullOrEmpty(joined) ? null : joined;
+            return contributors.Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
         }
     }
 }

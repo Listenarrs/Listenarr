@@ -1,0 +1,26 @@
+{
+  "policyVersion": "CorroboratedAutomaticV6",
+  "note": "Explicitly reviewed V6 changes. Historical corpus, facts and earlier adjudications remain frozen. Context is either original title/author fields (plain) or the exported series/narrator supplement (full).",
+  "cases": [
+    {"index":16,"context":"plain","expectedConfirmed":true,"rationale":"Complete City of Lost Souls title and Cassandra Clare credit; symmetric The article on the independently stored Mortal Instruments series, with matching Book 5."},
+    {"index":89,"context":"plain","expectedConfirmed":true,"rationale":"Complete Tick Tock title and James Patterson credit; the independently witnessed NMR-- prefix is a delimited catalog label, not an author."},
+    {"index":103,"context":"plain","expectedConfirmed":true,"rationale":"Complete Golden Fool and Robin Hobb credit; stored Tawny Man Trilogy Book 2 backs the descriptor variant and position, with separately recognized Audible and NMR annotations."},
+    {"index":211,"context":"plain","expectedConfirmed":true,"rationale":"Complete Annihilation Road and Christine Feehan credit; Torpedo Ink Series Book 6 agrees with the separately stored series subtitle."},
+    {"index":238,"context":"plain","expectedConfirmed":true,"rationale":"Complete Cross Justice and explicit James Patterson credit; the bracketed EarReaders catalog entry explains the only previously unknown annotation."},
+    {"index":293,"context":"plain","expectedConfirmed":true,"rationale":"Complete Homeroom Diaries with both stored contributors; retail is a bracketed source annotation and dwg a bracketed catalog label, neither provides identity or edition evidence."},
+    {"index":316,"context":"plain","expectedConfirmed":true,"rationale":"Complete Unlucky 13 and complete stored contributor credits; trailing zeke23 is allowed only after the MP3 technical annotation."},
+    {"index":406,"context":"plain","expectedConfirmed":true,"rationale":"Complete Shadow Dance and Christine Feehan credit; the supported Series descriptor retains the explicit Book 8 claim backed by the stored subtitle."},
+    {"index":436,"context":"plain","expectedConfirmed":true,"rationale":"The complete 6th Target title is followed by a curated alias of the separately stored Women's Murder Club series subtitle and a distinct parenthesized complete James Patterson credit; MP3/audio and zeke23 remain bounded annotations."},
+    {"index":137,"context":"full","expectedConfirmed":true,"rationale":"The complete adaptation-labeled Threshing Day title and Rebecca Yarros credit are present. Independently stored Empyrean series facts support the unnumbered Series descriptor; the adaptation label remains edition evidence."},
+    {"index":211,"context":"full","expectedConfirmed":true,"rationale":"Torpedo Ink Series Book 6 is a supported descriptor of the stored Torpedo Ink membership and agrees with its ordinal; complete title/author remain necessary."},
+    {"index":237,"context":"full","expectedConfirmed":true,"rationale":"Complete Cross Justice and James Patterson credit; the curated Alex Cross alias is scoped to the stored Alex Cross Adventures membership and preserves Book 23."},
+    {"index":238,"context":"full","expectedConfirmed":true,"rationale":"Same complete Cross Justice/James Patterson proof as the original context; no series interpretation is needed for this release's bracketed EarReaders label."},
+    {"index":293,"context":"full","expectedConfirmed":true,"rationale":"Same complete Homeroom Diaries/contributor proof and scoped retail/dwg annotations as the original context; supplied narrator facts are not manufactured from the release."},
+    {"index":316,"context":"full","expectedConfirmed":true,"rationale":"Same complete Unlucky 13/contributor proof and technical-suffix zeke23 layout as the original context; the title's 13 is not repurposed as a series claim."},
+    {"index":368,"context":"full","expectedConfirmed":true,"rationale":"Complete Mary, Mary and James Patterson credit; the curated reference-scoped Alex Cross alias retains the matching Book 11 claim."},
+    {"index":406,"context":"full","expectedConfirmed":true,"rationale":"Complete Shadow Dance and Christine Feehan credit; the independent Shadow Riders membership and explicit Book 8 agree through a supported Series descriptor."},
+    {"index":407,"context":"full","expectedConfirmed":true,"rationale":"Complete Shadow Fire and Christine Feehan credit; the exported Shadow Riders membership explicitly supports Book 7. No generic Rider/Riders or parenthetical stripping is performed."},
+    {"index":435,"context":"full","expectedConfirmed":true,"rationale":"Complete 5th Horseman title, independently stored Women's Murder Club membership, its curated Womans spelling, a separate parenthesized full James Patterson credit, and the witnessed technical-suffix zeke23 layout. No series or author is inferred as a new library fact."},
+    {"index":436,"context":"full","expectedConfirmed":true,"rationale":"Same complete 6th Target proof as the original context; the independently exported Women's Murder Club membership also backs the unnumbered alias. No title digit is repurposed as a release ordinal."}
+  ]
+}

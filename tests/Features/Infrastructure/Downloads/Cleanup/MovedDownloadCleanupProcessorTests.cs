@@ -10,7 +10,7 @@
 using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.DownloadClients;
 
 namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
 {
@@ -24,6 +24,45 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             _services.AddSingleton<IMovedDownloadCleanupProcessor, MovedDownloadCleanupProcessor>();
             Init();
             return Task.CompletedTask;
+        }
+
+        [Theory]
+        [InlineData(false, true)]
+        [InlineData(null, true)]
+        [InlineData(false, null)]
+        [InlineData(null, null)]
+        public async Task RunCycleAsync_ClientOwnedSourcesRequireFreshPermission(bool? permission, bool? storedRemovability)
+        {
+            var client = await CreateRemovableClientAsync("remove_and_delete");
+            var download = await AddMovedDownloadAsync(client, storedRemovability);
+            download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            await _downloadRepository.UpdateAsync(download);
+            await AddCompletedImportJobAsync(download);
+            _gateway.CanMoveFiles = permission;
+            _gateway.RemoveResult = true;
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>().RunCycleAsync(CancellationToken.None);
+
+            Assert.Equal(0, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+        }
+
+        [Fact]
+        public async Task RunCycleAsync_ReleasedClientOwnershipNeverOverridesPersistedRetention()
+        {
+            var client = await CreateRemovableClientAsync("remove_and_delete");
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            await _downloadRepository.UpdateAsync(download);
+            // Even an older import proof claiming retirement cannot upgrade this decision.
+            await AddCompletedImportJobAsync(download, sourceRetained: false);
+            _gateway.CanMoveFiles = true;
+            _gateway.RemoveResult = true;
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>().RunCycleAsync(CancellationToken.None);
+
+            Assert.Equal(1, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            Assert.False(_gateway.LastRemoveDeleteFiles);
         }
 
         [Fact]

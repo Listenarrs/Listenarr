@@ -310,6 +310,7 @@ namespace Listenarr.Api.Features.Library
                         return await ApplyMetadataRescanResultAsync(
                             id,
                             convertedMetadata,
+                            resolvedRegion,
                             expectedMetadataState,
                             token);
                     },

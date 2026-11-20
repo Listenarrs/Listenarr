@@ -109,7 +109,6 @@ public partial class ManualImportController
                                 audiobook,
                                 authorization.Path,
                                 authorization.Identity,
-                                authorization.PhysicalIdentity,
                                 IsAuthoritativeScope: false,
                                 AuthorizationMode:
                                     ScanAuthorizationMode.PreauthorizedPath));

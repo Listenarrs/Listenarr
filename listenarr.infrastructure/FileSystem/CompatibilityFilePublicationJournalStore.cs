@@ -19,7 +19,9 @@ internal sealed record CompatibilityFilePublicationClaim(
     int? DestinationRootFolderId = null,
     int? DestinationPolicyRevision = null,
     int? SourceStorageContractRevision = null,
-    int? DestinationStorageContractRevision = null);
+    int? DestinationStorageContractRevision = null,
+    int? ExpectedBatchMemberCount = null,
+    string? ExpectedBatchSourceManifestSha256 = null);
 
 internal sealed class CompatibilityFilePublicationJournalStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
@@ -50,6 +52,14 @@ internal sealed class CompatibilityFilePublicationJournalStore(
         var existing = await GetAsync(claim.OperationId, cancellationToken);
         if (existing != null)
         {
+            if (CanRebindLegacyRetainedAttempt(existing, claim))
+            {
+                return await RebindLegacyRetainedAttemptAsync(
+                    existing.OperationId,
+                    claim,
+                    cancellationToken);
+            }
+
             ValidateClaim(existing, claim);
             return existing;
         }
@@ -69,6 +79,8 @@ internal sealed class CompatibilityFilePublicationJournalStore(
             DestinationRootFolderId = claim.DestinationRootFolderId,
             DestinationPolicyRevision = claim.DestinationPolicyRevision,
             DestinationStorageContractRevision = claim.DestinationStorageContractRevision,
+            ExpectedBatchMemberCount = claim.ExpectedBatchMemberCount,
+            ExpectedBatchSourceManifestSha256 = claim.ExpectedBatchSourceManifestSha256,
             SourcePath = Path.GetFullPath(claim.SourcePath),
             DestinationPath = Path.GetFullPath(claim.DestinationPath),
             SourceLength = claim.SourceLength,
@@ -190,6 +202,71 @@ internal sealed class CompatibilityFilePublicationJournalStore(
         };
     }
 
+    private static bool CanRebindLegacyRetainedAttempt(
+        CompatibilityFilePublicationJournal journal,
+        CompatibilityFilePublicationClaim claim) =>
+        journal.ProtocolVersion == CompatibilityFilePublicationProtocol.Current
+        && journal.State == CompatibilityFilePublicationState.Completed
+        && journal.SourceDisposition == CompatibilitySourceDisposition.Retained
+        && journal.CleanupOwner != CompatibilityCleanupOwner.None
+        && journal.CleanupOwner == claim.CleanupOwner
+        && journal.ExpectedBatchMemberCount == null
+        && string.IsNullOrWhiteSpace(journal.ExpectedBatchSourceManifestSha256)
+        && string.IsNullOrWhiteSpace(journal.QuarantinePath)
+        && claim.ExpectedBatchMemberCount.HasValue
+        && !string.IsNullOrWhiteSpace(claim.ExpectedBatchSourceManifestSha256)
+        && journal.RequestedAction == claim.RequestedAction
+        && string.Equals(
+            journal.SourcePath,
+            Path.GetFullPath(claim.SourcePath),
+            StringComparison.Ordinal)
+        && string.Equals(
+            journal.DestinationPath,
+            Path.GetFullPath(claim.DestinationPath),
+            StringComparison.Ordinal)
+        && journal.SourceLength == claim.SourceLength
+        && string.Equals(
+            journal.SourceSha256,
+            claim.SourceSha256,
+            StringComparison.OrdinalIgnoreCase)
+        && journal.IsCompanionFile == claim.IsCompanionFile
+        && journal.SourceRootFolderId == claim.SourceRootFolderId
+        && journal.DestinationRootFolderId == claim.DestinationRootFolderId;
+
+    private async Task<CompatibilityFilePublicationJournal>
+        RebindLegacyRetainedAttemptAsync(
+            Guid operationId,
+            CompatibilityFilePublicationClaim claim,
+            CancellationToken cancellationToken)
+    {
+        await using var context = await dbContextFactory.CreateDbContextAsync(
+            cancellationToken);
+        var journal = await context.CompatibilityFilePublicationJournals
+            .SingleAsync(
+                candidate => candidate.OperationId == operationId,
+                cancellationToken);
+        if (!CanRebindLegacyRetainedAttempt(journal, claim))
+        {
+            ValidateClaim(journal, claim);
+            return journal;
+        }
+
+        journal.BatchId = claim.BatchId;
+        journal.SourcePolicyRevision = claim.SourcePolicyRevision;
+        journal.SourceStorageContractRevision = claim.SourceStorageContractRevision;
+        journal.DestinationPolicyRevision = claim.DestinationPolicyRevision;
+        journal.DestinationStorageContractRevision =
+            claim.DestinationStorageContractRevision;
+        journal.ExpectedBatchMemberCount = claim.ExpectedBatchMemberCount;
+        journal.ExpectedBatchSourceManifestSha256 =
+            claim.ExpectedBatchSourceManifestSha256;
+        journal.State = CompatibilityFilePublicationState.RegistrationCommitted;
+        journal.Error = null;
+        journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await context.SaveChangesAsync(cancellationToken);
+        return journal;
+    }
+
     private static void ValidateClaim(
         CompatibilityFilePublicationJournal journal,
         CompatibilityFilePublicationClaim claim)
@@ -216,7 +293,12 @@ internal sealed class CompatibilityFilePublicationJournalStore(
                     || journal.SourceStorageContractRevision != claim.SourceStorageContractRevision
                     || journal.DestinationRootFolderId != claim.DestinationRootFolderId
                     || journal.DestinationPolicyRevision != claim.DestinationPolicyRevision
-                    || journal.DestinationStorageContractRevision != claim.DestinationStorageContractRevision))
+                    || journal.DestinationStorageContractRevision != claim.DestinationStorageContractRevision
+                    || journal.ExpectedBatchMemberCount != claim.ExpectedBatchMemberCount
+                    || !string.Equals(
+                        journal.ExpectedBatchSourceManifestSha256,
+                        claim.ExpectedBatchSourceManifestSha256,
+                        StringComparison.OrdinalIgnoreCase)))
             || !string.Equals(
                 journal.SourceSha256,
                 claim.SourceSha256,

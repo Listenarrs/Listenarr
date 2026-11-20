@@ -139,7 +139,6 @@ public static class MoveRecoveryPolicy
             || completedCleanupState is not (
                 MoveJobEntryCleanupState.Deleted
                 or MoveJobEntryCleanupState.Retained)
-            || string.IsNullOrWhiteSpace(job.TargetDirectoryObjectIdentity)
             || string.IsNullOrWhiteSpace(job.RequestedPath))
         {
             return false;
@@ -161,40 +160,16 @@ public static class MoveRecoveryPolicy
                 .TryCanonicalizeStoredPathWithIdentityForHost(
                     job.RequestedPath,
                     targetIdentity,
-                    out var requestedPath,
+                    out _,
                     out _))
         {
             return false;
         }
 
-        foreach (var directory in job.CreatedDirectories)
-        {
-            if (directory.State != MoveCreatedDirectoryState.Created
-                || string.IsNullOrWhiteSpace(directory.DirectoryObjectIdentity)
-                || !string.Equals(
-                    directory.DirectoryObjectIdentity,
-                    job.TargetDirectoryObjectIdentity,
-                    StringComparison.Ordinal)
-                || !Listenarr.Domain.Common.FileSystemPathIdentity
-                    .TryCanonicalizeStoredPathWithIdentityForHost(
-                        directory.Path,
-                        targetIdentity,
-                        out var directoryPath,
-                        out _))
-            {
-                continue;
-            }
-
-            if (Listenarr.Domain.Common.FileSystemPathIdentity.AreEquivalent(
-                    directoryPath,
-                    requestedPath,
-                    targetIdentity.Semantics))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // Recovery classification uses durable path/content state only.
+        // Created-directory physical identities are legacy diagnostics and cannot
+        // be required to resume non-destructive reconciliation.
+        return true;
     }
 
     public static MoveRecoveryState ClassifyAudiobookJobs(IEnumerable<MoveJob> jobs)

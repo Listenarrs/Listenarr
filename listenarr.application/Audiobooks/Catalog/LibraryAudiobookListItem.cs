@@ -26,11 +26,17 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public string[]? Narrators { get; set; }
         public string? PublishYear { get; set; }
         public string? PublishedDate { get; set; }
+        public DateTime? Added { get; set; }
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
         public AudiobookSeriesMembershipDto[]? SeriesMemberships { get; set; }
         public string[]? Genres { get; set; }
         public string? Asin { get; set; }
+        /// <summary>The Audible region of <see cref="Asin"/>, when the book's identifiers say it.</summary>
+        public string? AsinRegion { get; set; }
+        // Why Audible can't be asked for this book (BrokenBookReasons codes); empty when it can. The
+        // "Broken books" group lists the books that have reasons.
+        public string[] BrokenReasons { get; set; } = [];
         public string? OpenLibraryId { get; set; }
         public string? Publisher { get; set; }
         public string? Language { get; set; }

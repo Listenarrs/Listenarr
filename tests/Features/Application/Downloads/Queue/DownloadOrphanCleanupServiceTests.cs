@@ -192,6 +192,37 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
         }
 
+        [Fact]
+        [Trait("Method", "RemoveOrphansAsync")]
+        public async Task RemoveOrphansAsync_DoesNotRemoveWhenLiveSnapshotIsIncomplete()
+        {
+            var client = CreateClient();
+            var download = await AddDownloadAsync(
+                id: "incomplete-snapshot-download",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-10));
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+
+            await service.RemoveOrphansAsync(
+                client,
+                new ClientQueueFetchResult(
+                    client,
+                    [new QueueItem { Id = "other-live-item" }],
+                    usedCachedSnapshot: false,
+                    isUnavailable: false,
+                    snapshotAge: TimeSpan.Zero,
+                    failureReason: null,
+                    snapshotState: "live",
+                    snapshotRefreshedAtUtc: DateTimeOffset.UtcNow,
+                    isIncomplete: true),
+                [new QueueItem { Id = "other-live-item" }],
+                [download]);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
+        }
+
         private async Task<Download> AddDownloadAsync(
             string id,
             string clientId,

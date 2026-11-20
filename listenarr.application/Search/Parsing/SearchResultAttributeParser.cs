@@ -22,15 +22,52 @@ namespace Listenarr.Application.Search.Parsing;
 
 public static class SearchResultAttributeParser
 {
+    // Unambiguous tokens — 3-letter ISO codes, full/native names, and short codes that are
+    // not common words — are trusted anywhere in a release title. Deliberately broad so a
+    // non-English release (e.g. a Danish "...-DK-...") is flagged rather than grabbed as if
+    // it were English.
     private static readonly IReadOnlyDictionary<string, string> LanguageCodes =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            { "ENG", "English" }, { "EN", "English" },
-            { "DUT", "Dutch" },   { "NLD", "Dutch" },   { "NL", "Dutch" },
-            { "GER", "German" },  { "DEU", "German" },  { "DE", "German" },
-            { "FRE", "French" },  { "FRA", "French" },  { "FR", "French" },
-            { "SPA", "Spanish" }, { "ES", "Spanish" }
+            { "ENG", "English" }, { "EN", "English" }, { "English", "English" },
+            { "DA", "Danish" }, { "DK", "Danish" }, { "Danish", "Danish" }, { "Dansk", "Danish" },
+            { "DUT", "Dutch" }, { "NLD", "Dutch" }, { "NL", "Dutch" }, { "Dutch", "Dutch" }, { "Nederlands", "Dutch" },
+            { "GER", "German" }, { "DEU", "German" }, { "DE", "German" }, { "German", "German" }, { "Deutsch", "German" },
+            { "FRE", "French" }, { "FRA", "French" }, { "FR", "French" }, { "French", "French" }, { "Francais", "French" }, { "Français", "French" },
+            { "SPA", "Spanish" }, { "ES", "Spanish" }, { "Spanish", "Spanish" }, { "Espanol", "Spanish" }, { "Español", "Spanish" }, { "Castellano", "Spanish" },
+            { "ITA", "Italian" }, { "Italian", "Italian" }, { "Italiano", "Italian" },
+            { "SWE", "Swedish" }, { "SV", "Swedish" }, { "Swedish", "Swedish" }, { "Svenska", "Swedish" },
+            { "NB", "Norwegian" }, { "Norwegian", "Norwegian" }, { "Norsk", "Norwegian" },
+            { "FIN", "Finnish" }, { "FI", "Finnish" }, { "Finnish", "Finnish" }, { "Suomi", "Finnish" },
+            { "POR", "Portuguese" }, { "Portuguese", "Portuguese" }, { "Portugues", "Portuguese" }, { "Português", "Portuguese" },
+            { "POL", "Polish" }, { "PL", "Polish" }, { "Polish", "Polish" }, { "Polski", "Polish" },
+            { "RUS", "Russian" }, { "RU", "Russian" }, { "Russian", "Russian" },
+            { "JPN", "Japanese" }, { "JA", "Japanese" }, { "JP", "Japanese" }, { "Japanese", "Japanese" },
+            { "CHI", "Chinese" }, { "ZHO", "Chinese" }, { "ZH", "Chinese" }, { "Chinese", "Chinese" }, { "Mandarin", "Chinese" },
+            { "CES", "Czech" }, { "CZE", "Czech" }, { "CS", "Czech" }, { "CZ", "Czech" }, { "Czech", "Czech" },
+            { "HUN", "Hungarian" }, { "HU", "Hungarian" }, { "Hungarian", "Hungarian" }, { "Magyar", "Hungarian" },
+            { "TUR", "Turkish" }, { "TR", "Turkish" }, { "Turkish", "Turkish" },
+            { "ELL", "Greek" }, { "GRE", "Greek" }, { "Greek", "Greek" },
+            { "KOR", "Korean" }, { "KO", "Korean" }, { "Korean", "Korean" },
+            { "ISL", "Icelandic" }, { "Icelandic", "Icelandic" },
         };
+
+    // Tokens that are also ordinary words or names — the short codes ("it", "no", "se",
+    // "pt") and the name-like aliases ("DAN" as in "Dan Brown", "NOR", "EL") — are trusted
+    // only inside [brackets]/(parentheses) or in the delimited-before-the-year scene-tag
+    // position, never as a bare title token. This stops an author's name or a stray word
+    // from being read as the release language (e.g. "Dan Brown ...-WEB-DE-2017" is German,
+    // not Danish).
+    private static readonly IReadOnlyDictionary<string, string> AmbiguousLanguageCodes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "IT", "Italian" }, { "NO", "Norwegian" }, { "SE", "Swedish" }, { "PT", "Portuguese" },
+            { "DAN", "Danish" }, { "NOR", "Norwegian" }, { "EL", "Greek" },
+        };
+
+    private static readonly IReadOnlyDictionary<string, string> AllLanguageCodes =
+        LanguageCodes.Concat(AmbiguousLanguageCodes)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 
     public static string DetectQualityFromTags(string tags)
     {
@@ -111,33 +148,72 @@ public static class SearchResultAttributeParser
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
 
-        var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
-        var alternation = string.Join("|", LanguageCodes.Keys.Select(Regex.Escape));
-        var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b";
-        var wordBoundaryPattern = $"\\b(?:{alternation})\\b";
+        var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled).Trim();
 
-        var bracketMatch = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        if (bracketMatch.Success)
+        // Bracketed/parenthesized tags are high-confidence; trust every code there,
+        // including the short ambiguous ones.
+        var bracketed = MatchLanguageToken(normalized, AllLanguageCodes, bracketedOnly: true);
+        if (bracketed != null) return bracketed;
+
+        // Audiobook scene releases encode the language as a code wedged tightly between scene
+        // delimiters immediately before the year, e.g. "...AUDiOBOOK-WEB-SE-2023-GROUP"
+        // (Swedish) or "...-DK-2026-..." (Danish). That is the release's own language label,
+        // so it is checked BEFORE the standalone pass — otherwise an ordinary word in the book
+        // title ("French.Lessons-...-WEB-SE-2023") would override the release tag. Requiring the
+        // tight scene delimiters (no spaces) keeps human titles like "It 1986" / "Book No 2022"
+        // from being mistaken for a scene tag.
+        var sceneTag = MatchReleaseTagLanguage(normalized, AllLanguageCodes);
+        if (sceneTag != null) return sceneTag;
+
+        // Elsewhere only trust unambiguous tokens. The ambiguous short codes and the name-like
+        // aliases (DAN/NOR/EL) are excluded here so an author's name or a stray word ("Dan
+        // Brown", "it", "no") is not read as a language on its own.
+        return MatchLanguageToken(normalized, LanguageCodes, bracketedOnly: false);
+    }
+
+    private static string? MatchReleaseTagLanguage(
+        string normalized,
+        IReadOnlyDictionary<string, string> codes)
+    {
+        var alternation = string.Join("|", codes.Keys.OrderByDescending(k => k.Length).Select(Regex.Escape));
+        if (alternation.Length == 0)
         {
-            var code = bracketMatch.Value.TrimStart('[', '(').Trim().Split(' ', '/', ',')[0];
-            if (LanguageCodes.TryGetValue(code.ToUpperInvariant(), out var language)) return language;
+            return null;
         }
 
-        var wordMatch = Regex.Match(normalized, wordBoundaryPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        if (wordMatch.Success)
-        {
-            var code = wordMatch.Value.Trim();
-            if (LanguageCodes.TryGetValue(code.ToUpperInvariant(), out var language)) return language;
-        }
+        // <scene-delimiter><code><scene-delimiter><19xx|20xx year>. The delimiters are the
+        // tight scene characters (-._) only — a plain space is excluded so an ordinary title
+        // word before a year ("It 1986", "Book No 2022") is not accepted as a scene tag.
+        var pattern = $@"(?<=[-._])(?<tok>{alternation})(?=[-._](?:19|20)\d{{2}}(?:\b|[-._ ]))";
+        var match = Regex.Match(normalized, pattern, RegexOptions.IgnoreCase);
+        return match.Success && codes.TryGetValue(match.Groups["tok"].Value, out var language)
+            ? language
+            : null;
+    }
 
-        return null;
+    private static string? MatchLanguageToken(
+        string normalized,
+        IReadOnlyDictionary<string, string> codes,
+        bool bracketedOnly)
+    {
+        // Longest tokens first so full names win over their abbreviations.
+        var alternation = string.Join("|", codes.Keys.OrderByDescending(k => k.Length).Select(Regex.Escape));
+        if (alternation.Length == 0) return null;
+
+        var pattern = bracketedOnly
+            ? $@"[\[\(]\s*(?<tok>{alternation})\b"
+            : $@"\b(?<tok>{alternation})\b";
+        var match = Regex.Match(normalized, pattern, RegexOptions.IgnoreCase);
+        return match.Success && codes.TryGetValue(match.Groups["tok"].Value, out var language)
+            ? language
+            : null;
     }
 
     public static string? ParseLanguageFromCode(string? code)
     {
         if (string.IsNullOrWhiteSpace(code)) return null;
 
-        return LanguageCodes.TryGetValue(code.ToUpperInvariant(), out var language)
+        return AllLanguageCodes.TryGetValue(code.Trim(), out var language)
             ? language
             : null;
     }

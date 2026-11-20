@@ -125,6 +125,36 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveExistingAsync_GenericFidPersistedIdentity_IsClassifiedAsWeakEvidence()
+    {
+        var directory = FileService.GetTempDirectory(
+            "directory-object-identity-generic-fid-legacy");
+        const string genericFid =
+            "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000";
+        var persisted = ManagedDirectoryIdentity.CreateMarkerless(genericFid);
+        var resolver = new DirectoryObjectIdentityResolver(
+            nativeIdentityCandidatesResolver: static _ =>
+            [
+                "linux-generation:00000008:00000001:0000000000001234:gen:00000002"
+            ],
+            legacyWeakIdentityCandidatesResolver: static _ => [genericFid]);
+
+        var existing = await resolver.ResolveExistingAsync(
+            directory,
+            ManagedDirectoryIdentity.CurrentVersion,
+            persisted);
+
+        Assert.False(existing.IsAvailable);
+        Assert.Equal(
+            DirectoryObjectIdentityFailureKind.LegacyWeakIdentity,
+            existing.FailureKind);
+        Assert.Contains(
+            "FILEID_INO64_GEN",
+            existing.UnavailableReason,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ResolveExistingAsync_DifferentNativeGeneration_IsUnavailable()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-recreated");
@@ -240,6 +270,113 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
     }
 
     [Fact]
+    public void LinuxIdentity_GenericFidOnly_FailsClosed()
+    {
+        var exception = Assert.Throws<PlatformNotSupportedException>(() =>
+            PinnedDirectoryCreation.CreateLinuxObjectIdentityCandidatesFromEvidence(
+                deviceMajor: 8,
+                deviceMinor: 1,
+                inode: 0x1234,
+                hasBirthTime: false,
+                birthTimeSeconds: 0,
+                birthTimeNanoseconds: 0,
+                generationIdentities: ["fh:00000081:341200000000000000000000"]));
+
+        Assert.Contains(
+            "durable file handle or inode generation",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LinuxIdentity_GenericFid_DoesNotSuppressStrongInodeGeneration()
+    {
+        var candidates = PinnedDirectoryCreation.CreateLinuxObjectIdentityCandidatesFromEvidence(
+            deviceMajor: 8,
+            deviceMinor: 1,
+            inode: 0x1234,
+            hasBirthTime: false,
+            birthTimeSeconds: 0,
+            birthTimeNanoseconds: 0,
+            generationIdentities:
+            [
+                "fh:00000081:341200000000000000000000",
+                "gen:00000002"
+            ]);
+
+        Assert.Equal(
+            ["linux-generation:00000008:00000001:0000000000001234:gen:00000002"],
+            candidates);
+    }
+
+    [Fact]
+    public void LinuxIdentity_GenericFid_DoesNotSuppressFilesystemSpecificHandle()
+    {
+        var candidates = PinnedDirectoryCreation.CreateLinuxObjectIdentityCandidatesFromEvidence(
+            deviceMajor: 8,
+            deviceMinor: 1,
+            inode: 0x1234,
+            hasBirthTime: false,
+            birthTimeSeconds: 0,
+            birthTimeNanoseconds: 0,
+            generationIdentities:
+            [
+                "fh:00000081:341200000000000000000000",
+                "fh:00000001:deadbeef"
+            ]);
+
+        Assert.Equal(
+            ["linux-generation:00000008:00000001:0000000000001234:fh:00000001:deadbeef"],
+            candidates);
+    }
+
+    [Fact]
+    public void LinuxIdentity_GenericFidWeakCandidates_PreserveReleasedSpellingsOnlyForClassification()
+    {
+        var candidates = PinnedDirectoryCreation.CreateLinuxLegacyWeakObjectIdentityCandidatesFromEvidence(
+            deviceMajor: 8,
+            deviceMinor: 1,
+            inode: 0x1234,
+            hasBirthTime: true,
+            birthTimeSeconds: 0x5678,
+            birthTimeNanoseconds: 0x9abc,
+            generationIdentities:
+            [
+                "fh:00000081:341200000000000000000000",
+                "gen:00000002"
+            ]);
+
+        Assert.Equal(
+            [
+                "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000",
+                "linux:00000008:00000001:0000000000001234:0000000000005678:00009abc:fh:00000081:341200000000000000000000"
+            ],
+            candidates);
+    }
+
+    [Theory]
+    [InlineData("linux:00000008:00000001:0000000000001234:0000000000005678:00009abc")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000")]
+    [InlineData("linux:00000008:00000001:0000000000001234:0000000000005678:00009abc:fh:00000081:341200000000000000000000")]
+    public void LinuxIdentity_ReleasedGenericFidSpellings_AreClassifiedAsLegacyWeak(
+        string identity)
+    {
+        Assert.True(
+            PhysicalObjectIdentitySafety.IsKnownWeak(identity));
+    }
+
+    [Theory]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:gen:00000002")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000001:deadbeef")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000081")]
+    public void LinuxIdentity_StrongOrMalformedSpellings_AreNotLegacyWeak(
+        string identity)
+    {
+        Assert.False(
+            PhysicalObjectIdentitySafety.IsKnownWeak(identity));
+    }
+
+    [Fact]
     public void LinuxIdentity_WithoutBirthTime_UsesStrongAlternativeGenerationEvidence()
     {
         var identity = PinnedDirectoryCreation.CreateLinuxObjectIdentityFromEvidence(
@@ -295,6 +432,9 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             birthTimeIdentity,
             augmented));
+        Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+            birthTimeIdentity,
+            birthTimeIdentity));
         Assert.True(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             augmented,
             strong));
@@ -304,6 +444,17 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             strong,
             "linux-generation:00000008:00000001:0000000000001234:fh:00000001:deadbeef"));
+    }
+
+    [Fact]
+    public void LinuxPersistedIdentityEquivalence_GenericFidIsNeverDurableAuthority()
+    {
+        const string genericFid =
+            "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000";
+
+        Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+            genericFid,
+            genericFid));
     }
 
     [Fact]

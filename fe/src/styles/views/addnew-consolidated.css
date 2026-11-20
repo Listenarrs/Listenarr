@@ -440,6 +440,9 @@ select.form-input:focus {
   outline: none;
   border-color: var(--brand-600);
   box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.1);
+  /* Opaque, unlike a focused text field: the browser draws the open list with this background,
+     and a see-through one turns it nearly white */
+  background-color: #1a1a1a;
 }
 
 /* Form group layout */

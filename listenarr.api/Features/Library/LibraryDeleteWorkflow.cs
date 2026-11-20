@@ -39,7 +39,6 @@ namespace Listenarr.Api.Features.Library
         private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly IRootFolderService _rootFolderService;
         private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
-        private readonly IAudiobookFileIdentityReconciler _fileIdentityReconciler;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
@@ -75,7 +74,7 @@ namespace Listenarr.Api.Features.Library
                 ?? throw new ArgumentNullException(nameof(rootFolderService));
             _storageHealthResolver = storageHealthResolver
                 ?? throw new ArgumentNullException(nameof(storageHealthResolver));
-            _fileIdentityReconciler = fileIdentityReconciler
+            _ = fileIdentityReconciler
                 ?? throw new ArgumentNullException(nameof(fileIdentityReconciler));
             _logger = logger;
         }
@@ -167,41 +166,6 @@ namespace Listenarr.Api.Features.Library
                         });
                     }
 
-                    if (HasUnverifiedTrackedDeleteSource(snapshot))
-                    {
-                        if (activeIntent?.State == AudiobookDeletionIntentState.Planned)
-                        {
-                            await _fileIdentityReconciler.ReconcileAsync(cancellationToken);
-                            snapshot = await _audiobookRepository.GetByIdSnapshotAsync(
-                                id,
-                                cancellationToken);
-                            if (snapshot == null)
-                            {
-                                return new NotFoundObjectResult(new { message = "Audiobook not found" });
-                            }
-                        }
-
-                        if (HasUnverifiedTrackedDeleteSource(snapshot))
-                        {
-                            if (activeIntent?.State == AudiobookDeletionIntentState.Planned)
-                            {
-                                return new ObjectResult(new
-                                {
-                                    message = "The existing filesystem deletion remains pending because one or more tracked files still lack verified physical identity.",
-                                    code = "delete_recovery_pending"
-                                })
-                                {
-                                    StatusCode = StatusCodes.Status500InternalServerError
-                                };
-                            }
-
-                            return new ConflictObjectResult(new
-                            {
-                                message = "One or more tracked audiobook files have not yet been verified for safe filesystem deletion. Rescan the audiobook and try again.",
-                                code = "delete_source_unverified"
-                            });
-                        }
-                    }
                 }
 
                 // Cancellation is authoritative until the durable deletion intent is
@@ -335,12 +299,6 @@ namespace Listenarr.Api.Features.Library
             var active = await _deletionIntentStore.GetActiveAsync(cancellationToken);
             return active.SingleOrDefault(intent => intent.AudiobookId == audiobookId);
         }
-
-        private static bool HasUnverifiedTrackedDeleteSource(Audiobook audiobook) =>
-            audiobook.Files?.Any(file =>
-                !string.IsNullOrWhiteSpace(file.Path)
-                && file.PathIdentityState == PathIdentityState.Valid
-                && string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)) == true;
 
         private async Task<RootFolderStorageObservation?> GetManagedStorageMutationBlockAsync(
             Audiobook audiobook,

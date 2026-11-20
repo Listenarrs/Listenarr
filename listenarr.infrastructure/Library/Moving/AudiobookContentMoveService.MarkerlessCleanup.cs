@@ -2,12 +2,154 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private async Task RetainMarkerlessSourceAsync(
+    private async Task<bool> ReconcileRestartedMarkerlessSourceAsync(
         AudiobookContentMoveRequest request,
+        string source,
         string target,
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
+        await VerifyMarkerlessTargetAsync(
+            request,
+            target,
+            manifest,
+            cancellationToken);
+
+        var sourceRetained = false;
+        foreach (var entry in manifest.Where(IsPhysicalManifestEntry))
+        {
+            var sourcePath = ResolveManifestPath(
+                source,
+                entry,
+                request.SourceSemantics,
+                "source");
+            var exists = TryGetMarkerlessPathAttributes(
+                sourcePath,
+                out var attributes);
+            if (exists)
+            {
+                var expectedDirectory =
+                    entry.EntryType == MoveJobEntryType.Directory;
+                if (((attributes & FileAttributes.Directory) != 0)
+                    != expectedDirectory
+                    || (attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A surviving source entry changed type during restart recovery: {entry.RelativePath}");
+                }
+
+                if (expectedDirectory)
+                {
+                    await ReconcileRestartedDirectoryOwnershipAsync(
+                        request, sourcePath, exists: true, cancellationToken);
+                }
+
+                if (entry.CleanupState != MoveJobEntryCleanupState.Retained)
+                {
+                    await UpdateCleanupStateAsync(
+                        request.JobId,
+                        request.LeaseToken,
+                        entry.RelativePath,
+                        MoveJobEntryCleanupState.Retained,
+                        cancellationToken);
+                    entry.CleanupState = MoveJobEntryCleanupState.Retained;
+                }
+                sourceRetained = true;
+                continue;
+            }
+
+            if (entry.EntryType == MoveJobEntryType.Directory)
+            {
+                await ReconcileRestartedDirectoryOwnershipAsync(
+                    request, sourcePath, exists: false, cancellationToken);
+            }
+
+            if (entry.CleanupState != MoveJobEntryCleanupState.Deleted)
+            {
+                await UpdateCleanupStateAsync(
+                    request.JobId,
+                    request.LeaseToken,
+                    entry.RelativePath,
+                    MoveJobEntryCleanupState.Deleted,
+                    cancellationToken);
+                entry.CleanupState = MoveJobEntryCleanupState.Deleted;
+            }
+        }
+
+        var sourceExists = TryGetMarkerlessPathAttributes(
+            source,
+            out var sourceAttributes);
+        if (sourceExists
+            && ((sourceAttributes & FileAttributes.Directory) == 0
+                || (sourceAttributes & FileAttributes.ReparsePoint) != 0))
+        {
+            throw new MoveNeedsAttentionException(
+                "The surviving move source changed type during restart recovery.");
+        }
+
+        await ReconcileRestartedDirectoryOwnershipAsync(
+            request, source, sourceExists, cancellationToken);
+
+        await UpdateSourceDirectoryCleanupStateAsync(
+            request.JobId,
+            request.LeaseToken,
+            sourceExists
+                ? MoveJobEntryCleanupState.Retained
+                : MoveJobEntryCleanupState.Deleted,
+            cancellationToken);
+        sourceRetained |= sourceExists;
+
+        await ReportProgressAsync(
+            request,
+            90,
+            sourceRetained
+                ? "Source retained after restart"
+                : "Source already absent after restart",
+            cancellationToken);
+        return sourceRetained;
+    }
+
+    private async Task ReconcileRestartedDirectoryOwnershipAsync(
+        AudiobookContentMoveRequest request,
+        string path,
+        bool exists,
+        CancellationToken cancellationToken)
+    {
+        var ownership = await ResolveMarkerlessSourceDirectoryOwnershipAsync(
+            path, request.SourceSemantics, cancellationToken);
+        if (exists)
+        {
+            await RetainMarkerlessOwnedDirectoryIfRemovingAsync(
+                ownership,
+                "The source survived a process boundary; restart recovery retained it.",
+                cancellationToken);
+        }
+        else if (ownership?.State == LibraryDirectoryOwnershipState.Removing)
+        {
+            var ownershipKey = ownership.PathOwnershipKey
+                ?? throw new MoveNeedsAttentionException(
+                    "The absent source ownership has no durable ownership key.");
+            // An absent path is an observed outcome, never authority to delete.
+            await directoryOwnershipStore.MarkRemovedAsync(
+                ownership.Id, ownershipKey, cancellationToken);
+        }
+    }
+
+    private async Task RetainMarkerlessSourceAsync(
+        AudiobookContentMoveRequest request,
+        string source,
+        string target,
+        bool adoptedPriorTarget,
+        IReadOnlyCollection<MoveJobEntry> manifest,
+        CancellationToken cancellationToken)
+    {
+        if (adoptedPriorTarget)
+        {
+            // Absent sources are observations; surviving sources lose retirement authority.
+            await ReconcileRestartedMarkerlessSourceAsync(
+                request, source, target, manifest, cancellationToken);
+            return;
+        }
         await VerifyMarkerlessTargetAsync(
             request,
             target,
@@ -62,22 +204,14 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         bool targetInsideSource,
         IReadOnlyCollection<MoveJobEntry> manifest,
+        MarkerlessSourceRetirementLease sourceRetirementLease,
+        MarkerlessTargetVerificationLease targetVerificationLease,
         CancellationToken cancellationToken)
     {
         if (request.ForceCopyAndRetainSource)
         {
             throw new MoveNeedsAttentionException(
                 "Forced source retention forbids destructive source cleanup.");
-        }
-
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
-            || string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            throw new MoveNeedsAttentionException(
-                "Markerless cleanup requires persisted source and target endpoint generations.");
         }
 
         var files = manifest
@@ -104,8 +238,8 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 entry,
-                endpoints.SourceDirectoryObjectIdentity,
-                endpoints.TargetDirectoryObjectIdentity,
+                sourceRetirementLease,
+                targetVerificationLease,
                 cancellationToken);
             if (!wasComplete && entry.CleanupState is
                 MoveJobEntryCleanupState.Deleted or MoveJobEntryCleanupState.Retained)
@@ -130,7 +264,7 @@ internal sealed partial class AudiobookContentMoveService
                 target,
                 targetInsideSource,
                 entry,
-                endpoints.SourceDirectoryObjectIdentity,
+                sourceRetirementLease,
                 cancellationToken);
         }
 
@@ -139,6 +273,7 @@ internal sealed partial class AudiobookContentMoveService
             source,
             target,
             targetInsideSource,
+            sourceRetirementLease,
             cancellationToken);
         await ReportProgressAsync(request, 90, "Cleaning source", cancellationToken);
     }
@@ -148,8 +283,8 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         MoveJobEntry entry,
-        string sourceEndpointIdentity,
-        string targetEndpointIdentity,
+        MarkerlessSourceRetirementLease sourceRetirementLease,
+        MarkerlessTargetVerificationLease targetVerificationLease,
         CancellationToken cancellationToken)
     {
         var sourcePath = ResolveManifestPath(
@@ -218,11 +353,14 @@ internal sealed partial class AudiobookContentMoveService
             source,
             sourceParentPath,
             request.SourceSemantics,
-            sourceEndpointIdentity,
             sourceEndpoint: true);
-        using var sourceEntry = sourceParent.OpenExistingFile(
-            Path.GetFileName(sourcePath),
-            requireDeleteAccess: true);
+        using var sourceEntry = sourceParent.OpenExistingFileForStableDelete(
+            Path.GetFileName(sourcePath));
+        if (!sourceRetirementLease.Matches(entry.RelativePath, sourceEntry))
+        {
+            await RetainMarkerlessSourceEntryAsync(request, entry, cancellationToken);
+            return;
+        }
         ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
         if (!await PinnedFileMatchesManifestAsync(
                 sourceEntry,
@@ -238,11 +376,14 @@ internal sealed partial class AudiobookContentMoveService
             target,
             targetParentPath,
             request.TargetSemantics,
-            targetEndpointIdentity,
             sourceEndpoint: false);
-        using var targetEntry = targetParent.OpenExistingFile(
-            Path.GetFileName(targetPath),
-            requireDeleteAccess: false);
+        using var targetEntry = targetParent.OpenExistingFileForVerificationLease(
+            Path.GetFileName(targetPath));
+        if (!targetVerificationLease.Matches(entry.RelativePath, targetEntry))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The committed target changed before source deletion: {entry.RelativePath}");
+        }
         ValidateMarkerlessTargetEntry(entry, targetEntry);
         if (!await PinnedFileMatchesManifestAsync(
                 targetEntry,
@@ -289,7 +430,16 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 $"The target file content changed after markerless deletion was authorized: {entry.RelativePath}");
         }
+        if (!sourceEntry.VisiblePathMatches()
+            || !targetEntry.VisiblePathMatches()
+            || !sourceParent.VisiblePathMatches()
+            || !targetParent.VisiblePathMatches())
+        {
+            throw new MoveNeedsAttentionException(
+                $"A live publication changed immediately before source deletion: {entry.RelativePath}");
+        }
         sourceEntry.Delete();
+        sourceRetirementLease.Release(entry.RelativePath);
         faultInjector?.OnSourceCleanupMutation(
             request.JobId,
             SourceCleanupFaultPoint
@@ -306,61 +456,4 @@ internal sealed partial class AudiobookContentMoveService
             SourceCleanupFaultPoint.AfterMarkerlessSourceFileStateUpdate);
     }
 
-    private async Task RetainMarkerlessSourceEntryAsync(
-        AudiobookContentMoveRequest request,
-        MoveJobEntry entry,
-        CancellationToken cancellationToken)
-    {
-        if (entry.CleanupState != MoveJobEntryCleanupState.Retained)
-        {
-            await UpdateCleanupStateAsync(
-                request.JobId,
-                request.LeaseToken,
-                entry.RelativePath,
-                MoveJobEntryCleanupState.Retained,
-                cancellationToken);
-            entry.CleanupState = MoveJobEntryCleanupState.Retained;
-        }
-    }
-
-    private static bool TryGetMarkerlessPathAttributes(
-        string path,
-        out FileAttributes attributes)
-    {
-        try
-        {
-            attributes = File.GetAttributes(path);
-            return true;
-        }
-        catch (Exception exception) when (exception is
-            FileNotFoundException or DirectoryNotFoundException)
-        {
-            attributes = default;
-            return false;
-        }
-        catch (System.ComponentModel.Win32Exception exception) when (
-            OperatingSystem.IsWindows()
-                ? exception.NativeErrorCode is 2 or 3
-                : exception.NativeErrorCode == 2)
-        {
-            attributes = default;
-            return false;
-        }
-    }
-
-    private static void ValidateMarkerlessSourceDirectory(
-        MoveJobEntry entry,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
-    {
-        if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !directory.MatchesDirectoryObjectIdentity(
-                entry.SourcePhysicalObjectIdentity)
-            || !PinnedDirectoryVisibleOrThrowUnavailable(
-                directory,
-                $"A markerless source directory is temporarily unavailable: {entry.RelativePath}"))
-        {
-            throw new MoveNeedsAttentionException(
-                $"A markerless source directory changed physical generation: {entry.RelativePath}");
-        }
-    }
 }

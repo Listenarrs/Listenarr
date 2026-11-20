@@ -211,14 +211,15 @@ public partial class MoveJobProcessorTests
 
         await processor.ProcessJobAsync(state.Job, CancellationToken.None);
 
-        Assert.Equal(
-            MoveJobStatus.NeedsAttention,
-            (await state.Queue.GetJobAsync(state.Job.Id))?.Status);
+        var persisted = await state.Queue.GetJobAsync(state.Job.Id);
+        Assert.True(
+            persisted?.Status == MoveJobStatus.NeedsAttention,
+            $"Expected NeedsAttention but got {persisted?.Status}: {persisted?.Error}");
         Assert.Empty(Directory.EnumerateFileSystemEntries(state.Target));
     }
 
     [Fact]
-    public async Task ProcessJobAsync_RetryAfterPublishedBeforeSourceCleanup_ResumesFilesystemWorkflow()
+    public async Task ProcessJobAsync_RetryAfterPublishedBeforeSourceCleanup_RetainsSurvivingSource()
     {
         var source = FileService.GetTempDirectory(
             "move-processor-published-before-cleanup-src");
@@ -270,7 +271,9 @@ public partial class MoveJobProcessorTests
         Assert.True(
             completed.Status == MoveJobStatus.Completed,
             completed.Error ?? $"Unexpected recovery status: {completed.Status}");
-        Assert.False(File.Exists(sourceFile));
+        Assert.True(MoveJobPublicProjection.IsSourceRetained(completed));
+        Assert.True(File.Exists(sourceFile));
+        Assert.Equal("verified audio", await File.ReadAllTextAsync(sourceFile));
         Assert.True(Directory.Exists(source));
         Assert.Equal(
             "verified audio",
@@ -278,7 +281,7 @@ public partial class MoveJobProcessorTests
     }
 
     [Fact]
-    public async Task ProcessJobAsync_RetryDuringMarkerlessCopy_ResumesFromDurableJournal()
+    public async Task ProcessJobAsync_RetryDuringMarkerlessCopy_PreservesPartialTargetAndRequiresAttention()
     {
         var source = FileService.GetTempDirectory(
             "move-processor-partial-copy-src");
@@ -324,15 +327,18 @@ public partial class MoveJobProcessorTests
         await _provider.GetRequiredService<IMoveJobProcessor>()
             .ProcessJobAsync(retry, CancellationToken.None);
 
-        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-        Assert.True(
-            completed.Status == MoveJobStatus.Completed,
-            completed.Error ?? $"Unexpected recovery status: {completed.Status}");
-        Assert.False(File.Exists(sourceFile));
+        var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
+        Assert.Contains(
+            "preserved",
+            blocked.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(sourceFile));
+        Assert.Equal("partial copy audio", await File.ReadAllTextAsync(sourceFile));
         Assert.True(Directory.Exists(source));
-        Assert.Equal(
-            "partial copy audio",
-            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+        var targetFile = Path.Join(target, "book.m4b");
+        Assert.True(File.Exists(targetFile));
+        Assert.Equal(0, new FileInfo(targetFile).Length);
     }
 
     [Fact]
@@ -470,12 +476,9 @@ public partial class MoveJobProcessorTests
         await _provider.GetRequiredService<IMoveJobProcessor>()
             .ProcessJobAsync(retry, CancellationToken.None);
 
-        var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-        Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
-        Assert.Contains(
-            "Forced source retention",
-            blocked.Error,
-            StringComparison.OrdinalIgnoreCase);
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.Completed, completed.Status);
+        Assert.True(MoveJobPublicProjection.IsSourceRetained(completed));
         Assert.Equal("audio one", await File.ReadAllTextAsync(firstSource));
         Assert.Equal("audio two", await File.ReadAllTextAsync(secondSource));
         Assert.Equal(
@@ -708,7 +711,8 @@ public partial class MoveJobProcessorTests
             deleteEmptySource,
             FileSystemPathSemantics.CurrentHostDefault,
             FileSystemPathSemantics.CurrentHostDefault,
-            new MoveLeaseToken(LeaseOwner, job.LeaseGeneration));
+            new MoveLeaseToken(LeaseOwner, job.LeaseGeneration),
+            CommitOwnerMetadataAsync: (_, _) => Task.CompletedTask);
 
     private static bool TryCreateProcessorDirectoryLink(
         string linkPath,

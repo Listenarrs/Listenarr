@@ -60,9 +60,8 @@ public sealed class RootFolderWeakStoragePolicyService(
             Outcome = HistoryOutcome.Succeeded,
             Source = "RootFolderSettings",
             SourceTitle = root.Name,
-            Message = update.Policy == WeakStorageSourceCleanupPolicy.RetainSource
-                ? "Weak-storage source cleanup disabled."
-                : "Verified weak-storage source cleanup enabled.",
+            Message = "Legacy weak-storage setting updated for compatibility. "
+                + "Source deletion remains governed by current storage capabilities and verified operation evidence.",
             Timestamp = root.UpdatedAt.Value,
             Data = JsonSerializer.Serialize(new
             {

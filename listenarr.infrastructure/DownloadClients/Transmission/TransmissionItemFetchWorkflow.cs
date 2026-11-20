@@ -57,7 +57,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                             continue;
                         }
 
-                        items.Add(TransmissionResponseMapper.MapDownloadClientItem(client, torrent, sessionConfig));
+                        var item = TransmissionResponseMapper.MapDownloadClientItem(
+                            client, torrent, sessionConfig ?? default);
+                        if (!sessionConfig.HasValue)
+                        {
+                            // An unavailable inherited seed policy is not proof that
+                            // the torrent has no limits and can be moved or removed.
+                            item.CanMoveFiles = false;
+                            item.CanBeRemoved = false;
+                        }
+                        items.Add(item);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
@@ -73,7 +82,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             return items;
         }
 
-        private async Task<(bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit)> ReadSessionConfigAsync(
+        private async Task<(bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit)?> ReadSessionConfigAsync(
             DownloadClientConfiguration client,
             CancellationToken ct)
         {
@@ -85,17 +94,23 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             {
                 var sessionPayload = new { method = "session-get", arguments = new { }, tag = 99 };
                 var sessionResp = await rpcClient.InvokeAsync(client, sessionPayload, ct);
-                if (sessionResp.TryGetProperty("arguments", out var sessionArgs))
+                if (!sessionResp.TryGetProperty("arguments", out var sessionArgs)
+                    || !(sessionArgs.TryGetProperty("seedRatioLimited", out var srl) || sessionArgs.TryGetProperty("seed_ratio_limited", out srl))
+                    || !(sessionArgs.TryGetProperty("seedRatioLimit", out var srlv) || sessionArgs.TryGetProperty("seed_ratio_limit", out srlv))
+                    || !(sessionArgs.TryGetProperty("idle-seeding-limit-enabled", out var isle) || sessionArgs.TryGetProperty("idle_seeding_limit_enabled", out isle))
+                    || !(sessionArgs.TryGetProperty("idle-seeding-limit", out var isl) || sessionArgs.TryGetProperty("idle_seeding_limit", out isl)))
                 {
-                    sessionSeedRatioLimited = (sessionArgs.TryGetProperty("seedRatioLimited", out var srl) || sessionArgs.TryGetProperty("seed_ratio_limited", out srl)) && srl.GetBoolean();
-                    sessionSeedRatioLimit = (sessionArgs.TryGetProperty("seedRatioLimit", out var srlv) || sessionArgs.TryGetProperty("seed_ratio_limit", out srlv)) ? srlv.GetDouble() : 0;
-                    sessionIdleSeedingLimitEnabled = (sessionArgs.TryGetProperty("idle-seeding-limit-enabled", out var isle) || sessionArgs.TryGetProperty("idle_seeding_limit_enabled", out isle)) && isle.GetBoolean();
-                    sessionIdleSeedingLimit = (sessionArgs.TryGetProperty("idle-seeding-limit", out var isl) || sessionArgs.TryGetProperty("idle_seeding_limit", out isl)) ? isl.GetInt32() : 0;
+                    return null;
                 }
+                sessionSeedRatioLimited = srl.GetBoolean();
+                sessionSeedRatioLimit = srlv.GetDouble();
+                sessionIdleSeedingLimitEnabled = isle.GetBoolean();
+                sessionIdleSeedingLimit = isl.GetInt32();
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogDebug(ex, "Failed to fetch Transmission session config for seed limit evaluation, will use conservative defaults");
+                return null;
             }
 
             return (sessionSeedRatioLimited, sessionSeedRatioLimit, sessionIdleSeedingLimitEnabled, sessionIdleSeedingLimit);

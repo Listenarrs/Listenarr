@@ -624,7 +624,10 @@
             </label>
           </div>
           <p v-if="deleteCapabilities?.reason" class="warning-text">
-            {{ deleteCapabilities.reason }} The audiobook can still be removed from the library.
+            {{ deleteCapabilities.reason }}
+            <span v-if="deleteCapabilities.canRemoveFromLibrary">
+              The audiobook can still be removed from the library.
+            </span>
           </p>
         </div>
       </template>
@@ -667,8 +670,20 @@
   <RenamePreviewModal
     :visible="showOrganizeModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+    :can-go-back="isOrganizeFromRepair"
+    @back="backToRepair"
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
+  />
+
+  <RepairBooksModal
+    :visible="showRepairModal"
+    :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :is-resumed="isRepairResumed"
+    @close="showRepairModal = false"
+    @done="handleRepairDone"
+    @organize="organizeAfterRepair"
   />
 </template>
 
@@ -701,11 +716,12 @@ import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
-import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
 import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { REPAIR_ORGANIZE_TITLE } from '@/utils/repair'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'
@@ -716,6 +732,7 @@ import {
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
+  PhWrench,
   PhTrash,
   PhClock,
   PhFolder,
@@ -771,6 +788,8 @@ const scanning = ref(false)
 const rescanningMetadata = ref(false)
 const weakStorageMissingFiles = ref<WeakStorageMissingFilesResponse>({ items: [] })
 let weakStorageMissingFilesRequestId = 0
+let scanDetailRefreshRequestId = 0
+let detailViewUnmounted = false
 const trackedScanJob = computed(() => {
   const currentBookId = audiobook.value?.id
   if (!currentBookId) return undefined
@@ -795,6 +814,11 @@ const displayedScanStatus = computed(() => {
 })
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+// Organize opened by Repair, as its last step
+const isOrganizeFromRepair = ref(false)
+const showRepairModal = ref(false)
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const isRepairResumed = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -886,6 +910,20 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'repair',
+    label: 'Repair Book',
+    title: 'Repair Book',
+    ariaLabel: 'Repair Book',
+    icon: PhWrench,
+    disabled: !audiobook.value,
+    desktopGroup: 'secondary',
+    desktopClass: 'warning',
+    onClick: () => {
+      isRepairResumed.value = false
+      showRepairModal.value = true
+    },
+  },
+  {
     key: 'organize',
     label: 'Organize Files',
     title: 'Organize Files',
@@ -894,6 +932,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     disabled: !audiobook.value?.files?.length && !audiobook.value?.filePath,
     desktopGroup: 'secondary',
     onClick: () => {
+      isOrganizeFromRepair.value = false
       showOrganizeModal.value = true
     },
   },
@@ -941,6 +980,7 @@ type DetailTopAction = {
     | 'monitor'
     | 'edit'
     | 'rescan-metadata'
+    | 'repair'
     | 'organize'
     | 'delete'
   label: string
@@ -1260,9 +1300,6 @@ onMounted(async () => {
     if (!audiobook.value) return
     if (String(job.audiobookId) !== String(audiobook.value.id)) return
     scanNotificationsStore.applyUpdate(job)
-    if (job.status.toLowerCase() === 'completed') {
-      void loadWeakStorageMissingFiles()
-    }
   })
 
   // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
@@ -1310,6 +1347,8 @@ function handleClickOutside() {
 }
 
 onUnmounted(() => {
+  detailViewUnmounted = true
+  scanDetailRefreshRequestId++
   document.removeEventListener('click', handleClickOutside)
   try {
     if (audiobookUpdateUnsub) audiobookUpdateUnsub()
@@ -1326,8 +1365,74 @@ watch(
   },
 )
 
-async function loadAudiobook() {
-  loading.value = true
+let lastHandledTerminalScanJobId: string | null = null
+watch(
+  () => route.params.id,
+  () => {
+    scanDetailRefreshRequestId++
+  },
+)
+watch(
+  () =>
+    [
+      trackedScanJob.value?.jobId,
+      trackedScanJob.value?.status,
+      trackedScanJob.value?.error,
+    ] as const,
+  async ([jobId, status, scanError]) => {
+    if (!jobId || !status) return
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus !== 'completed' && normalizedStatus !== 'failed') return
+    if (lastHandledTerminalScanJobId === jobId) return
+    lastHandledTerminalScanJobId = jobId
+
+    if (normalizedStatus === 'completed') {
+      await refreshAudiobookAfterScan(jobId)
+      return
+    }
+
+    const toast = useToast()
+    toast.error('Scan failed', scanError || 'The audiobook scan did not complete successfully.')
+  },
+  { flush: 'post' },
+)
+
+async function refreshAudiobookAfterScan(jobId: string) {
+  const id = audiobook.value?.id ?? parseInt(route.params.id as string)
+  const routeId = String(route.params.id)
+  const requestId = ++scanDetailRefreshRequestId
+  const isCurrent = () =>
+    !detailViewUnmounted &&
+    requestId === scanDetailRefreshRequestId &&
+    audiobook.value?.id === id &&
+    parseInt(routeId, 10) === id &&
+    String(route.params.id) === routeId &&
+    trackedScanJob.value?.jobId === jobId
+  try {
+    let refreshed: Audiobook | null = null
+    if (typeof apiService.getAudiobook === 'function') {
+      refreshed = await apiService.getAudiobook(id)
+    } else {
+      await libraryStore.fetchLibrary()
+      refreshed = libraryStore.audiobooks.find((candidate) => candidate.id === id) ?? null
+    }
+
+    if (!isCurrent()) return
+    if (refreshed) {
+      audiobook.value = refreshed
+      await afterLoad(isCurrent)
+    }
+  } catch (err) {
+    logger.debug('Unable to refresh audiobook after scan completion', err)
+  }
+
+  if (isCurrent()) await loadWeakStorageMissingFiles()
+}
+
+// Quietly: the book shown until the new one is in, without the page's loading state (a dialog
+// is open over it)
+async function loadAudiobook({ isQuiet = false } = {}) {
+  if (!isQuiet) loading.value = true
   error.value = null
 
   try {
@@ -1370,9 +1475,11 @@ async function loadAudiobook() {
 }
 
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
-async function afterLoad() {
-  await loadQualityProfilesForDetail()
-  await loadIdentifiersForDetail()
+async function afterLoad(isCurrent: () => boolean = () => true) {
+  await loadQualityProfilesForDetail(isCurrent)
+  if (!isCurrent()) return
+  await loadIdentifiersForDetail(isCurrent)
+  if (!isCurrent()) return
   try {
     const img = audiobook.value?.imageUrl
     if (img) {
@@ -1385,21 +1492,22 @@ async function afterLoad() {
   } catch {}
 }
 
-async function loadQualityProfilesForDetail() {
+async function loadQualityProfilesForDetail(isCurrent: () => boolean = () => true) {
   try {
-    qualityProfiles.value = await apiService.getQualityProfiles()
+    const profiles = await apiService.getQualityProfiles()
+    if (isCurrent()) qualityProfiles.value = profiles
   } catch (err) {
     logger.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
-async function loadIdentifiersForDetail() {
+async function loadIdentifiersForDetail(isCurrent: () => boolean = () => true) {
   const id = audiobook.value?.id
   if (!id || typeof apiService.getAudiobookIdentifiers !== 'function') return
 
   try {
     const response = await apiService.getAudiobookIdentifiers(id)
-    if (!audiobook.value || audiobook.value.id !== id) return
+    if (!isCurrent() || !audiobook.value || audiobook.value.id !== id) return
     audiobook.value = {
       ...audiobook.value,
       identifiers: Array.isArray(response?.identifiers) ? response.identifiers : [],
@@ -1670,10 +1778,6 @@ async function executeDelete() {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
-      retryAfterBlockedMutation: shouldDeleteFiles
-        ? (error) =>
-            preparePhysicalDeleteRetry(error, audiobook.value!.id, audiobook.value?.basePath)
-        : undefined,
     })
     if (success) {
       const toast = useToast()
@@ -1714,7 +1818,7 @@ function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
     canRemoveFromLibrary: true,
     canDeleteTrackedFiles: false,
     canDeleteFolder: false,
-    reason: 'Physical-delete safety could not be checked.',
+    reason: 'Filesystem delete capability could not be checked.',
     fallbackAction: 'RemoveFromLibraryOnly',
   }
 }
@@ -1742,6 +1846,26 @@ function closeEditModal() {
 async function handleEditSaved() {
   // Refresh the audiobook data after edit
   await loadAudiobook()
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await loadAudiobook()
+}
+
+async function organizeAfterRepair() {
+  showRepairModal.value = false
+  isOrganizeFromRepair.value = true
+  showOrganizeModal.value = true
+  // Organize reads its previews from the server: the book behind is refreshed meanwhile, quietly
+  await loadAudiobook({ isQuiet: true })
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  isRepairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {

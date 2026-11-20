@@ -1,3 +1,5 @@
+using Listenarr.Application.Common.Exceptions;
+
 namespace Listenarr.Api.Features.Library;
 
 public sealed record AudiobookDeleteCapabilities(
@@ -21,16 +23,28 @@ public sealed partial class LibraryDeleteWorkflow
             return null;
         }
 
+        try
+        {
+            await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                id,
+                cancellationToken,
+                allowActiveDeletionIntent: true);
+        }
+        catch (ApplicationConflictException exception)
+        {
+            return new AudiobookDeleteCapabilities(
+                CanRemoveFromLibrary: false,
+                CanDeleteTrackedFiles: false,
+                CanDeleteFolder: false,
+                Reason: exception.SafeDetail,
+                FallbackAction: "RemoveFromLibraryOnly");
+        }
+
         var storageBlock = await GetManagedStorageMutationBlockAsync(
             snapshot,
             cancellationToken);
-        var hasUnverifiedSource = HasUnverifiedTrackedDeleteSource(snapshot);
-        var canDeleteFiles = storageBlock == null && !hasUnverifiedSource;
+        var canDeleteFiles = storageBlock == null;
         var reason = storageBlock?.Message;
-        if (reason == null && hasUnverifiedSource)
-        {
-            reason = "Tracked files do not expose durable identity for standalone deletion. Verified move cleanup requires a destination copy; removing the library record remains available.";
-        }
 
         return new AudiobookDeleteCapabilities(
             CanRemoveFromLibrary: true,

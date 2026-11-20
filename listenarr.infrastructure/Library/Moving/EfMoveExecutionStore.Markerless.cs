@@ -32,34 +32,19 @@ internal sealed partial class EfMoveExecutionStore
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                 var job = await db.MoveJobs
                     .AsNoTracking()
-                    .Include(candidate => candidate.Entries)
                     .SingleAsync(candidate => candidate.Id == jobId, cancellationToken);
                 var sourceAuthorizationBoundary = job.SourceCleanupBoundary
                     ?? job.SourceIdentityBoundary;
                 if (string.IsNullOrWhiteSpace(sourceAuthorizationBoundary)
-                    || string.IsNullOrWhiteSpace(job.TargetIdentityBoundary)
-                    || !MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
-                        job.Entries,
-                        out var sourceVersion,
-                        out var sourceIdentity,
-                        out _)
-                    || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
-                        job.Entries,
-                        out var targetVersion,
-                        out var targetIdentity,
-                        out _))
+                    || string.IsNullOrWhiteSpace(job.TargetIdentityBoundary))
                 {
                     throw new MoveNeedsAttentionException(
-                        "The move lacks durable source or target boundary authorization.");
+                        "The move lacks persisted source or target path boundaries.");
                 }
 
                 return new MarkerlessMoveBoundaryAuthorizationState(
                     sourceAuthorizationBoundary,
-                    sourceVersion,
-                    sourceIdentity,
-                    job.TargetIdentityBoundary,
-                    targetVersion,
-                    targetIdentity);
+                    job.TargetIdentityBoundary);
             },
             cancellationToken);
 
@@ -74,13 +59,6 @@ internal sealed partial class EfMoveExecutionStore
             async () =>
             {
                 EnsureLeaseTokenProvided(jobId, leaseToken);
-                if (string.IsNullOrWhiteSpace(sourceDirectoryObjectIdentity)
-                    && string.IsNullOrWhiteSpace(targetDirectoryObjectIdentity))
-                {
-                    throw new ArgumentException(
-                        "At least one endpoint physical identity is required.");
-                }
-
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                 var job = await db.MoveJobs.SingleOrDefaultAsync(
@@ -96,22 +74,23 @@ internal sealed partial class EfMoveExecutionStore
                     throw new MoveLeaseLostException(jobId, leaseToken.Generation);
                 }
 
-                EnsureSameOrUnassigned(
-                    job.SourceDirectoryObjectIdentity,
-                    sourceDirectoryObjectIdentity,
-                    "The source root changed physical generation.");
-                EnsureSameOrUnassigned(
-                    job.TargetDirectoryObjectIdentity,
-                    targetDirectoryObjectIdentity,
-                    "The target root changed physical generation.");
                 var observedSourceIdentity = job.SourceDirectoryObjectIdentity;
                 var observedTargetIdentity = job.TargetDirectoryObjectIdentity;
-                var desiredSourceIdentity = observedSourceIdentity
-                    ?? sourceDirectoryObjectIdentity;
-                var desiredTargetIdentity = observedTargetIdentity
-                    ?? targetDirectoryObjectIdentity;
+                // Endpoint identities are current-operation diagnostics only.
+                // A remount may legitimately change them between attempts.
+                var desiredSourceIdentity = sourceDirectoryObjectIdentity
+                    ?? observedSourceIdentity;
+                var desiredTargetIdentity = targetDirectoryObjectIdentity
+                    ?? observedTargetIdentity;
+                var forceRetain = job.ForceCopyAndRetainSource
+                    || sourceDirectoryObjectIdentity == string.Empty
+                    || targetDirectoryObjectIdentity == string.Empty;
+                var cleanupMode = forceRetain
+                    ? MoveSourceCleanupMode.RetainSource : job.SourceCleanupMode;
                 if (!db.Database.IsRelational())
                 {
+                    job.ForceCopyAndRetainSource = forceRetain;
+                    job.SourceCleanupMode = cleanupMode;
                     job.SourceDirectoryObjectIdentity = desiredSourceIdentity;
                     job.TargetDirectoryObjectIdentity = desiredTargetIdentity;
                     job.UpdatedAt = nowUtc;
@@ -130,7 +109,9 @@ internal sealed partial class EfMoveExecutionStore
                         && candidate.SourceDirectoryObjectIdentity
                             == observedSourceIdentity
                         && candidate.TargetDirectoryObjectIdentity
-                            == observedTargetIdentity)
+                            == observedTargetIdentity
+                        && candidate.ForceCopyAndRetainSource == job.ForceCopyAndRetainSource
+                        && candidate.SourceCleanupMode == job.SourceCleanupMode)
                     .ExecuteUpdateAsync(
                         updates => updates
                             .SetProperty(
@@ -139,6 +120,8 @@ internal sealed partial class EfMoveExecutionStore
                             .SetProperty(
                                 candidate => candidate.TargetDirectoryObjectIdentity,
                                 desiredTargetIdentity)
+                            .SetProperty(candidate => candidate.ForceCopyAndRetainSource, forceRetain)
+                            .SetProperty(candidate => candidate.SourceCleanupMode, cleanupMode)
                             .SetProperty(candidate => candidate.UpdatedAt, nowUtc),
                         cancellationToken);
                 if (affected != 1)
@@ -223,14 +206,6 @@ internal sealed partial class EfMoveExecutionStore
                 {
                     throw new ArgumentOutOfRangeException(nameof(copyState));
                 }
-                if (copyState == MoveJobEntryCopyState.Staged
-                    && string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity))
-                {
-                    throw new ArgumentException(
-                        "A staged target file requires a physical object identity.",
-                        nameof(targetPhysicalObjectIdentity));
-                }
-
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                 var entry = await db.MoveJobEntries
@@ -252,26 +227,39 @@ internal sealed partial class EfMoveExecutionStore
                     throw new MoveLeaseLostException(jobId, leaseToken.Generation);
                 }
 
-                if (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-                    && !string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity)
-                    && !string.Equals(
-                        entry.TargetPhysicalObjectIdentity,
-                        targetPhysicalObjectIdentity,
-                        StringComparison.Ordinal))
-                {
-                    throw new MoveNeedsAttentionException(
-                        "The target file generation changed after markerless publication began.");
-                }
-
                 if (AfterMarkerlessStateLoadedForTestAsync != null)
                 {
                     await AfterMarkerlessStateLoadedForTestAsync();
                 }
 
+                if (targetPhysicalObjectIdentity == string.Empty)
+                {
+                    if (!db.Database.IsRelational())
+                    {
+                        entry.MoveJob.ForceCopyAndRetainSource = true;
+                        entry.MoveJob.SourceCleanupMode = MoveSourceCleanupMode.RetainSource;
+                    }
+                    else
+                    {
+                        var retained = await db.MoveJobs.Where(job => job.Id == jobId
+                            && job.Status == MoveJobStatus.Running
+                            && job.LeaseOwner == leaseToken.Owner
+                            && job.LeaseGeneration == leaseToken.Generation
+                            && job.LeaseExpiresAt != null && job.LeaseExpiresAt > nowUtc)
+                            .ExecuteUpdateAsync(updates => updates
+                                .SetProperty(job => job.ForceCopyAndRetainSource, true)
+                                .SetProperty(job => job.SourceCleanupMode, MoveSourceCleanupMode.RetainSource),
+                                cancellationToken);
+                        if (retained != 1) throw new MoveLeaseLostException(jobId, leaseToken.Generation);
+                    }
+                }
                 var observedIdentity = entry.TargetPhysicalObjectIdentity;
                 var observedCopyState = entry.CopyState;
-                var desiredIdentity = observedIdentity
-                    ?? targetPhysicalObjectIdentity;
+                // Target kernel identity is diagnostic only. Refresh it from
+                // the currently pinned publication instead of treating a remount
+                // or another client namespace as an authority mismatch.
+                var desiredIdentity = targetPhysicalObjectIdentity
+                    ?? observedIdentity;
                 var desiredCopyState = observedCopyState < copyState
                     ? copyState
                     : observedCopyState;
@@ -351,7 +339,7 @@ internal sealed partial class EfMoveExecutionStore
             {
                 EnsureLeaseTokenProvided(jobId, leaseToken);
                 ArgumentException.ThrowIfNullOrWhiteSpace(path);
-                ArgumentException.ThrowIfNullOrWhiteSpace(directoryObjectIdentity);
+                ArgumentNullException.ThrowIfNull(directoryObjectIdentity);
                 var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
                 await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
                 var directory = await db.MoveJobCreatedDirectories
@@ -373,18 +361,11 @@ internal sealed partial class EfMoveExecutionStore
                     throw new MoveLeaseLostException(jobId, leaseToken.Generation);
                 }
 
-                if (!string.IsNullOrWhiteSpace(directory.DirectoryObjectIdentity)
-                    && !string.Equals(
-                        directory.DirectoryObjectIdentity,
-                        directoryObjectIdentity,
-                        StringComparison.Ordinal))
-                {
-                    throw new MoveNeedsAttentionException(
-                        "A move-created target directory changed physical generation.");
-                }
                 var observedIdentity = directory.DirectoryObjectIdentity;
                 var observedState = directory.State;
-                var desiredIdentity = observedIdentity ?? directoryObjectIdentity;
+                // Directory identity is an operation-local diagnostic. Durable
+                // creation provenance is the move-created-directory row itself.
+                var desiredIdentity = directoryObjectIdentity;
                 var desiredState = AdvanceCreatedDirectoryState(observedState, state);
                 if (!db.Database.IsRelational())
                 {

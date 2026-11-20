@@ -22,7 +22,7 @@ using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Cleanup
 {
-    public class MovedDownloadCleanupProcessor(
+    public partial class MovedDownloadCleanupProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
     {
@@ -131,6 +131,14 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                         continue;
                     }
 
+                    var clientRetained = bool.TryParse(download.GetMetadataString(
+                        Download.ImportSourceRetentionRequiredMetadataKey), out var required) && required;
+                    if (clientRetained && !await CanReleaseClientOwnedSourceAsync(
+                            downloadClientGateway, clientConfig, download, cancellationToken))
+                    {
+                        continue;
+                    }
+
                     var hasCanBeRemoved = false;
                     var canBeRemoved = false;
                     if (download.Metadata != null && download.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
@@ -165,11 +173,11 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     }
 
                     var deleteFiles = removalPolicy == "remove_and_delete";
-                    if (deleteFiles && !proof.AllowsDestructiveCleanup)
+                    if (deleteFiles && (clientRetained || !proof.AllowsDestructiveCleanup))
                     {
                         var reason = proof.Kind == ImportProofKind.LegacyMovedState
                             ? "only legacy Moved-state import proof is available"
-                            : proof.SourceRetained is true
+                            : clientRetained || proof.SourceRetained is true
                                 ? "the import retained its source"
                                 : "the source-retention disposition is unavailable";
                         logger.LogWarning(
@@ -227,7 +235,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     // If the primary client did not remove a torrent, try other enabled torrent
                     // clients by hash. This keeps cleanup resilient to older records assigned to
                     // the wrong DownloadClientId.
-                    if (!removed && !string.IsNullOrEmpty(torrentHash))
+                    if (!removed && !clientRetained && !string.IsNullOrEmpty(torrentHash))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                             { "qbittorrent", "transmission" };

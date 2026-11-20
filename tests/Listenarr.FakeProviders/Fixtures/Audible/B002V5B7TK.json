@@ -1,0 +1,13 @@
+{
+  "product": {
+    "asin": "B002V5B7TK",
+    "title": "Tarzan of the Apes",
+    "language": "english",
+    "authors": [{ "name": "Edgar Rice Burroughs" }],
+    "narrators": [{ "name": "Shelly Frasier" }],
+    "series": [{ "asin": "B002TARZAN", "title": "Tarzan", "sequence": "1" }],
+    "publisher_name": "Fixture Audio",
+    "release_date": "2001-01-01",
+    "runtime_length_min": 480
+  }
+}

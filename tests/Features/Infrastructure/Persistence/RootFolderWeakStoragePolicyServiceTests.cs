@@ -7,28 +7,36 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 [Trait("Category", "Infrastructure")]
 public sealed class RootFolderWeakStoragePolicyServiceTests : BaseTests
 {
-    [Fact]
-    public async Task UpdateAsync_EnablesPolicyAndWritesAuditHistory()
+    [Theory]
+    [InlineData(WeakStorageSourceCleanupPolicy.RetainSource, WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy)]
+    [InlineData(WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy, WeakStorageSourceCleanupPolicy.RetainSource)]
+    public async Task UpdateAsync_PreservesLegacyValueAndExplainsCompatibilityInHistory(
+        WeakStorageSourceCleanupPolicy previousPolicy, WeakStorageSourceCleanupPolicy policy)
     {
         var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
-        var rootId = await AddRootAsync(factory);
+        var rootId = await AddRootAsync(factory, previousPolicy);
         var service = CreateService(factory);
 
         var updated = await service.UpdateAsync(
             rootId,
             new RootFolderWeakStoragePolicyUpdate(
-                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy,
+                policy,
                 ExpectedRevision: 0));
 
         Assert.Equal(
-            WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy,
+            policy,
             updated.WeakStorageSourceCleanupPolicy);
         Assert.Equal(1, updated.WeakStoragePolicyRevision);
         await using var verification = await factory.CreateDbContextAsync();
         Assert.Contains(
             verification.History,
             history => history.EventType == "Root Folder Policy Changed"
-                && history.Message == "Verified weak-storage source cleanup enabled.");
+                && history.Message == "Legacy weak-storage setting updated for compatibility. "
+                    + "Source deletion remains governed by current storage capabilities and verified operation evidence.");
+        var persisted = await verification.RootFolders.SingleAsync(root => root.Id == rootId);
+        Assert.Equal(policy, persisted.WeakStorageSourceCleanupPolicy);
+        Assert.Equal(1, persisted.WeakStoragePolicyRevision);
+        Assert.Equal(0, persisted.StorageContractRevision);
     }
 
     [Fact]
@@ -66,12 +74,14 @@ public sealed class RootFolderWeakStoragePolicyServiceTests : BaseTests
             TimeProvider.System);
 
     private static async Task<int> AddRootAsync(
-        IDbContextFactory<ListenArrDbContext> factory)
+        IDbContextFactory<ListenArrDbContext> factory,
+        WeakStorageSourceCleanupPolicy policy = WeakStorageSourceCleanupPolicy.RetainSource)
     {
         await using var db = await factory.CreateDbContextAsync();
         var root = new RootFolder
         {
             Name = "Weak storage",
+            WeakStorageSourceCleanupPolicy = policy,
             Path = Path.GetFullPath(Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString("N")))
         };
         db.RootFolders.Add(root);

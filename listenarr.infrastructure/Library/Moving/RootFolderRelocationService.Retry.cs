@@ -156,13 +156,6 @@ public sealed partial class RootFolderRelocationService
         {
             throw new InvalidOperationException("Only relocations needing attention can be retried.");
         }
-        if (relocation.Mode == RootFolderRelocationMode.Relocate
-            && relocation.TargetIdentityEnrollmentState
-                == TargetIdentityEnrollmentState.Unavailable)
-        {
-            throw new InvalidOperationException(
-                "The relocation target identity is unavailable and cannot be retried safely.");
-        }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var needsTargetSemantics = relocation.SkippedItems.Count > 0;
@@ -323,25 +316,6 @@ public sealed partial class RootFolderRelocationService
                 unsafeRetryJobs++;
                 continue;
             }
-            if (!MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
-                    job.Entries,
-                    out _,
-                    out _,
-                    out _)
-                || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
-                    job.Entries,
-                    out _,
-                    out _,
-                    out _))
-            {
-                job.Status = MoveJobStatus.NeedsAttention;
-                job.Error = "The move job has no valid durable source- or target-boundary physical-generation authorization and cannot be retried safely.";
-                job.FailureKind = MoveFailureKind.Verification;
-                job.ActiveDeduplicationKey = null;
-                unsafeRetryJobs++;
-                continue;
-            }
-
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 job.AudiobookId,
                 job.SourcePath,
@@ -362,6 +336,7 @@ public sealed partial class RootFolderRelocationService
 
             MoveJobManualRetry.Reset(job, deduplicationKey, now);
             job.IdentityKeyVersion = MoveManifestIdentity.Version;
+            job.ExecutionProtocolVersion = MoveExecutionProtocol.Current;
         }
 
         if (relocation.SkippedItems.Count > 0)

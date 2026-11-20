@@ -119,7 +119,6 @@ internal sealed partial class AudiobookContentMoveService
         string endpointRoot,
         string directoryPath,
         FileSystemPathSemantics semantics,
-        string expectedEndpointIdentity,
         bool sourceEndpoint)
     {
         var authorization = request.BoundaryAuthorization
@@ -128,12 +127,6 @@ internal sealed partial class AudiobookContentMoveService
         var boundaryPath = sourceEndpoint
             ? authorization.SourceBoundaryPath
             : authorization.TargetBoundaryPath;
-        var boundaryIdentityVersion = sourceEndpoint
-            ? authorization.SourceDirectoryObjectIdentityVersion
-            : authorization.TargetDirectoryObjectIdentityVersion;
-        var boundaryIdentity = sourceEndpoint
-            ? authorization.SourceDirectoryObjectIdentity
-            : authorization.TargetDirectoryObjectIdentity;
 
         if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
                 endpointRoot,
@@ -149,18 +142,15 @@ internal sealed partial class AudiobookContentMoveService
             boundaryPath,
             endpointRoot,
             semantics,
-            boundaryIdentityVersion,
-            boundaryIdentity,
             sourceEndpoint ? "source boundary" : "target boundary");
         try
         {
-            if (!current.MatchesDirectoryObjectIdentity(expectedEndpointIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     current,
-                    "The move endpoint is temporarily unavailable while its physical generation is being verified."))
+                    "The move endpoint is temporarily unavailable while its live path is being verified."))
             {
                 throw new MoveNeedsAttentionException(
-                    "A move endpoint changed physical generation.");
+                    "A move endpoint changed while the live path was being verified.");
             }
 
             foreach (var segment in SplitMovePathSegments(relativePath, semantics))
@@ -197,12 +187,6 @@ internal sealed partial class AudiobookContentMoveService
                 : authorization.TargetBoundaryPath,
             directoryPath,
             semantics,
-            sourceBoundary
-                ? authorization.SourceDirectoryObjectIdentityVersion
-                : authorization.TargetDirectoryObjectIdentityVersion,
-            sourceBoundary
-                ? authorization.SourceDirectoryObjectIdentity
-                : authorization.TargetDirectoryObjectIdentity,
             sourceBoundary ? "source boundary" : "target boundary");
     }
 
@@ -210,8 +194,6 @@ internal sealed partial class AudiobookContentMoveService
         string boundaryPath,
         string directoryPath,
         FileSystemPathSemantics semantics,
-        int boundaryIdentityVersion,
-        string boundaryIdentity,
         string boundaryDescription)
     {
         if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
@@ -227,15 +209,12 @@ internal sealed partial class AudiobookContentMoveService
         var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
         try
         {
-            if (!current.MatchesManagedDirectoryIdentity(
-                    boundaryIdentityVersion,
-                    boundaryIdentity)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     current,
-                    $"The move {boundaryDescription} is temporarily unavailable while its physical generation is being verified."))
+                    $"The move {boundaryDescription} is temporarily unavailable while its live path is being verified."))
             {
                 throw new MoveNeedsAttentionException(
-                    $"The move {boundaryDescription} changed physical generation.");
+                    $"The move {boundaryDescription} changed while its live path was being verified.");
             }
 
             foreach (var segment in SplitMovePathSegments(relativePath, semantics))

@@ -179,7 +179,7 @@ onMounted(() => {
 
 #### Testing
 - Write unit tests for all business logic; test both success and error scenarios.
-- Mock external dependencies (API clients, file system, download clients).
+- Mock external dependencies: the file system, download clients and trackers (see the mocks bullet below for how).
 - Test classes are named `{TestedClassName}Tests` and mirror the source project path under `tests/`.
 - Every test class inherits `BaseTests`.
 - Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
@@ -192,7 +192,7 @@ onMounted(() => {
 - If a coherent domain/model fixture needs repeated setup and no builder exists, add a focused builder.
 - Only add repository data *after* calling `Init()`.
 - Structure tests as Given / When / Then.
-- API mock helpers inherit `BaseMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
+- Metadata providers (Audible, Audnexus, OpenLibrary) are answered by `tests/Listenarr.FakeProviders` (route class per provider, fixtures per provider); never hand-mock them. Download client and tracker API mocks live in `tests/Mocks/{Category}/` and inherit `BaseApiMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
 - See `tests/README.md` for full conventions.
 
 #### Documentation

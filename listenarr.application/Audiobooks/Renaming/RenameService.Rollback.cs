@@ -53,83 +53,100 @@ public partial class RenameService
             {
                 if (!PathsEqual(item.PreviousPath, item.NewPath, semantics))
                 {
-                    if (!_fileSystem.FileExists(item.NewPath))
+                    if (item.VerifiedRenameLease != null)
                     {
-                        rollbackSucceeded = false;
-                        item.Error = "Rollback failed because the moved file could not be found.";
-                        continue;
-                    }
-
-                    if (!_fileSystem.TryValidateMutationTarget(
-                            item.NewPath,
-                            allowedRoots,
-                            out var rollbackSource,
-                            out _)
-                        || !_fileSystem.TryValidateMutationTarget(
-                            item.PreviousPath,
-                            allowedRoots,
-                            out var rollbackDestination,
-                            out _))
-                    {
-                        rollbackSucceeded = false;
-                        item.Error = "Rollback paths could not be resolved safely within the allowed library roots.";
-                        continue;
-                    }
-
-                    var parent = Path.GetDirectoryName(rollbackDestination);
-                    if (!string.IsNullOrWhiteSpace(parent))
-                    {
-                        await EnsureOwnedRenameHierarchyAsync(
-                            parent,
-                            allowedRoots,
-                            semantics,
-                            audiobook.Id,
-                            Guid.NewGuid(),
-                            cancellationToken);
-                    }
-
-                    // Compensation is also owner-bound and startup-discoverable. A fresh ID
-                    // keeps completed compensation history from colliding with a later retry.
-                    var rollbackOperationId = Guid.NewGuid();
-                    item.RollbackOperationId = rollbackOperationId;
-                    bool moved;
-                    if (item.FileId == 0)
-                    {
-                        moved = await _fileMover.PerformActionOn(
-                            FileAction.Move,
-                            rollbackSource,
-                            rollbackDestination,
-                            rollbackOperationId,
-                            audiobook.Id,
-                            audiobookFileId: 0);
-                    }
-                    else
-                    {
-                        var trackedFile = audiobook.Files?.FirstOrDefault(
-                            candidate => candidate.Id == item.FileId);
-                        if (string.IsNullOrWhiteSpace(
-                                trackedFile?.PhysicalObjectIdentity))
+                        var verifiedRollback = await item.VerifiedRenameLease
+                            .RollBackAsync(cancellationToken);
+                        await item.VerifiedRenameLease.DisposeAsync();
+                        item.VerifiedRenameLease = null;
+                        if (!verifiedRollback)
                         {
                             rollbackSucceeded = false;
                             item.Error =
-                                "Rollback could not prove the tracked file generation.";
+                                "Verified organize rollback could not restore the source safely.";
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        if (!_fileSystem.FileExists(item.NewPath))
+                        {
+                            rollbackSucceeded = false;
+                            item.Error = "Rollback failed because the moved file could not be found.";
                             continue;
                         }
 
-                        moved = await _fileMover
-                            .MoveFilePreservingPhysicalIdentityAsync(
+                        if (!_fileSystem.TryValidateMutationTarget(
+                                item.NewPath,
+                                allowedRoots,
+                                out var rollbackSource,
+                                out _)
+                            || !_fileSystem.TryValidateMutationTarget(
+                                item.PreviousPath,
+                                allowedRoots,
+                                out var rollbackDestination,
+                                out _))
+                        {
+                            rollbackSucceeded = false;
+                            item.Error = "Rollback paths could not be resolved safely within the allowed library roots.";
+                            continue;
+                        }
+
+                        var parent = Path.GetDirectoryName(rollbackDestination);
+                        if (!string.IsNullOrWhiteSpace(parent))
+                        {
+                            await EnsureOwnedRenameHierarchyAsync(
+                                parent,
+                                allowedRoots,
+                                semantics,
+                                audiobook.Id,
+                                Guid.NewGuid(),
+                                cancellationToken);
+                        }
+
+                        // Compensation is also owner-bound and startup-discoverable. A fresh ID
+                        // keeps completed compensation history from colliding with a later retry.
+                        var rollbackOperationId = Guid.NewGuid();
+                        item.RollbackOperationId = rollbackOperationId;
+                        bool moved;
+                        if (item.FileId == 0)
+                        {
+                            moved = await _fileMover.PerformActionOn(
+                                FileAction.Move,
                                 rollbackSource,
                                 rollbackDestination,
-                                trackedFile.PhysicalObjectIdentity,
                                 rollbackOperationId,
                                 audiobook.Id,
-                                item.FileId);
-                    }
-                    if (!moved)
-                    {
-                        rollbackSucceeded = false;
-                        item.Error = "Rollback file move failed.";
-                        continue;
+                                audiobookFileId: 0);
+                        }
+                        else
+                        {
+                            var trackedFile = audiobook.Files?.FirstOrDefault(
+                                candidate => candidate.Id == item.FileId);
+                            if (string.IsNullOrWhiteSpace(
+                                    trackedFile?.PhysicalObjectIdentity))
+                            {
+                                rollbackSucceeded = false;
+                                item.Error =
+                                    "Rollback could not prove the tracked file generation.";
+                                continue;
+                            }
+
+                            moved = await _fileMover
+                                .MoveFilePreservingPhysicalIdentityAsync(
+                                    rollbackSource,
+                                    rollbackDestination,
+                                    trackedFile.PhysicalObjectIdentity,
+                                    rollbackOperationId,
+                                    audiobook.Id,
+                                    item.FileId);
+                        }
+                        if (!moved)
+                        {
+                            rollbackSucceeded = false;
+                            item.Error = "Rollback file move failed.";
+                            continue;
+                        }
                     }
                 }
 

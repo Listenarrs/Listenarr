@@ -17,7 +17,7 @@
  */
 using System.Text;
 using System.Text.Json;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 
 namespace Listenarr.Tests.Features.Api
 {

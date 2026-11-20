@@ -99,7 +99,7 @@ The Listenarr logo combines headphones and a book to represent audiobook listeni
 - **.NET 10.0 SDK or later (net10.0)** - [Download](https://dotnet.microsoft.com/download)  
 
 **Note:** Build/test environments in this repo target net10.0. Running with a different SDK may create build/run inconsistencies.
-- **Node.js 24.x or later** - [Download](https://nodejs.org/)
+- **Node.js 26.x (26.12.1 or later)** - [Download](https://nodejs.org/)
 - **npm** (comes with Node.js)
 
 ### Recommended: Single Command Start

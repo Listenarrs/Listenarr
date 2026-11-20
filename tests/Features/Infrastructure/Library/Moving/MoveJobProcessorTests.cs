@@ -370,7 +370,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [Fact]
-        public async Task ProcessJobAsync_AutoSemanticsOnlyBehavioral_BlocksBeforeFilesystemMutation()
+        public async Task ProcessJobAsync_AutoSemanticsOnlyBehavioral_UsesLiveSemantics()
         {
             var semanticsResolver = new BehavioralSemanticsResolver();
             Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
@@ -399,18 +399,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .ProcessJobAsync(job, CancellationToken.None);
 
             var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, updated.Status);
-            Assert.Contains(
-                "start a new move",
-                updated.Error,
-                StringComparison.OrdinalIgnoreCase);
-            Assert.False(MoveRecoveryPolicy.HasFilesystemExecutionEvidence(updated));
-            Assert.True(File.Exists(sourceFile));
-            Assert.False(Directory.Exists(target));
+            Assert.Equal(MoveJobStatus.Completed, updated.Status);
+            Assert.Null(updated.Error);
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
         }
 
         [Fact]
-        public async Task ProcessJobAsync_AutoBehavioralSource_WithExecutionEvidence_NormalMoveStillBlocks()
+        public async Task ProcessJobAsync_AutoBehavioralSource_WithExecutionEvidence_UsesLiveSemantics()
         {
             var semanticsResolver = new BehavioralSemanticsResolver();
             Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
@@ -453,13 +449,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .ProcessJobAsync(job, CancellationToken.None);
 
             var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, updated.Status);
-            Assert.Contains(
-                "start a new move",
-                updated.Error,
-                StringComparison.OrdinalIgnoreCase);
-            Assert.True(File.Exists(sourceFile));
-            Assert.False(Directory.Exists(target));
+            Assert.Equal(MoveJobStatus.Completed, updated.Status);
+            Assert.Null(updated.Error);
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
         }
 
         [Fact]
@@ -531,7 +524,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [Fact]
-        public async Task ProcessJobAsync_AutoBehavioralTarget_ForcedCopyRetain_BlocksBeforeFilesystemMutation()
+        public async Task ProcessJobAsync_AutoBehavioralTarget_ForcedCopyRetain_UsesLiveSemantics()
         {
             var semanticsResolver = new BehavioralSemanticsResolver();
             Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
@@ -567,18 +560,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .ProcessJobAsync(job, CancellationToken.None);
 
             var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, updated.Status);
-            Assert.Contains(
-                "start a new move",
-                updated.Error,
-                StringComparison.OrdinalIgnoreCase);
-            Assert.False(MoveRecoveryPolicy.HasFilesystemExecutionEvidence(updated));
+            Assert.Equal(MoveJobStatus.Completed, updated.Status);
+            Assert.Null(updated.Error);
             Assert.True(File.Exists(sourceFile));
-            Assert.False(Directory.Exists(target));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
         }
 
         [Fact]
-        public async Task ProcessJobAsync_AutoBehavioralTarget_WithExecutionEvidence_StillBlocksBeforeNewMutation()
+        public async Task ProcessJobAsync_AutoBehavioralTarget_WithExecutionEvidence_UsesLiveSemantics()
         {
             var semanticsResolver = new BehavioralSemanticsResolver();
             Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
@@ -624,13 +613,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 .ProcessJobAsync(job, CancellationToken.None);
 
             var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-            Assert.Equal(MoveJobStatus.NeedsAttention, updated.Status);
-            Assert.Contains(
-                "start a new move",
-                updated.Error,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(MoveJobStatus.Completed, updated.Status);
+            Assert.Null(updated.Error);
             Assert.True(File.Exists(sourceFile));
-            Assert.False(Directory.Exists(target));
+            Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
         }
 
         [LinuxFact]
@@ -765,10 +751,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     manifest.Entries,
                     target,
                     targetIdentity,
-                    sourceRootFolder.DirectoryObjectIdentityVersion!.Value,
-                    sourceRootFolder.DirectoryObjectIdentity!,
-                    targetRootFolder.DirectoryObjectIdentityVersion!.Value,
-                    targetRootFolder.DirectoryObjectIdentity!,
                     true,
                     sourceRoot));
             var job = Assert.IsType<MoveJob>(await queue.GetJobAsync(jobId));
@@ -1196,10 +1178,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 manifest,
                 target,
                 targetIdentity,
-                managedIdentity.Version!.Value,
-                managedIdentity.Value!,
-                managedIdentity.Version!.Value,
-                managedIdentity.Value!,
                 DeleteEmptySource: false,
                 SourceCleanupBoundary: managedRoot));
             var job = Assert.IsType<MoveJob>(await queue.GetJobAsync(jobId));
@@ -2106,10 +2084,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     manifest,
                     requestedPath,
                     targetIdentity,
-                    sourceDirectoryIdentity.Version!.Value,
-                    sourceDirectoryIdentity.Value!,
-                    targetDirectoryIdentity.Version!.Value,
-                    targetDirectoryIdentity.Value!,
                     deleteEmptySource,
                     deleteEmptySource ? sourceBoundary : null,
                     SourceCleanupMode: sourceCleanupMode,

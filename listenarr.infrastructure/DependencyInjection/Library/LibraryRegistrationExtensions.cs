@@ -44,10 +44,14 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<ICompatibilitySourceCleanupCoordinator, CompatibilitySourceCleanupCoordinator>();
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
         services.AddScoped<IFileRenameCommitStore, FileRenameCommitStore>();
+        services.AddScoped<IVerifiedFileRenameTransactionCoordinator,
+            VerifiedFileRenameTransactionCoordinator>();
         services.AddScoped<IFileRegistrationRecoveryService, FileRegistrationRecoveryService>();
         services.AddScoped<CompatibilityFilePublicationRecoveryService>();
         services.AddScoped<ICompatibilityFilePublicationRecoveryService>(provider =>
             provider.GetRequiredService<CompatibilityFilePublicationRecoveryService>());
+        services.AddScoped<IVerifiedFileRenameRecoveryService,
+            VerifiedFileRenameRecoveryService>();
         services.AddScoped<IFileRenameRecoveryReconciler, FileRenameRecoveryReconciler>();
         services.AddScoped<IAudiobookFileIdentityReconciler, AudiobookFileIdentityReconciler>();
         services.AddScoped<IRootFolderObjectIdentityReconciler, RootFolderObjectIdentityReconciler>();

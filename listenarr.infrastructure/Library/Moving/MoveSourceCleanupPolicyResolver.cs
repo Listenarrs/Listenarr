@@ -37,15 +37,6 @@ public sealed class MoveSourceCleanupPolicyResolver(
                 sourceIsManagedRoot,
                 "Source files will be retained because the destination is not inside a configured root folder.");
         }
-        if (targetRoot.WeakStorageSourceCleanupPolicy
-            != WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy)
-        {
-            return Retain(
-                sourceRoot,
-                targetRoot,
-                sourceIsManagedRoot,
-                "Source files will be retained because verified source deletion is not enabled for the destination root folder.");
-        }
         if (!(await storageHealthResolver.ResolveAsync(
                 targetRoot,
                 cancellationToken)).CanPublishAdditively)
@@ -66,16 +57,6 @@ public sealed class MoveSourceCleanupPolicyResolver(
                 forceCopyAndRetainSource: true);
         }
         if (sourceRoot != null
-            && sourceRoot.WeakStorageSourceCleanupPolicy
-                != WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy)
-        {
-            return Retain(
-                sourceRoot,
-                targetRoot,
-                sourceIsManagedRoot,
-                "Source files will be retained because verified source deletion is not enabled for the source root folder.");
-        }
-        if (sourceRoot != null
             && !(await storageHealthResolver.ResolveAsync(
                     sourceRoot,
                     cancellationToken))
@@ -89,12 +70,19 @@ public sealed class MoveSourceCleanupPolicyResolver(
                 forceCopyAndRetainSource: true);
         }
 
+        if (HasUnsupportedNativeGeneration(sourcePath, sourceRoot)
+            || HasUnsupportedNativeGeneration(targetPath, targetRoot))
+        {
+            return Retain(sourceRoot, targetRoot, sourceIsManagedRoot,
+                "Source files will be retained because native generation diagnostics are unavailable on this storage.",
+                forceCopyAndRetainSource: true);
+        }
         return new MoveSourceCleanupAuthorization(
             MoveSourceCleanupMode.DeleteAfterVerifiedCopy,
             sourceRoot?.Id,
-            sourceRoot?.WeakStoragePolicyRevision,
+            null,
             targetRoot.Id,
-            targetRoot.WeakStoragePolicyRevision,
+            null,
             sourceIsManagedRoot,
             sourceIsManagedRoot
                 ? "Source files will be removed after every copied file is verified. The managed root folder will remain."
@@ -110,7 +98,6 @@ public sealed class MoveSourceCleanupPolicyResolver(
         ArgumentNullException.ThrowIfNull(authorization);
         if (!authorization.DeletesSourceAfterVerifiedCopy
             || authorization.TargetRootFolderId is not int targetRootFolderId
-            || authorization.TargetPolicyRevision is not int targetPolicyRevision
             || authorization.TargetStorageContractRevision is not int targetStorageContractRevision)
         {
             return false;
@@ -132,10 +119,9 @@ public sealed class MoveSourceCleanupPolicyResolver(
             .Where(root => rootIds.Contains(root.Id))
             .ToDictionaryAsync(root => root.Id, cancellationToken);
 
-        if (!MatchesAuthorizedPolicy(
+        if (!MatchesStorageContract(
                 roots,
                 targetRootFolderId,
-                targetPolicyRevision,
                 targetStorageContractRevision)
             || !roots.TryGetValue(targetRootFolderId, out var targetRoot)
             || !(await storageHealthResolver.ResolveAsync(
@@ -149,12 +135,10 @@ public sealed class MoveSourceCleanupPolicyResolver(
         {
             return true;
         }
-        if (authorization.SourcePolicyRevision is not int sourcePolicyRevision
-            || authorization.SourceStorageContractRevision is not int sourceStorageContractRevision
-            || !MatchesAuthorizedPolicy(
+        if (authorization.SourceStorageContractRevision is not int sourceStorageContractRevision
+            || !MatchesStorageContract(
                 roots,
                 sourceRootFolderId,
-                sourcePolicyRevision,
                 sourceStorageContractRevision)
             || !roots.TryGetValue(sourceRootFolderId, out var sourceRoot))
         {
@@ -166,18 +150,61 @@ public sealed class MoveSourceCleanupPolicyResolver(
             cancellationToken)).CanRetireVerifiedSource;
     }
 
+    private static bool HasUnsupportedNativeGeneration(string path, RootFolder? root)
+    {
+        var existingPath = path;
+        while (!Directory.Exists(existingPath))
+        {
+            existingPath = Path.GetDirectoryName(existingPath);
+            if (string.IsNullOrWhiteSpace(existingPath)) return false;
+        }
+        if (root == null)
+        {
+            using var directory = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                existingPath, createMissing: false);
+            return string.IsNullOrWhiteSpace(PinnedDirectoryCreation.CaptureDiagnosticIdentity(
+                directory.GetDirectoryObjectIdentity));
+        }
+        // Configured boundaries may be linked; descendants must still reject links.
+        using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(root.Path);
+        var current = boundary.Duplicate();
+        try
+        {
+            var semantics = RootFolderPathSemantics.ResolvePersisted(root)
+                ?? throw new InvalidOperationException("The move boundary has no persisted path semantics.");
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                    root.Path, existingPath, semantics.Semantics, out var relative))
+                throw new InvalidOperationException("The move path escaped its configured boundary.");
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
+            {
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+            if (!boundary.VisiblePathMatches() || !current.VisiblePathMatches())
+                throw new IOException("The managed move boundary changed during diagnostic capture.");
+            return string.IsNullOrWhiteSpace(PinnedDirectoryCreation.CaptureDiagnosticIdentity(
+                current.GetDirectoryObjectIdentity));
+        }
+        finally
+        {
+            current.Dispose();
+        }
+    }
     private static MoveSourceCleanupAuthorization Retain(
         RootFolder? sourceRoot,
         RootFolder? targetRoot,
         bool sourceIsManagedRoot,
         string message,
-        bool forceCopyAndRetainSource = false) =>
+        bool forceCopyAndRetainSource = true) =>
         new(
             MoveSourceCleanupMode.RetainSource,
             sourceRoot?.Id,
-            sourceRoot?.WeakStoragePolicyRevision,
+            null,
             targetRoot?.Id,
-            targetRoot?.WeakStoragePolicyRevision,
+            null,
             sourceIsManagedRoot,
             message,
             sourceRoot?.StorageContractRevision,
@@ -289,14 +316,10 @@ public sealed class MoveSourceCleanupPolicyResolver(
         return false;
     }
 
-    private static bool MatchesAuthorizedPolicy(
+    private static bool MatchesStorageContract(
         IReadOnlyDictionary<int, RootFolder> roots,
         int rootFolderId,
-        int policyRevision,
         int storageContractRevision) =>
         roots.TryGetValue(rootFolderId, out var root)
-        && root.WeakStorageSourceCleanupPolicy
-            == WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy
-        && root.WeakStoragePolicyRevision == policyRevision
         && root.StorageContractRevision == storageContractRevision;
 }

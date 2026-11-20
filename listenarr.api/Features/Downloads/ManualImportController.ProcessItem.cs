@@ -63,6 +63,39 @@ public partial class ManualImportController
                     item.FullPath);
             }
 
+            // An ambiguous container cannot be admitted on its extension, because the same
+            // extension carries audiobooks and films. Probe the content once, here, before any
+            // filesystem mutation is planned, so a film is refused with a reason the user can act
+            // on rather than failing late with a generic registration error. One probe per
+            // user-selected item is affordable; the library scanner, which walks every file,
+            // stays extension-only and never reaches this.
+            if (FileUtils.IsAmbiguousAudioContainer(item.FullPath)
+                && !FileUtils.IsAudioFile(item.FullPath))
+            {
+                var probedContent = await _metadataService.ExtractFileMetadataAsync(
+                    item.FullPath);
+                if (probedContent == null)
+                {
+                    return ManualImportResultDto.FailureResult(
+                        "Failed to extract metadata from file",
+                        item.FullPath);
+                }
+
+                if (!FileUtils.IsProbedAudioContent(probedContent))
+                {
+                    _logger.LogInformation(
+                        "Refused manual import of ambiguous container {Path}: audio stream {HasAudio}, video stream {HasVideo}",
+                        LogRedaction.SanitizeFilePath(item.FullPath),
+                        probedContent.HasAudioStream,
+                        probedContent.HasVideoStream);
+                    return ManualImportResultDto.FailureResult(
+                        probedContent.HasVideoStream
+                            ? "The file carries video, so it was not imported as an audiobook."
+                            : "The file carries no audio stream.",
+                        item.FullPath);
+                }
+            }
+
             if (action == FileAction.None)
             {
                 if (string.IsNullOrWhiteSpace(audiobook.BasePath))
@@ -210,17 +243,10 @@ public partial class ManualImportController
                         destinationPath,
                         pathPlan.AudiobookBasePath,
                         cancellationToken);
-                if (!destinationReservation.ReusesExistingFile
-                    || sourceProof.HasDurablePhysicalObjectIdentity
-                    || ownership.Outcome
-                        != AudiobookFileOwnershipCheckOutcome.Available)
-                {
-                    break;
-                }
-
-                // Byte equality is not ownership. Exclude an unowned existing
-                // pathname and continue planning a new no-overwrite destination.
-                destinationTracker.Commit(destinationReservation);
+                // A byte-identical existing destination may be adopted when
+                // ownership is available. Content proof is the idempotency evidence;
+                // persisted kernel identity is intentionally irrelevant.
+                break;
             }
             var authoritativeBasePath = pathPlan.AudiobookBasePath;
             if (string.IsNullOrWhiteSpace(authoritativeBasePath))
@@ -260,9 +286,7 @@ public partial class ManualImportController
             }
 
             var publicationPlan = _filePublicationCapabilityResolver == null
-                ? sourceProof.HasDurablePhysicalObjectIdentity
-                    ? FilePublicationPlan.Durable(action)
-                    : FilePublicationPlan.Additive(action)
+                ? FilePublicationPlan.Durable(action)
                 : await _filePublicationCapabilityResolver.ResolveAsync(
                     action,
                     item.FullPath,
@@ -309,6 +333,9 @@ public partial class ManualImportController
                     ownership.ExistingFile?.PhysicalObjectIdentity,
                     sourceProof,
                     cancellationToken);
+            var metadataEnrichmentDeferred = preparation.RegistrationLease != null
+                && !preparation.RegistrationLease.SupportsMetadataWrite
+                && !string.IsNullOrWhiteSpace(audiobook.Asin);
             using (var registrationLease = preparation.RegistrationLease)
             {
                 if (registrationLease == null)
@@ -374,7 +401,7 @@ public partial class ManualImportController
                     };
                 }
 
-                if (registrationLease.HasDurablePhysicalObjectIdentity
+                if (registrationLease.SupportsMetadataWrite
                     && !string.IsNullOrWhiteSpace(audiobook.Asin))
                 {
                     try
@@ -416,8 +443,11 @@ public partial class ManualImportController
                 RequestedAction = action.ToString(),
                 EffectiveAction = publicationPlan.EffectiveAction.ToString(),
                 SourceDisposition = publicationPlan.SourceDisposition.ToString(),
-                WarningCode = publicationPlan.ReasonCode,
-                Warning = publicationPlan.Message
+                WarningCode = publicationPlan.ReasonCode
+                    ?? (metadataEnrichmentDeferred ? "metadata_enrichment_deferred" : null),
+                Warning = metadataEnrichmentDeferred
+                    ? $"{publicationPlan.Message} ASIN tagging was deferred to preserve verified import recovery.".Trim()
+                    : publicationPlan.Message
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException

@@ -31,6 +31,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver;
         private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe;
+        private readonly IFileRenameRecoveryProbe? _fileRenameRecoveryProbe;
 
         public RootFolderService(
             IRootFolderRepository repo,
@@ -41,7 +42,8 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
-            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null)
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null,
+            IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
         {
             _repo = repo;
             _logger = logger;
@@ -53,6 +55,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _directoryObjectIdentityResolver = directoryObjectIdentityResolver;
             _fileRegistrationRecoveryProbe = fileRegistrationRecoveryProbe;
+            _fileRenameRecoveryProbe = fileRenameRecoveryProbe;
         }
 
         public async Task<RootFolder?> GetDefaultAsync()
@@ -353,16 +356,28 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             string rootPath,
             FileSystemPathSemantics semantics)
         {
-            if (_fileRegistrationRecoveryProbe == null
-                || !await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
-                    rootPath,
-                    semantics))
+            if (_fileRenameRecoveryProbe != null
+                && await _fileRenameRecoveryProbe.HasBlockingBoundaryAsync(rootPath, semantics))
+            {
+                throw new InvalidOperationException(
+                    "Resolve interrupted file organize recovery before deleting or reassigning this root.");
+            }
+
+            if (_fileRegistrationRecoveryProbe == null)
+            {
+                return;
+            }
+
+            var blockers = await _fileRegistrationRecoveryProbe
+                .GetBlockingBoundaryAsync(rootPath, semantics);
+            var blocker = blockers.FirstOrDefault();
+            if (blocker == null)
             {
                 return;
             }
 
             throw new InvalidOperationException(
-                "Root folder has unresolved file-registration recovery touching this path; complete that recovery before deleting or reassigning the root.");
+                $"Root folder has unresolved file-registration recovery {blocker.OperationId} in state {blocker.JournalState}; complete that recovery before deleting or reassigning the root.");
         }
 
         private async Task<FileSystemSemanticsResolution> ResolveSemanticsAsync(

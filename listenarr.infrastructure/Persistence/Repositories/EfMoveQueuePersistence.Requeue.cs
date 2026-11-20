@@ -81,6 +81,7 @@ public sealed partial class EfMoveQueuePersistence
                             .SetProperty(job => job.TargetCaseSensitivityMode, command.TargetIdentity.RequestedMode)
                             .SetProperty(job => job.TargetIdentityBoundary, command.TargetIdentity.BoundaryPath)
                             .SetProperty(job => job.IdentityKeyVersion, MoveManifestIdentity.Version)
+                            .SetProperty(job => job.ExecutionProtocolVersion, MoveExecutionProtocol.Current)
                             .SetProperty(job => job.ActiveDeduplicationKey, command.DeduplicationKey)
                             .SetProperty(job => job.Status, MoveJobStatus.Queued)
                             .SetProperty(job => job.FailureKind, MoveFailureKind.None)
@@ -181,6 +182,7 @@ public sealed partial class EfMoveQueuePersistence
         && job.TargetCaseSensitivityMode == command.TargetIdentity.RequestedMode
         && job.TargetIdentityBoundary == command.TargetIdentity.BoundaryPath
         && job.IdentityKeyVersion == MoveManifestIdentity.Version
+        && job.ExecutionProtocolVersion == MoveExecutionProtocol.Current
         && job.ActiveDeduplicationKey == command.DeduplicationKey
         && job.FailureKind == MoveFailureKind.None
         && job.AttemptCount == 0
@@ -206,6 +208,7 @@ public sealed partial class EfMoveQueuePersistence
         job.SetSourceIdentity(command.SourceIdentity);
         job.SetTargetIdentity(command.TargetIdentity);
         job.IdentityKeyVersion = MoveManifestIdentity.Version;
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.Current;
         job.ActiveDeduplicationKey = command.DeduplicationKey;
         job.Status = MoveJobStatus.Queued;
         job.Error = null;

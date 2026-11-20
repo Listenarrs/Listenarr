@@ -5,6 +5,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Domain.Common;
 namespace Listenarr.Api.Features.Library
 {
     public sealed partial class LibraryMetadataRescanWorkflow
@@ -21,7 +22,16 @@ namespace Listenarr.Api.Features.Library
                 if (seen.Add(normalized)) ordered.Add(normalized);
             }
 
+            // A region recorded on the ASIN is the catalogue the book was matched in (or that the user
+            // chose): only that one is tried, so a rescan never moves the book to another catalogue on
+            // its own. Without a region (older data, or an ASIN found through an ISBN), the US and UK
+            // catalogues are tried as before.
             AddOrdered(preferredRegion);
+            if (ordered.Count > 0)
+            {
+                return ordered;
+            }
+
             AddOrdered("us");
             AddOrdered("uk");
 
@@ -57,13 +67,16 @@ namespace Listenarr.Api.Features.Library
                     audiobook,
                     metadata.SeriesMemberships,
                     metadata.Series,
-                    metadata.SeriesNumber);
+                    metadata.SeriesNumber,
+                    metadata.SeriesAsin);
             }
 
-            var authors = NormalizeMetadataStringList(
+            // Same cleanup as the add path (AudibleBookMetadata.ToAudiobook), so a rescan neither keeps
+            // nor reintroduces a "Name - translator" style suffix on a contributor.
+            var authors = NormalizeMetadataStringList(AuthorCredits.WithoutRoleSuffixes(
                 (metadata.Authors != null && metadata.Authors.Any())
                     ? metadata.Authors
-                    : (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : null));
+                    : (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : null)));
             if (authors.Count > 0) audiobook.Authors = authors;
 
             var narrators = NormalizeMetadataStringList(

@@ -133,7 +133,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 "The claimed directory no longer matches its validated pathname.");
         }
         using var claimedDirectory = markerCreation.OpenCreatedDirectoryAnchor();
-        var directoryObjectIdentity = claimedDirectory.GetDirectoryObjectIdentity();
+        var directoryObjectIdentity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(claimedDirectory.GetDirectoryObjectIdentity);
         if (!claimedDirectory.VisiblePathMatches())
         {
             throw new InvalidOperationException(
@@ -189,16 +189,22 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             EnsureAuthorizedPhysicalIdentity(
                 existing,
                 managedRootFolderId,
-                claimedDirectory.GetDirectoryObjectIdentityCandidates());
+                []);
             cancellationToken.ThrowIfCancellationRequested();
-            ValidatePinnedOwnership(existing, markerCreation);
+            ValidatePinnedOwnership(
+                existing,
+                markerCreation,
+                requirePersistedPhysicalIdentity: false);
             existing.State = LibraryDirectoryOwnershipState.Owned;
             existing.StateReason = null;
             existing.DirectoryObjectIdentityUnavailableReason = null;
             existing.UpdatedAt = now;
             await db.SaveChangesAsync(CancellationToken.None);
             BeforeOwnershipAtomicCommitForTest?.Invoke();
-            ValidatePinnedOwnership(existing, markerCreation);
+            ValidatePinnedOwnership(
+                existing,
+                markerCreation,
+                requirePersistedPhysicalIdentity: false);
             if (transaction != null)
             {
                 await transaction.CommitAsync(CancellationToken.None);
@@ -206,6 +212,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             await RevalidateCommittedOwnershipAsync(
                 existing,
                 markerCreation,
+                requirePersistedPhysicalIdentity: false,
                 CancellationToken.None);
             return existing;
         }
@@ -250,7 +257,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             managedRootFolderId,
             directoryObjectIdentity,
             now);
-        ValidatePinnedOwnership(ownership, markerCreation);
+        ValidatePinnedOwnership(
+            ownership,
+            markerCreation,
+            requirePersistedPhysicalIdentity: false);
         BeforeNewOwnershipCommitForTest?.Invoke();
         db.LibraryDirectoryOwnerships.Add(ownership);
         try
@@ -258,7 +268,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             await db.SaveChangesAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             BeforeOwnershipAtomicCommitForTest?.Invoke();
-            ValidatePinnedOwnership(ownership, markerCreation);
+            ValidatePinnedOwnership(
+            ownership,
+            markerCreation,
+            requirePersistedPhysicalIdentity: false);
             if (transaction != null)
             {
                 await transaction.CommitAsync(CancellationToken.None);
@@ -266,6 +279,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             await RevalidateCommittedOwnershipAsync(
                 ownership,
                 markerCreation,
+                requirePersistedPhysicalIdentity: false,
                 CancellationToken.None);
         }
         catch (UniqueConstraintViolationException)
@@ -294,16 +308,22 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 EnsureAuthorizedPhysicalIdentity(
                     concurrent,
                     managedRootFolderId,
-                    claimedDirectory.GetDirectoryObjectIdentityCandidates());
+                    []);
                 cancellationToken.ThrowIfCancellationRequested();
-                ValidatePinnedOwnership(concurrent, markerCreation);
+                ValidatePinnedOwnership(
+                    concurrent,
+                    markerCreation,
+                    requirePersistedPhysicalIdentity: false);
                 concurrent.State = LibraryDirectoryOwnershipState.Owned;
                 concurrent.StateReason = null;
                 concurrent.DirectoryObjectIdentityUnavailableReason = null;
                 concurrent.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
                 await retryDb.SaveChangesAsync(CancellationToken.None);
                 BeforeOwnershipAtomicCommitForTest?.Invoke();
-                ValidatePinnedOwnership(concurrent, markerCreation);
+                ValidatePinnedOwnership(
+                    concurrent,
+                    markerCreation,
+                    requirePersistedPhysicalIdentity: false);
                 if (retryTransaction != null)
                 {
                     await retryTransaction.CommitAsync(CancellationToken.None);
@@ -311,6 +331,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 await RevalidateCommittedOwnershipAsync(
                     concurrent,
                     markerCreation,
+                    requirePersistedPhysicalIdentity: false,
                     CancellationToken.None);
                 return concurrent;
             }

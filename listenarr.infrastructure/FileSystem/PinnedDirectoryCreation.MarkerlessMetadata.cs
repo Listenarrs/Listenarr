@@ -132,9 +132,11 @@ internal sealed partial class PinnedDirectoryCreation
                 return;
             }
 
-            File.SetUnixFileMode(
-                destination._fileHandle,
-                File.GetUnixFileMode(_fileHandle));
+            var sourceMode = File.GetUnixFileMode(_fileHandle);
+            if (File.GetUnixFileMode(destination._fileHandle) != sourceMode)
+            {
+                File.SetUnixFileMode(destination._fileHandle, sourceMode);
+            }
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
                 GetLastWriteTimeUtc());

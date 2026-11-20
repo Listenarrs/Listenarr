@@ -9,11 +9,7 @@ internal sealed record MarkerlessMoveEndpointState(
 
 internal sealed record MarkerlessMoveBoundaryAuthorizationState(
     string SourceBoundaryPath,
-    int SourceDirectoryObjectIdentityVersion,
-    string SourceDirectoryObjectIdentity,
-    string TargetBoundaryPath,
-    int TargetDirectoryObjectIdentityVersion,
-    string TargetDirectoryObjectIdentity);
+    string TargetBoundaryPath);
 
 internal interface IMoveExecutionStore
 {
@@ -21,6 +17,15 @@ internal interface IMoveExecutionStore
 
     Task<int> GetExecutionProtocolVersionAsync(
         Guid jobId,
+        CancellationToken cancellationToken);
+
+    Task<MoveJobPhase> GetJobPhaseAsync(
+        Guid jobId,
+        CancellationToken cancellationToken);
+
+    Task<int> EnsureCurrentOrUpgradeLegacyExecutionProtocolAsync(
+        Guid jobId,
+        MoveLeaseToken leaseToken,
         CancellationToken cancellationToken);
 
     Task<MarkerlessMoveEndpointState> GetEndpointObjectIdentitiesAsync(

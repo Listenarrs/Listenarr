@@ -218,28 +218,11 @@ public sealed partial class EfMoveQueuePersistence
                 var canonical = evidenceBearing.Count == 1
                     ? evidenceBearing[0]
                     : candidates[0];
-                var canonicalHasBoundaryAuthorization =
-                    MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
-                        canonical.Job.Entries,
-                        out _,
-                        out _,
-                        out _)
-                    && MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
-                        canonical.Job.Entries,
-                        out _,
-                        out _,
-                        out _);
-                if (canonicalHasBoundaryAuthorization)
-                {
-                    canonical.Job.ActiveDeduplicationKey = group.Key;
-                    canonical.Job.IdentityKeyVersion = MoveManifestIdentity.Version;
-                }
-                else
-                {
-                    MarkIdentityConflict(
-                        canonical.Job,
-                        "The move job has no valid durable source- or target-boundary physical-generation authorization and cannot be reconciled safely.");
-                }
+                // v3 identity is path/content based. Legacy boundary physical
+                // generations may remain as diagnostics but are not required to
+                // reconcile or deduplicate a current operation-evidence job.
+                canonical.Job.ActiveDeduplicationKey = group.Key;
+                canonical.Job.IdentityKeyVersion = MoveManifestIdentity.Version;
 
                 foreach (var duplicate in candidates.Where(item => item.Job.Id != canonical.Job.Id))
                 {
