@@ -116,6 +116,31 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await ctx.SaveChangesAsync();
         }
 
+        public async Task SaveWithDownloadAsync(Download download, DownloadProcessingJob? job)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
+            await EfDownloadRepository.StageUpdateAsync(ctx, download);
+            if (job != null)
+            {
+                job.ActiveDeduplicationKey = IsActive(job.Status)
+                    ? BuildActiveDeduplicationKey(job.DownloadId)
+                    : null;
+                if (await ctx.DownloadProcessingJobs.AsNoTracking().AnyAsync(j => j.Id == job.Id))
+                {
+                    ctx.DownloadProcessingJobs.Update(job);
+                }
+                else
+                {
+                    ctx.DownloadProcessingJobs.Add(job);
+                }
+            }
+
+            await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
+        }
+
         public async Task<DownloadProcessingJob?> GetByIdAsync(string jobId)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
