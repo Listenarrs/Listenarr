@@ -44,7 +44,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return result;
             }
 
-            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(resolved.Value.SavePath, resolved.Value.Files);
+            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
+                resolved.Value.SavePath, resolved.Value.Files);
             if (string.IsNullOrEmpty(outputPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -95,7 +96,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return result;
             }
 
-            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(resolved.Value.SavePath, resolved.Value.Files);
+            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
+                resolved.Value.SavePath, resolved.Value.Files);
             if (string.IsNullOrEmpty(outputPath) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -103,7 +105,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             }
 
             result.SourceFiles = QbittorrentImportPathResolver.TranslateSourceFiles(
-                QbittorrentImportPathResolver.BuildSourceFiles(resolved.Value.SavePath, resolved.Value.Files));
+                QbittorrentImportPathResolver.BuildSourceFiles(
+                    resolved.Value.SavePath, resolved.Value.Files));
             if (!string.IsNullOrWhiteSpace(outputPath))
             {
                 result.ContentPath = outputPath;
@@ -165,6 +168,37 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     logger.LogWarning("No save_path found for torrent {Hash}", hash);
                     return null;
+                }
+
+                if (QbittorrentImportPathResolver.HasUnusableFileMetadata(files))
+                {
+                    var recovered = await QbittorrentCompatibilityDetector.RecoverSelectedFilesAsync(
+                        httpClient, baseUrl, props, hash, files, ct);
+                    if (recovered == null || recovered.Count == 0) return null;
+
+                    // The import caller synthesizes a "completed" queue item. Verify the
+                    // current torrent itself before overriding unusable per-file metadata.
+                    using var infoResp = await httpClient.GetAsync(
+                        $"{baseUrl}/api/v2/torrents/info?hashes={Uri.EscapeDataString(hash)}", ct);
+                    if (!infoResp.IsSuccessStatusCode)
+                    {
+                        return null;
+                    }
+
+                    var infoJson = await infoResp.Content.ReadAsStringAsync(ct);
+                    var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(infoJson);
+                    var matches = torrents?.Where(torrent =>
+                        torrent.TryGetValue("hash", out var hashElement)
+                        && hashElement.ValueKind == JsonValueKind.String
+                        && string.Equals(hashElement.GetString(), hash, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (matches?.Count != 1
+                        || QbittorrentResponseMapper.MapQueueItem(matches[0], client, files).Status != "completed")
+                    {
+                        return null;
+                    }
+
+                    files = recovered;
+                    logger.LogInformation("Recovered native selected files for completed rdt-client torrent {Hash}", hash);
                 }
 
                 return (savePath, files);
