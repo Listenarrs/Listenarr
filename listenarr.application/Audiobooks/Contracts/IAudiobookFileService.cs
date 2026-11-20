@@ -111,6 +111,17 @@ namespace Listenarr.Application.Audiobooks.Contracts
             IAudiobookFileRegistrationLease registrationLease,
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// The same refresh as <see cref="RefreshMetadataAsync"/>, reporting why the
+        /// row was or was not written: the row is gone, a guard refused it, or the
+        /// extractor returned no metadata.
+        /// </summary>
+        Task<MetadataRefreshResult> RefreshMetadataWithResultAsync(
+            Audiobook audiobook,
+            int fileId,
+            IAudiobookFileRegistrationLease registrationLease,
+            CancellationToken cancellationToken = default);
+
         Task<bool> RollbackPhysicalGenerationClaimAsync(
             Audiobook audiobook,
             int fileId,

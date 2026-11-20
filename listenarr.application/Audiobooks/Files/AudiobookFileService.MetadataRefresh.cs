@@ -10,6 +10,20 @@ public partial class AudiobookFileService
         IAudiobookFileRegistrationLease registrationLease,
         CancellationToken cancellationToken = default)
     {
+        // Calling the result variant first keeps its argument checks synchronous.
+        return IsUpdatedAsync(RefreshMetadataWithResultAsync(
+            audiobook,
+            fileId,
+            registrationLease,
+            cancellationToken));
+    }
+
+    public Task<MetadataRefreshResult> RefreshMetadataWithResultAsync(
+        Audiobook audiobook,
+        int fileId,
+        IAudiobookFileRegistrationLease registrationLease,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
         ArgumentException.ThrowIfNullOrWhiteSpace(registrationLease.PublicPath);
@@ -27,7 +41,12 @@ public partial class AudiobookFileService
             cancellationToken);
     }
 
-    private async Task<bool> RefreshMetadataCoreAsync(
+    private static async Task<bool> IsUpdatedAsync(Task<MetadataRefreshResult> refresh)
+    {
+        return await refresh == MetadataRefreshResult.Updated;
+    }
+
+    private async Task<MetadataRefreshResult> RefreshMetadataCoreAsync(
         int audiobookId,
         int fileId,
         IAudiobookFileRegistrationLease lease,
@@ -41,7 +60,11 @@ public partial class AudiobookFileService
             || currentFile.AudiobookId != audiobookId
             || string.IsNullOrWhiteSpace(currentFile.Path))
         {
-            return false;
+            return audiobook == null
+                || currentFile == null
+                || currentFile.AudiobookId != audiobookId
+                ? MetadataRefreshResult.RowGone
+                : MetadataRefreshResult.GuardRejected;
         }
 
         var resolvedPathIdentity = await filePathIdentityResolver.ResolveAsync(
@@ -51,7 +74,7 @@ public partial class AudiobookFileService
         if (resolvedPathIdentity.State != PathIdentityState.Valid
             || string.IsNullOrWhiteSpace(resolvedPathIdentity.OwnershipKey))
         {
-            return false;
+            return MetadataRefreshResult.GuardRejected;
         }
 
         var ownership = await audiobookFileRepository.CheckOwnershipAsync(
@@ -68,7 +91,7 @@ public partial class AudiobookFileService
                 resolvedPathIdentity,
                 cancellationToken))
         {
-            return false;
+            return MetadataRefreshResult.GuardRejected;
         }
 
         currentFile = await audiobookFileRepository.GetByIdAsync(
@@ -77,7 +100,9 @@ public partial class AudiobookFileService
         if (currentFile == null
             || currentFile.PathIdentityState != PathIdentityState.Valid)
         {
-            return false;
+            return currentFile == null
+                ? MetadataRefreshResult.RowGone
+                : MetadataRefreshResult.GuardRejected;
         }
 
         // Capture immutable expected state before extraction; the persistence port
@@ -87,7 +112,7 @@ public partial class AudiobookFileService
             audiobook.BasePath);
         if (!await CanRefreshOwnedMetadataAsync(audiobook, expectedFile, lease, cancellationToken))
         {
-            return false;
+            return MetadataRefreshResult.GuardRejected;
         }
 
         // Operation-local cache identity prevents a path-only read from inheriting
@@ -100,7 +125,9 @@ public partial class AudiobookFileService
         if (metadata == null
             || !await CanRefreshOwnedMetadataAsync(audiobook, expectedFile, lease, cancellationToken))
         {
-            return false;
+            return metadata == null
+                ? MetadataRefreshResult.NoMetadata
+                : MetadataRefreshResult.GuardRejected;
         }
 
         // The size comes from the same lease the metadata was read through —
@@ -110,7 +137,9 @@ public partial class AudiobookFileService
             expectedFile,
             metadata,
             TryGetRegisteredFileLength(lease.MetadataPath),
-            cancellationToken);
+            cancellationToken)
+            ? MetadataRefreshResult.Updated
+            : MetadataRefreshResult.GuardRejected;
     }
 
     private async Task<bool> CanRefreshOwnedMetadataAsync(

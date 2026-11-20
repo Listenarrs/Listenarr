@@ -28,6 +28,7 @@ namespace Listenarr.Api.Features.Metadata
         Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
         IMetadataService metadataService,
         IFileSystem fileSystem,
+        TimeProvider timeProvider,
         ILogger<AdminMetadataController> logger) : ControllerBase
     {
         /// <summary>
@@ -62,6 +63,7 @@ namespace Listenarr.Api.Features.Metadata
             if (!FileUtils.IsAudioFile(path))
                 return BadRequest(new { message = "AudiobookFile path is not a supported audio file" });
 
+            var counts = CountsOf(file);
             AudioMetadata? meta = null;
             try
             {
@@ -69,6 +71,7 @@ namespace Listenarr.Api.Features.Metadata
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
+                await RecordOutcomeAsync(file.Id, counts, MetadataRescanOutcome.ExtractionFailed);
                 return StatusCode(500, new { message = "Metadata extraction failed", detail = ex.Message });
             }
 
@@ -80,6 +83,10 @@ namespace Listenarr.Api.Features.Metadata
             file.Channels = meta?.Channels ?? file.Channels;
 
             await audioFiles.UpdateAsync(file);
+            await RecordOutcomeAsync(
+                file.Id,
+                counts,
+                meta == null ? MetadataRescanOutcome.NoMetadata : MetadataRescanOutcome.Completed);
 
             return Ok(new { message = "Re-extraction completed", audiobookFileId = audiobookFileId });
         }
@@ -114,8 +121,23 @@ namespace Listenarr.Api.Features.Metadata
                         continue;
                     }
 
-                    var meta = await metadataService.ExtractFileMetadataAsync(path);
-                    if (meta != null)
+                    var counts = CountsOf(f);
+                    AudioMetadata? meta;
+                    try
+                    {
+                        meta = await metadataService.ExtractFileMetadataAsync(path);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        await RecordOutcomeAsync(f.Id, counts, MetadataRescanOutcome.ExtractionFailed);
+                        throw;
+                    }
+
+                    if (meta == null)
+                    {
+                        await RecordOutcomeAsync(f.Id, counts, MetadataRescanOutcome.NoMetadata);
+                    }
+                    else
                     {
                         f.Size = fileSystem.GetFileLength(path);
                         f.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : f.DurationSeconds;
@@ -124,6 +146,7 @@ namespace Listenarr.Api.Features.Metadata
                         f.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : f.SampleRate;
                         f.Channels = meta.Channels != 0 ? meta.Channels : f.Channels;
                         await audioFiles.UpdateAsync(f);
+                        await RecordOutcomeAsync(f.Id, counts, MetadataRescanOutcome.Completed);
                         updated++;
                     }
                 }
@@ -135,6 +158,38 @@ namespace Listenarr.Api.Features.Metadata
             }
 
             return Ok(new { message = "Triggered rescan", examined = candidates.Count, updated });
+        }
+
+        private static AudiobookFileRescanCounts CountsOf(AudiobookFile file) => new(
+            file.MetadataRescanFailureCount,
+            file.MetadataRescanUnavailableCount,
+            file.MetadataRescanBlockedCount);
+
+        // A manual rescan records only what the extraction itself found. It never reads the due time and
+        // never records a blocked, unavailable or cancelled outcome. Completed means "the row was refreshed":
+        // the repository decides between Completed and Incomplete from the stored row.
+        private async Task RecordOutcomeAsync(int fileId, AudiobookFileRescanCounts counts, MetadataRescanOutcome outcome)
+        {
+            try
+            {
+                var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+                var failureWrite = MetadataRescanSchedulePolicy.ToScheduleWrite(MetadataRescanOutcome.Incomplete, counts, nowUtc)!;
+                if (outcome == MetadataRescanOutcome.Completed)
+                {
+                    await audioFiles.RecordMetadataRescanRefreshedAsync(fileId, counts, failureWrite, CancellationToken.None);
+                    return;
+                }
+
+                await audioFiles.ApplyMetadataRescanScheduleAsync(
+                    fileId,
+                    counts,
+                    MetadataRescanSchedulePolicy.ToScheduleWrite(outcome, counts, nowUtc)!,
+                    CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogWarning(ex, "Could not record manual rescan outcome {Outcome} for file id={Id}", outcome, fileId);
+            }
         }
     }
 }

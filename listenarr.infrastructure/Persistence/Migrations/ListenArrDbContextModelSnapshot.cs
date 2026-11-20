@@ -458,6 +458,28 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Format")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("MetadataRescanBlockedCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("MetadataRescanDueUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MetadataRescanFailureCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("MetadataRescanLastOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MetadataRescanUnavailableCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Path")
                         .HasColumnType("TEXT");
 
@@ -531,6 +553,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AudiobookId");
+
+                    b.HasIndex("MetadataRescanDueUtc")
+                        .HasDatabaseName("IX_AudiobookFiles_MetadataRescanDue")
+                        .HasFilter("\"DurationSeconds\" IS NULL OR \"Format\" IS NULL OR \"SampleRate\" IS NULL OR \"Size\" IS NULL OR \"Size\" = 64");
 
                     b.HasIndex("PathIdentityLookupKey");
 
