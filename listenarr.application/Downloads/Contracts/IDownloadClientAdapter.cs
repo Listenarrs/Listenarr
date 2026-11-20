@@ -88,6 +88,17 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default);
 
         /// <summary>
+        /// Fetch updates for the given IDs and say whether every item the client listed is in them.
+        /// Default implementation treats <see cref="GetQueueAsync(DownloadClientConfiguration, List{string}, CancellationToken)"/>
+        /// as complete, for clients that do not skip items they cannot read.
+        /// </summary>
+        /// <param name="client">Download client configuration</param>
+        /// <param name="ids">List of IDs to get updates from</param>
+        /// <param name="ct"></param>
+        async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+            => DownloadClientQueueSnapshot.Complete(await GetQueueAsync(client, ids, ct));
+
+        /// <summary>
         /// Look up tracked items by ID without the client's configured category, so a
         /// tracked job stays visible after its category changes. Orphan cleanup uses it
         /// to confirm an item is gone. A failed lookup throws.

@@ -186,7 +186,7 @@ namespace Listenarr.Application.Downloads.Common
             return await TranslateQueueItemPathsAsync(client, item);
         }
 
-        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default, ISet<string>? reportedDownloadIds = null)
+        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default, DownloadPollReport? pollReport = null)
         {
             var ids = GetExternalIds(downloads);
             if (ids.Count == 0)
@@ -198,7 +198,12 @@ namespace Listenarr.Application.Downloads.Common
             List<QueueItem> items;
             try
             {
-                items = await adapter.GetQueueAsync(client, ids!, ct);
+                var snapshot = await adapter.GetQueueSnapshotAsync(client, ids!, ct);
+                items = snapshot.Items;
+                if (pollReport != null)
+                {
+                    pollReport.IsComplete = snapshot.IsComplete;
+                }
             }
             catch (DownloadClientAdapterPollingException)
             {
@@ -224,7 +229,7 @@ namespace Listenarr.Application.Downloads.Common
                     continue;
                 }
 
-                reportedDownloadIds?.Add(download.Id);
+                pollReport?.ReportedDownloadIds.Add(download.Id);
 
                 logger.LogDebug(
                     "Found matching download client item for {DownloadId}: {Title} (ExternalId: {ExternalId}, Status: {Status}, Progress: {Progress:F2}, LocalPath: {LocalPath}, ContentPath: {ContentPath})",

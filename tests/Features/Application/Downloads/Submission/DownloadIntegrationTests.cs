@@ -132,8 +132,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                     }
                 ]));
             gatewayMock
-                .Setup(g => g.FetchDownloadsAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<List<Download>>(), It.IsAny<CancellationToken>(), It.IsAny<ISet<string>?>()))
-                .ReturnsAsync((DownloadClientConfiguration _, List<Download> downloads, CancellationToken _, ISet<string>? _) =>
+                .Setup(g => g.FetchDownloadsAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<List<Download>>(), It.IsAny<CancellationToken>(), It.IsAny<DownloadPollReport?>()))
+                .ReturnsAsync((DownloadClientConfiguration _, List<Download> downloads, CancellationToken _, DownloadPollReport? _) =>
                     downloads.Select(download => download.Completed()).ToList());
             gatewayMock
                 .Setup(g => g.MarkItemAsImportedAsync(

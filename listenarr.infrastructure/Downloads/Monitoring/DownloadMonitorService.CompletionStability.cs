@@ -27,24 +27,31 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
     /// Kept beside the monitor rather than inside it because the monitor file is already at the
     /// size the architecture tests cap production files at.
     /// </summary>
+    /// <remarks>
+    /// When the client first reported a held download complete is persisted on the row (see
+    /// <see cref="DownloadCompletionObservation"/>), because the hold writes the row back with its
+    /// pre-completion status and nothing else records that the completion happened. Kept only in
+    /// memory, a restart during the hold lost it: a client that had meanwhile dropped the item was
+    /// never seen to complete again, and orphan cleanup deleted the row while the files stayed on
+    /// disk. After a restart the monitor resumes from the persisted observation: the window keeps
+    /// counting from the first report, and a download the client no longer lists is finalized.
+    /// </remarks>
     public partial class DownloadMonitorProcessor
     {
-        // When the client first reported each download complete. In memory on purpose: a restart
-        // simply restarts the window, which is the safe direction, and persisting it would need a
-        // column for a value that is meaningless once the transition has been let through.
-        //
-        // Entries are removed when the transition is let through, when the client stops
-        // reporting the download as complete, and when the client stops listing it (which lets it
-        // through, see ReleaseIfGoneWhileHeld). They are not removed when the row itself is
-        // deleted mid-window, so the dictionary can hold entries for downloads that no longer
-        // exist. The processor is a singleton, so those survive for the life of the process. That is
-        // accepted rather than swept: an entry is a string key and a DateTime, it can only be
-        // added for a download the client itself reported complete during this run, and the
-        // bound is therefore the number of downloads that completed and then disappeared before
-        // their window elapsed, which is a handful over an uptime rather than something that
-        // grows with the library. Sweeping it would mean either a second timer or walking the
-        // dictionary on every cycle, both of which cost more than the leak.
-        internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _completionFirstSeen = new();
+        /// <summary>
+        /// Should this pass write the download back with its previous status?
+        /// </summary>
+        /// <remarks>
+        /// A held download the client did not list came back unchanged, so it goes to the release
+        /// rather than the window: the window would read its unchanged status as the client no
+        /// longer reporting it complete and discard the observation, including when the poll that
+        /// left it out was incomplete. Writing its previous status back changes nothing unless the
+        /// release turns it into a completion.
+        /// </remarks>
+        private bool HoldsPreviousStatus(Download current, Download previous, DownloadPollReport poll, TimeSpan stabilityWindow) =>
+            !poll.ReportedDownloadIds.Contains(current.Id) && current.GetCompletionObservedAt() != null
+                ? !ReleaseIfGoneWhileHeld(current, previous, poll.IsComplete)
+                : !HasSettledAsComplete(current, previous, stabilityWindow);
 
         /// <summary>
         /// Has this download been reported complete by the client for long enough to finalize?
@@ -60,31 +67,40 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         {
             if (current.Status != DownloadStatus.Completed || !IsPreCompletion(previous.Status))
             {
-                _completionFirstSeen.TryRemove(current.Id, out _);
+                current.ClearCompletionObserved();
                 return true;
             }
 
             if (stabilityWindow <= TimeSpan.Zero)
             {
-                // The window can be set to zero while a download is held; drop its entry so it
-                // cannot outlive the hold.
-                _completionFirstSeen.TryRemove(current.Id, out _);
+                // The window can be set to zero while a download is held; drop its observation so
+                // it cannot outlive the hold.
+                current.ClearCompletionObserved();
                 return true;
             }
 
             var now = timeProvider.GetUtcNow().UtcDateTime;
-            var firstSeen = _completionFirstSeen.GetOrAdd(current.Id, now);
-            if (now - firstSeen < stabilityWindow)
+            var firstSeen = current.GetCompletionObservedAt();
+
+            // An observation from the future means the clock moved back since it was taken;
+            // counting from it would hold the download for the size of that jump.
+            if (firstSeen is not { } observedAt || observedAt > now)
+            {
+                observedAt = now;
+                current.RecordCompletionObserved(now);
+            }
+
+            if (now - observedAt < stabilityWindow)
             {
                 logger.LogDebug(
                     "Download {DownloadId} reported complete {Elapsed:0}s ago; holding finalization until the {Window:0}s stability window passes",
                     LogRedaction.SanitizeText(current.Id),
-                    (now - firstSeen).TotalSeconds,
+                    (now - observedAt).TotalSeconds,
                     stabilityWindow.TotalSeconds);
                 return false;
             }
 
-            _completionFirstSeen.TryRemove(current.Id, out _);
+            current.ClearCompletionObserved();
             return true;
         }
 
@@ -92,39 +108,41 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         /// Lets a held download through to finalization when its client stops listing it.
         /// </summary>
         /// <remarks>
-        /// The hold writes the row back with its pre-completion status, so the completion is
-        /// remembered only in <see cref="_completionFirstSeen"/>. A download the client drops
-        /// before the window passes comes back unchanged and is never seen complete again, and
-        /// orphan cleanup would then delete it as missing from the client. Without the window the
-        /// import was enqueued on the first pass, so this does exactly that: it applies only to a
-        /// download the client itself reported complete during this run, and if the files went
+        /// A download the client drops before the window passes comes back unchanged and is never
+        /// seen complete again, and orphan cleanup would then delete it as missing from the client.
+        /// Without the window the import was enqueued on the first pass, so this does exactly that:
+        /// it applies only to a download the client itself reported complete, and if the files went
         /// with the item, the import fails the same way it would have without the window.
         ///
-        /// Only a row still waiting for its first completion is released. An entry that outlived
-        /// its hold must not write Completed over a row that has moved into import, because the
-        /// Completed edge would enqueue that import a second time.
+        /// Only a complete poll can say the item is gone. An adapter that cannot read an item
+        /// leaves it out and marks the poll incomplete, and releasing on that omission would queue
+        /// the import while the client still lists the item, before the window has passed. Such a
+        /// download keeps its hold and its observation until a poll accounts for every item.
+        ///
+        /// Only a row still waiting for its first completion is released. An observation that
+        /// outlived its hold must not write Completed over a row that has moved into import,
+        /// because the Completed edge would enqueue that import a second time.
         /// </remarks>
-        private bool ReleaseIfGoneWhileHeld(Download current, Download previous, ISet<string> reportedIds)
+        private bool ReleaseIfGoneWhileHeld(Download current, Download previous, bool pollIsComplete)
         {
-            if (reportedIds.Contains(current.Id))
-            {
-                return false;
-            }
-
             if (!IsPreCompletion(previous.Status))
             {
-                _completionFirstSeen.TryRemove(current.Id, out _);
+                current.ClearCompletionObserved();
                 return false;
             }
 
-            if (!_completionFirstSeen.TryRemove(current.Id, out _))
+            if (!pollIsComplete)
             {
+                logger.LogDebug(
+                    "Download {DownloadId} was reported complete and was left out of an incomplete poll; keeping the hold until a complete poll",
+                    LogRedaction.SanitizeText(current.Id));
                 return false;
             }
 
             logger.LogInformation(
                 "Download {DownloadId} was reported complete and is no longer listed by its client; finalizing without waiting out the stability window",
                 LogRedaction.SanitizeText(current.Id));
+            current.ClearCompletionObserved();
             current.SetStatus(DownloadStatus.Completed);
             return true;
         }
