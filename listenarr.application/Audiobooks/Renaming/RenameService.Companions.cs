@@ -25,7 +25,8 @@ public partial class RenameService
     /// <summary>
     /// Carries the non-audio companions (cover.jpg, metadata.json, ...) left in the previous
     /// folder after a folder-changing organize, mirroring what manual import already does.
-    /// Runs only when every tracked file left the previous folder, honours the import
+    /// Runs only when every tracked file left the previous folder and that folder held this
+    /// book alone (no other audio, not a library root, not a parent of the new folder), honours the import
     /// blacklist, never overwrites, and removes the previous folder once nothing but
     /// blacklisted files is left in it.
     /// </summary>
@@ -47,18 +48,30 @@ public partial class RenameService
         if (string.IsNullOrWhiteSpace(previous)
             || string.IsNullOrWhiteSpace(next)
             || PathsEqual(previous, next, semantics)
+            || allowedRoots.Any(root => PathsEqual(previous, root, semantics))
+            || IsSamePathOrWithin(next, previous, semantics)
             || !_fileSystem.DirectoryExists(previous)
             || !_fileSystem.DirectoryExists(next))
         {
+            // A library root, or a folder the book moved down into (a flat author folder), holds
+            // files that belong to other books or to the folder itself, not to this book.
             return;
         }
 
         List<string> companions;
         try
         {
-            companions = _fileSystem
+            var remaining = _fileSystem
                 .EnumerateFiles(previous, "*", SearchOption.TopDirectoryOnly)
-                .Where(file => !FileUtils.IsAudioFile(file))
+                .ToList();
+            if (remaining.Any(FileUtils.IsAudioFile))
+            {
+                // Audio this book does not track is still there: the folder is shared with
+                // another book, whose cover and metadata must stay with it.
+                return;
+            }
+
+            companions = remaining
                 .Where(file => !Path.GetFileName(file).StartsWith('.'))
                 .Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions))
                 .ToList();
