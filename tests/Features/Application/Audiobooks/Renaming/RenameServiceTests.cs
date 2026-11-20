@@ -1194,7 +1194,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             List<string> importBlacklist,
             Dictionary<string, string> sourceCompanions,
             Dictionary<string, string>? existingTargetFiles = null,
-            string[]? sourceFolderParts = null)
+            string[]? sourceFolderParts = null,
+            Action<Mock<IFileMover>>? configureFileMover = null)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join([libraryRoot, .. sourceFolderParts ?? ["Old"]]);
@@ -1226,7 +1227,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 ImportBlacklistExtensions = importBlacklist
             };
 
-            var (service, db, _) = BuildService(settings);
+            var (service, db, _) = BuildService(settings, configureFileMover);
             db.Audiobooks.Add(new Audiobook
             {
                 Id = 5,
@@ -1362,6 +1363,26 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
             Assert.Equal("map", await File.ReadAllTextAsync(Path.Join(sourceFolder, "extras", "map.pdf")));
             Assert.False(Directory.Exists(Path.Join(targetFolder, "extras")));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task ExecuteRename_FolderChange_CompanionThatCannotMoveKeepsOrganizeSuccessfulAndOldFolder(bool moverThrows)
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                configureFileMover: mover => mover
+                    .Setup(m => m.PerformActionOn(FileAction.Move, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>()))
+                    .Returns(() => moverThrows
+                        ? Task.FromException<bool>(new IOException("disk gone"))
+                        : Task.FromResult(false)));
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
         }
 
         [Fact]
