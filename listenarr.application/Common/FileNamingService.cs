@@ -207,7 +207,7 @@ namespace Listenarr.Application.Common
 
             // Replace variables. If a variable is empty, emit a sentinel so we can clean up surrounding
             // punctuation and separators (for example: remove "{Series}/" when Series is empty).
-            const string EmptySentinel = "__EMPTY_VAR__";
+            const string EmptySentinel = "\uE000";
             result = variableRegex.Replace(result, match =>
             {
                 var variableName = match.Groups[1].Value;
@@ -253,10 +253,18 @@ namespace Listenarr.Application.Common
                 return EmptySentinel;
             });
 
-            // Cleanup: remove empty sentinel inside any brackets (e.g. "(__EMPTY_VAR__)" -> "")
-            result = Regex.Replace(result, @"[\(\[\{]\s*" + EmptySentinel + @"\s*[\)\]\}]", string.Empty);
+            // Cleanup order matters. Bracket groups are resolved first so a sentinel can never leak a
+            // stray separator or slash into the rendered name.
 
-            // Remove common separators adjacent to the sentinel (e.g. " - __EMPTY_VAR__" or "__EMPTY_VAR__ - ")
+            // Bracket groups: a group whose contents are entirely empty tokens disappears, however many
+            // tokens it held; a group that still holds real content keeps the group and drops only the
+            // empty tokens. This is what lets "[{Series} {SeriesNumber}]" vanish for a standalone book
+            // and render as "[Radicalized]" for a series with no number.
+            result = CollapseBracketGroup(result, '(', ')', EmptySentinel);
+            result = CollapseBracketGroup(result, '[', ']', EmptySentinel);
+            result = CollapseBracketGroup(result, '{', '}', EmptySentinel);
+
+            // Remove common separators adjacent to any surviving sentinel (e.g. " - {sentinel}")
             result = Regex.Replace(result, @"\s*[-–—:_]\s*" + EmptySentinel, string.Empty);
             result = Regex.Replace(result, EmptySentinel + @"\s*[-–—:_]\s*", string.Empty);
 
@@ -305,6 +313,45 @@ namespace Listenarr.Application.Common
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Resolves a single kind of bracket group against empty-token sentinels.
+        /// Groups holding nothing but sentinels are removed entirely; groups that retain real content
+        /// keep their brackets with the sentinels stripped out.
+        /// </summary>
+        private static string CollapseBracketGroup(string input, char open, char close, string sentinel)
+        {
+            // Escape explicitly rather than via Regex.Escape: Regex.Escape leaves ']' and '}' alone,
+            // and a bare ']' would close the negated character class below early.
+            var openEscaped = "\\" + open;
+            var closeEscaped = "\\" + close;
+
+            // Non-nested groups only - a group may not contain its own delimiters.
+            var groupPattern = openEscaped + "[^" + openEscaped + closeEscaped + "]*" + closeEscaped;
+
+            return Regex.Replace(input, groupPattern, match =>
+            {
+                var group = match.Value;
+                if (!group.Contains(sentinel, StringComparison.Ordinal))
+                {
+                    return group;
+                }
+
+                var inner = group
+                    .Substring(1, group.Length - 2)
+                    .Replace(sentinel, string.Empty, StringComparison.Ordinal);
+
+                inner = Regex.Replace(inner, @"\s{2,}", " ").Trim();
+
+                // Nothing meaningful survived - drop the whole group.
+                if (!inner.Any(char.IsLetterOrDigit))
+                {
+                    return string.Empty;
+                }
+
+                return open + inner + close;
+            });
         }
 
         public string ApplyNamingPattern(string pattern, AudioMetadata metadata, bool treatAsFilename = false)
