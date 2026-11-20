@@ -38,6 +38,10 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
     /// </remarks>
     public partial class DownloadMonitorProcessor
     {
+        // Downloads whose overdue hold has been logged, so the line appears once per hold rather
+        // than on every incomplete poll.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _overdueHoldsLogged = new();
+
         /// <summary>
         /// Should this pass write the download back with its previous status?
         /// </summary>
@@ -50,7 +54,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         /// </remarks>
         private bool HoldsPreviousStatus(Download current, Download previous, DownloadPollReport poll, TimeSpan stabilityWindow) =>
             !poll.ReportedDownloadIds.Contains(current.Id) && current.GetCompletionObservedAt() != null
-                ? !ReleaseIfGoneWhileHeld(current, previous, poll.IsComplete)
+                ? !ReleaseIfGoneWhileHeld(current, previous, poll.IsComplete, stabilityWindow)
                 : !HasSettledAsComplete(current, previous, stabilityWindow);
 
         /// <summary>
@@ -101,6 +105,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             }
 
             current.ClearCompletionObserved();
+            _overdueHoldsLogged.TryRemove(current.Id, out _);
             return true;
         }
 
@@ -122,17 +127,31 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         /// Only a row still waiting for its first completion is released. An observation that
         /// outlived its hold must not write Completed over a row that has moved into import,
         /// because the Completed edge would enqueue that import a second time.
+        ///
+        /// A hold that has outlived its window and is kept only because the poll was incomplete is
+        /// logged once at Information, so an operator can see why a completed download has not
+        /// moved on. Nothing about the log feeds back into the decision.
         /// </remarks>
-        private bool ReleaseIfGoneWhileHeld(Download current, Download previous, bool pollIsComplete)
+        private bool ReleaseIfGoneWhileHeld(Download current, Download previous, bool pollIsComplete, TimeSpan stabilityWindow)
         {
             if (!IsPreCompletion(previous.Status))
             {
                 current.ClearCompletionObserved();
+                _overdueHoldsLogged.TryRemove(current.Id, out _);
                 return false;
             }
 
             if (!pollIsComplete)
             {
+                if (current.GetCompletionObservedAt() is { } observedAt
+                    && timeProvider.GetUtcNow().UtcDateTime - observedAt >= stabilityWindow
+                    && _overdueHoldsLogged.TryAdd(current.Id, 0))
+                {
+                    logger.LogInformation(
+                        "Download {DownloadId} completion hold has passed its window but the client poll was incomplete; keeping the hold until a complete poll",
+                        LogRedaction.SanitizeText(current.Id));
+                }
+
                 logger.LogDebug(
                     "Download {DownloadId} was reported complete and was left out of an incomplete poll; keeping the hold until a complete poll",
                     LogRedaction.SanitizeText(current.Id));
@@ -143,6 +162,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 "Download {DownloadId} was reported complete and is no longer listed by its client; finalizing without waiting out the stability window",
                 LogRedaction.SanitizeText(current.Id));
             current.ClearCompletionObserved();
+            _overdueHoldsLogged.TryRemove(current.Id, out _);
             current.SetStatus(DownloadStatus.Completed);
             return true;
         }
