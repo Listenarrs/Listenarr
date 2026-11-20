@@ -39,6 +39,7 @@ internal static class MetadataRegistrationExtensions
         services.AddScoped<IMetadataService, MetadataService>();
         services.AddScoped<IAsinLookupService, AsinLookupService>();
         services.AddScoped<IAudiobookMetadataService, AudiobookMetadataService>();
+        services.AddScoped<IAudiobookMetadataRefreshService, AudiobookMetadataRefreshService>();
         services.AddScoped<IOpenLibraryService, OpenLibraryService>();
         services.AddSingleton<MetadataExtractionLimiter>();
         services.TryAddSingleton(TimeProvider.System);
