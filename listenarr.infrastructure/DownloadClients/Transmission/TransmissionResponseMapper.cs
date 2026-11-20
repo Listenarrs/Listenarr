@@ -26,7 +26,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
     {
         public static QueueItem MapQueueItem(DownloadClientConfiguration client, JsonElement torrent)
         {
-            var id = GetString(torrent, "hash_string", "hashString");
+            var id = GetTorrentHash(torrent);
             if (string.IsNullOrEmpty(id) && torrent.TryGetProperty("id", out var numericId))
             {
                 id = numericId.GetInt32().ToString(CultureInfo.InvariantCulture);
@@ -79,7 +79,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             JsonElement torrent,
             (bool SeedRatioLimited, double SeedRatioLimit, bool IdleSeedingLimitEnabled, int IdleSeedingLimit) sessionConfig)
         {
-            var hash = GetString(torrent, "hash_string", "hashString");
+            var hash = GetTorrentHash(torrent);
             var numericId = torrent.TryGetProperty("id", out var numericIdProp) ? numericIdProp.GetInt32() : 0;
             var name = GetString(torrent, "name");
             var percentDone = GetDouble(torrent, "percent_done", "percentDone") * 100;
@@ -209,6 +209,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
 
             return labels;
         }
+
+        internal static string GetTorrentHash(JsonElement torrent) => GetString(torrent, "hash_string", "hashString");
 
         private static string GetString(JsonElement value, string snakeCaseName, string? camelCaseName = null)
         {

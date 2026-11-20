@@ -37,12 +37,9 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
     {
         foreach (var client in new[] { "qbittorrent", "transmission", "sabnzbd", "nzbget" })
             foreach (var scenario in new[] { "present", "bad-telemetry", "absent", "unrelated-bad-present", "unrelated-bad-absent" })
-            {
-                // Only NZBGet reads tracked identity apart from progress telemetry so far.
-                // The other three clients get that in a follow-up.
-                if (scenario == "bad-telemetry" && client != "nzbget") continue;
                 yield return [client, scenario];
-            }
+        foreach (var scenario in new[] { "older-history", "truncated-history", "history-without-total", "unreadable-history-id" })
+            yield return ["sabnzbd", scenario];
         foreach (var status in new[] { "WARNING/SPACE", "WARNING/REPAIRABLE", "WARNING/SCRIPT", "WARNING/HEALTH", "SUCCESS/ALL", "FAILURE/HEALTH", "DELETED/MANUAL" })
             yield return ["nzbget", status];
         foreach (var shape in new[] { "bad-history", "duplicate-array", "duplicate-data", "typed-id", "missing-status" })
@@ -107,6 +104,10 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
             var shouldRemove = scenario is "absent" or "unrelated-bad-absent" or "DELETED/MANUAL";
             Assert.Equal(!shouldRemove, stored != null);
             Assert.NotNull(await _downloadRepository.GetByIdAsync(foreign.Id));
+            if (type == "sabnzbd" && scenario.Contains("history", StringComparison.Ordinal))
+            {
+                Assert.Contains(requests, request => request.Contains("nzo_ids=" + Target, StringComparison.Ordinal));
+            }
             if (scenario.StartsWith("WARNING/", StringComparison.Ordinal))
             {
                 Assert.NotNull(stored);
@@ -136,10 +137,26 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
             if (scenario == "missing-status") entry = entry.Replace(Member("Status", "SUCCESS/ALL"), "");
             return Xml("<array><data>" + entry + "</data></array>");
         }
-        if (type == "sabnzbd" && request.QueryString["mode"] == "history") return "{\"history\":{\"slots\":[],\"noofslots\":0}}";
+        if (type == "sabnzbd" && request.QueryString["mode"] == "history")
+        {
+            if (request.QueryString["nzo_ids"] == Target)
+            {
+                return scenario switch
+                {
+                    "older-history" => JsonSerializer.Serialize(new { history = new { slots = new[] { new { nzo_id = Target, storage = 42 } }, noofslots = 1 } }),
+                    "truncated-history" => """{"history":{"slots":[{"nzo_id":"other-job"}],"noofslots":101}}""",
+                    "history-without-total" => """{"history":{"slots":[]}}""",
+                    "unreadable-history-id" => """{"history":{"slots":[{"nzo_id":42}],"noofslots":1}}""",
+                    _ => """{"history":{"slots":[],"noofslots":0}}"""
+                };
+            }
+
+            return """{"history":{"slots":[],"noofslots":0}}""";
+        }
         if (type == "nzbget" && method != "listgroups") return Xml("<struct/>");
         var entries = new List<string>();
-        if (scenario != "absent" && scenario != "unrelated-bad-absent" && !historyCase)
+        if (scenario != "absent" && scenario != "unrelated-bad-absent" && !historyCase &&
+            !(type == "sabnzbd" && scenario.Contains("history", StringComparison.Ordinal)))
             entries.Add(ActiveEntry(type, type == "nzbget" ? "101" : Target, scenario == "bad-telemetry"));
         if (scenario.StartsWith("unrelated-bad-", StringComparison.Ordinal))
             entries.Add(ActiveEntry(type, type == "nzbget" ? "102" : Other, true));
@@ -165,7 +182,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         {
             "qbittorrent" => JsonSerializer.Serialize(new { hash = id, name = "Target book", state = "downloading", progress = 0.5, size = 1000, downloaded = 500, category = "other" }).Replace("\"size\":1000", bad ? "\"size\":{}" : "\"size\":1000"),
             "transmission" => JsonSerializer.Serialize(new { id = id == Target ? 7 : 8, hashString = id, name = "Target book", status = 4, totalSize = 1000, leftUntilDone = 500, percentDone = 0.5, eta = 60, labels = new[] { "other" } }).Replace("\"eta\":60", bad ? "\"eta\":null" : "\"eta\":60"),
-            "sabnzbd" => JsonSerializer.Serialize(new { nzo_id = id, filename = "Target book", cat = "other", status = "Downloading", storage = (object)(bad ? 42 : "/downloads"), mb = "100", mbleft = "50" }),
+            "sabnzbd" => JsonSerializer.Serialize(new { nzo_id = id, filename = "Target book", cat = "other", status = "Downloading", storage = (object)(bad ? 42 : ""), mb = "100", mbleft = "50" }),
             _ => NzbEntry(id, "other", "DOWNLOADING").Replace("<int>100</int>", bad ? "<double>1e300</double>" : "<int>100</int>")
         };
     }
