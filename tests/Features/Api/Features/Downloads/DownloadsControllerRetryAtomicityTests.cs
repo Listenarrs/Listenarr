@@ -32,6 +32,14 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
     [Trait("Category", "DownloadsController")]
     public class DownloadsControllerRetryAtomicityTests : BaseTests
     {
+        private const string FailDownloadUpdates =
+            "CREATE TRIGGER fail_download_update BEFORE UPDATE ON Downloads " +
+            "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
+
+        private const string FailJobInserts =
+            "CREATE TRIGGER fail_job_insert BEFORE INSERT ON DownloadProcessingJobs " +
+            "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
+
         private readonly SqliteFactory _factory;
 
         public DownloadsControllerRetryAtomicityTests()
@@ -60,7 +68,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             // the endpoint answered 500, and the worker went on to fail the committed job because
             // the download it pointed at still read ImportBlocked.
             await AddBlockedDownloadAsync("d-retry-download-write-fails");
-            await FailWritesAsync("Downloads", "UPDATE");
+            await InstallTriggerAsync(FailDownloadUpdates);
 
             var result = await MockUtils.CreateDownloadsController(_provider)
                 .RetryBlockedImport("d-retry-download-write-fails");
@@ -81,7 +89,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             // ImportPending this endpoint exists to recover, so a failed job write must not
             // produce one either.
             await AddBlockedDownloadAsync("d-retry-job-write-fails");
-            await FailWritesAsync("DownloadProcessingJobs", "INSERT");
+            await InstallTriggerAsync(FailJobInserts);
 
             var result = await MockUtils.CreateDownloadsController(_provider)
                 .RetryBlockedImport("d-retry-job-write-fails");
@@ -127,12 +135,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 .Build());
         }
 
-        private async Task FailWritesAsync(string table, string operation)
+        private async Task InstallTriggerAsync(string trigger)
         {
             await using var db = await _factory.CreateDbContextAsync();
-            await db.Database.ExecuteSqlRawAsync(
-                $"CREATE TRIGGER fail_{table}_{operation} BEFORE {operation} ON {table} " +
-                "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;");
+            await db.Database.ExecuteSqlRawAsync(trigger);
         }
 
         private sealed class SqliteFactory(DbContextOptions<ListenArrDbContext> options)
