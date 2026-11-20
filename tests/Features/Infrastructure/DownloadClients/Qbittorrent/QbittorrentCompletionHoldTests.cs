@@ -104,6 +104,34 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
+        [Trait("Scenario", "A new hold that goes overdue logs again")]
+        public async Task HeldCompletion_NewHoldOverdueAfterTheFirstEnded_LogsAgain()
+        {
+            // The once-per-hold guard must end with the hold. A client that stops reporting the
+            // torrent complete clears the observation; when it completes again that is a new hold.
+            await HoldCompletionAsync();
+            Api.MalformedFilesForHash = HeldHash;
+            _clock.Advance(StabilityWindow + TimeSpan.FromSeconds(1));
+            await RunCycleAsync(Processor);
+            Assert.Equal(1, _logs.Count(OverdueHoldLine));
+
+            Api.MalformedFilesForHash = null;
+            Api.InfoResponseOverride = Queue(Torrent(HeldHash, complete: false), Torrent(OtherHash, complete: false));
+            await RunCycleAsync(Processor);
+
+            Api.InfoResponseOverride = Queue(Torrent(HeldHash, complete: true), Torrent(OtherHash, complete: false));
+            await RunCycleAsync(Processor);
+
+            Api.MalformedFilesForHash = HeldHash;
+            _clock.Advance(StabilityWindow + TimeSpan.FromSeconds(1));
+            await RunCycleAsync(Processor);
+
+            Assert.Equal(2, _logs.Count(OverdueHoldLine));
+            Assert.Equal(DownloadStatus.Downloading, (await HeldDownloadAsync())!.Status);
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
         [Trait("Scenario", "A torrent gone from a complete poll is released")]
         public async Task HeldCompletion_GoneFromACompletePoll_IsFinalized()
         {

@@ -199,6 +199,26 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Assert.Equal(ProcessingJobStatus.Pending, job.Status);
         }
 
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "Beside an existing active job the download-only save commits without a failure")]
+        public async Task RetryBlockedImport_WithAnActiveJobAndNoFailure_UnblocksAndLeavesTheJob()
+        {
+            // The control for the download-only failure test above.
+            await AddBlockedDownloadAsync("d-retry-active-commits");
+            await AddJobAsync("j-retry-active-commits", "d-retry-active-commits", ProcessingJobStatus.Pending);
+
+            Assert.IsType<OkObjectResult>(await MockUtils.CreateDownloadsController(_provider)
+                .RetryBlockedImport("d-retry-active-commits"));
+
+            Assert.Equal(
+                DownloadStatus.ImportPending,
+                (await _downloadRepository.GetByIdAsync("d-retry-active-commits"))!.Status);
+            var job = (await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-retry-active-commits")).Single();
+            Assert.Equal("j-retry-active-commits", job.Id);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+        }
+
         private async Task AddJobAsync(string jobId, string downloadId, ProcessingJobStatus status)
         {
             await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()

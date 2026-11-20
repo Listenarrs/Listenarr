@@ -72,6 +72,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             if (current.Status != DownloadStatus.Completed || !IsPreCompletion(previous.Status))
             {
                 current.ClearCompletionObserved();
+                _overdueHoldsLogged.TryRemove(current.Id, out _);
                 return true;
             }
 
@@ -80,6 +81,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 // The window can be set to zero while a download is held; drop its observation so
                 // it cannot outlive the hold.
                 current.ClearCompletionObserved();
+                _overdueHoldsLogged.TryRemove(current.Id, out _);
                 return true;
             }
 
