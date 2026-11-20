@@ -56,14 +56,11 @@ namespace Listenarr.Tests.Features.Api.Features.Images
             // Assert
             mockImageCache.Verify(m => m.DownloadAndCacheImageAsync(imageUrl, identifier), Times.Once);
 
-            if (result is PhysicalFileResult fileResult)
-            {
-                Assert.Equal(fullPath, fileResult.FileName);
-            }
-            else
-            {
-                Assert.IsType<NotFoundObjectResult>(result);
-            }
+            // The file was created above, so serving it is the only correct outcome.
+            // Accepting a 404 here as well would let this test pass with image serving
+            // removed entirely, which is what it used to do.
+            var fileResult = Assert.IsType<PhysicalFileResult>(result);
+            Assert.Equal(fullPath, fileResult.FileName);
 
             // Cleanup
             try
