@@ -1839,7 +1839,8 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Guid companionOperation = Guid.Empty;
         try
         {
-            await Task.WhenAny(entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(10));
+            // 30 s: 10 s expired on GitHub's Windows runner with coverage collection (import still on its way).
+            await Task.WhenAny(entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(30));
             if (importing.IsCompleted)
             {
                 await using var diagnostic = await factory.CreateDbContextAsync();
@@ -1849,7 +1850,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
                     + Environment.NewLine + System.Text.Json.JsonSerializer.Serialize(
                         await diagnostic.FileMutationJournals.AsNoTracking().ToListAsync()));
             }
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
             await using var paused = await factory.CreateDbContextAsync();
             var journal = await paused.FileMutationJournals.SingleAsync(item => item.DestinationPath == companionDestination);
             companionOperation = journal.OperationId;
@@ -1976,7 +1977,8 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         }, cancellation.Token);
         try
         {
-            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(10));
+            // 15 s: 10 s expired once on GitHub's Windows runner (import still on its way to the pause).
+            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(15));
             Assert.False(importing.IsCompleted);
             await pause.Entered.Task;
             await using var paused = await factory.CreateDbContextAsync();

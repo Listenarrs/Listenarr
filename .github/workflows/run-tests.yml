@@ -6,6 +6,21 @@ on:
   pull_request:
     branches: [ beta, main, canary ]
     types: [ opened, synchronize, reopened ]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label for the Linux job; default: the CI_RUNNER repository variable, else GitHub-hosted'
+        type: string
+        required: false
+      jobs:
+        description: 'Comma-separated job names to run; default: all'
+        type: string
+        required: false
+      coverage:
+        description: 'Collect test coverage in every test job and merge it in the coverage job'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -16,12 +31,13 @@ concurrency:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-24.04
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'unit-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
       API_PROJECT: listenarr.api/Listenarr.Api.csproj
-      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
 
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +111,9 @@ jobs:
       - name: Repository path-safety tests
         run: npm run --silent test:repository-paths
 
+      - name: E2E failure-GIF tests
+        run: npm run --silent test:e2e-gif
+
       - name: Frontend lint
         run: npm run --silent lint:frontend
 
@@ -112,26 +131,158 @@ jobs:
       - name: Build solution
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
-      - name: Run native backend tests
-        env:
-          ASPNETCORE_ENVIRONMENT: Test
-          Playwright__Enabled: 'false'
-        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
+      - name: Check backend API contract against generated TypeScript types
+        working-directory: fe
+        run: npm run api-types:check
+
+      - name: Type-check browser tests
+        working-directory: fe
+        run: npm run type-check:playwright
 
       - name: Run frontend tests
         working-directory: fe
         run: |
-          if npm run test --silent --if-present; then
+          if npm run ${{ inputs.coverage && 'test:coverage' || 'test' }} --silent; then
             echo "Frontend tests ran successfully."
           else
             echo "Frontend tests failed." >&2
             exit 1
           fi
 
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-tests
+          path: fe/coverage/unit/lcov.info
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
 
+      - name: Check the packaged ffprobe sits beside the published app
+        run: |
+          test -f listenarr.api/publish/linux-x64/ffprobe
+          listenarr.api/publish/linux-x64/ffprobe -version > /dev/null
+
+  frontend-integration-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'frontend-integration-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+          cache-dependency-path: fe/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci --engine-strict
+
+      - name: Install Playwright Chromium
+        working-directory: fe
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright frontend integration tests (browser, stubbed API)
+        working-directory: fe
+        env:
+          LISTENARR_COVERAGE: ${{ inputs.coverage && '1' || '0' }}
+        run: npm run test:frontend-integration
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend-integration-tests
+          path: fe/test-results/frontend-integration-coverage/lcov.info
+          retention-days: 7
+          if-no-files-found: ignore
+
+  backend-integration-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-integration-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      # Makes tests/Listenarr.BackendIntegrationTests a test project; the other CI jobs skip it.
+      ListenarrBackendIntegrationJob: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # ffprobe: the import scan reads real tags.
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+
+      - name: Run backend integration tests (app in process, API only)
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+        run: >-
+          dotnet test tests/Listenarr.BackendIntegrationTests/Listenarr.BackendIntegrationTests.csproj -c Release
+          --logger 'console;verbosity=normal'
+          ${{ inputs.coverage && '--settings tests/coverage.runsettings --results-directory TestResults/coverage' || '' }}
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend-integration-tests
+          path: TestResults/coverage/**/coverage.cobertura.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  backend-tests-linux:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore listenarr.slnx
+
+      - name: Build backend
+        run: dotnet build listenarr.slnx --no-restore --configuration Release
+
+      - name: Run native backend tests
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+          LISTENARR_COVERAGE_DIRECTORY: ${{ inputs.coverage && 'TestResults/coverage' || '' }}
+        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend-tests-linux
+          path: TestResults/coverage/**/coverage.cobertura.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
   backend-tests-windows:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-windows') }}
     runs-on: windows-2025
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -155,5 +306,110 @@ jobs:
       - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
-          Playwright__Enabled: 'false'
+          LISTENARR_COVERAGE_DIRECTORY: ${{ inputs.coverage && 'TestResults/coverage' || '' }}
         run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend-tests-windows
+          path: TestResults/coverage/**/coverage.cobertura.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  e2e-tests:
+    # Defined after the other test jobs so it is listed after them; it runs alongside them.
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+          cache-dependency-path: fe/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci --engine-strict
+
+      - name: Install Playwright Chromium
+        working-directory: fe
+        run: npx playwright install --with-deps chromium
+
+      - name: Install synthetic audiobook generator dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
+
+      - name: Run Playwright E2E tests (browser, app in Docker)
+        working-directory: fe
+        run: npm run test:e2e${{ inputs.coverage && ' -- --coverage' || '' }}
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-e2e-tests
+          path: |
+            fe/test-results/e2e-coverage/lcov.info
+            fe/test-results/e2e-coverage-backend/cobertura.xml
+            fe/test-results/e2e-coverage-backend/summary.md
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload failure traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: fe/test-results/e2e/
+          if-no-files-found: ignore
+
+  coverage:
+    # Manual runs with the coverage input only. After every test job, whatever their result: merges the
+    # coverage they uploaded. Reported, not gated.
+    needs:
+      - unit-tests
+      - frontend-integration-tests
+      - backend-integration-tests
+      - backend-tests-linux
+      - backend-tests-windows
+      - e2e-tests
+    if: ${{ !cancelled() && inputs.coverage }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+
+      - name: Download the test jobs' coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-input
+
+      - name: Merge coverage (job summary, HTML report)
+        run: |
+          mkdir -p coverage-input
+          dotnet tool restore
+          node scripts/test-coverage/aggregate.mjs coverage-input coverage-report --html
+
+      - name: Upload merged coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/

@@ -228,6 +228,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<bool>("Abridged")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("Added")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Asin")
                         .HasColumnType("TEXT");
 
@@ -1955,6 +1958,41 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("ApplicationSettings");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Downloads.BlockedRelease", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("BlockedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReleaseIdentifier")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId", "ReleaseIdentifier")
+                        .IsUnique();
+
+                    b.ToTable("BlockedReleases");
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.CompatibilityFilePublicationJournal", b =>

@@ -21,7 +21,11 @@ internal sealed partial class AudiobookScanService
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!FileUtils.IsAudioFile(filePath))
+        // Extension pre-filter only. This entry point serves manual import, which has already
+        // probed an ambiguous container before calling; the content gate that actually decides
+        // sits in the file service this method delegates registration to. The scan enumeration
+        // path is unaffected: it never offers an ambiguous container in the first place.
+        if (!FileUtils.MayBeAudioPendingProbe(filePath))
         {
             return false;
         }

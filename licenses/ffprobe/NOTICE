@@ -1,0 +1,54 @@
+ffprobe notice
+==============
+
+Listenarr ships the ffprobe program from the Openur.FFprobeStatic NuGet package to read audio
+file metadata. Listenarr runs it as a separate program and does not modify it. The package
+version is pinned in Directory.Packages.props; this notice describes version 9.0.2.508.
+
+What it is
+----------
+
+ffprobe is part of FFmpeg (https://ffmpeg.org). The packaged binaries report the version
+"9.0.2-Openur" and were built from the FFmpeg n9.0.2 release tag with these configure options,
+shared by every platform in the package:
+
+  --extra-version=Openur --prefix=/opt/ffmpeg --enable-version3 --enable-static
+  --disable-shared --enable-pic --disable-programs --disable-everything --disable-autodetect
+  --disable-iconv --disable-network --disable-avdevice --disable-avfilter --disable-swresample
+  --disable-swscale --disable-doc --disable-debug --enable-ffprobe --enable-protocol=file
+  --enable-demuxers --enable-parsers --enable-decoders --enable-bsf=av1_frame_split
+  --enable-bsf=av1_frame_merge --enable-bsf=av1_metadata --enable-libdav1d --disable-unstable
+
+Platform builds add their own toolchain options (for example --target-os and --arch). The build
+uses neither --enable-gpl nor --enable-nonfree.
+
+Two patches are applied to the FFmpeg source before it is built:
+
+  patches/v8.0_dts_es_audio.patch
+  patches/v8.0_x2645_codec_tag.patch
+
+The binaries are statically linked with dav1d 1.5.4 (https://code.videolan.org/videolan/dav1d),
+an AV1 decoder.
+
+Licences
+--------
+
+With --enable-version3 and without --enable-gpl, FFmpeg's LICENSE.md places the build under the
+GNU Lesser General Public License version 3 or later. That licence is in LGPL-3.0.txt; it
+supplements the GNU General Public License version 3, which is in GPL-3.0.txt. dav1d is under
+the BSD 2-Clause licence in dav1d-BSD-2-Clause.txt.
+
+Source
+------
+
+FFmpeg n9.0.2:
+  https://git.ffmpeg.org/ffmpeg.git, tag n9.0.2 (commit 946fcce07b6dcd0331c8cc609192aeff5e1924f8)
+  https://ffmpeg.org/releases/
+
+dav1d 1.5.4:
+  https://code.videolan.org/videolan/dav1d, tag 1.5.4 (commit 54706fc6bc0cdecab7e9593974a4039cc038fca7)
+
+Build scripts and the two patches:
+  https://github.com/Openur/ffprobe-static-build at commit 0e8056a9bbeabedee51c5a1bcf517c755278c68c,
+  the commit the package's metadata names. That repository does not include a licence file, and
+  the package's metadata does not declare a licence.

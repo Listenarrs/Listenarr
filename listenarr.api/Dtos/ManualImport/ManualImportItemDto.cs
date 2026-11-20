@@ -17,11 +17,14 @@
  */
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using Listenarr.Application.Common.Exceptions;
 
 namespace Listenarr.Api.Dtos.ManualImport
 {
     public class ManualImportItemDto
     {
+        private static readonly char[] PathSegmentSeparators = ['/', '\\'];
+
         [JsonPropertyName("relativePath")]
         public string RelativePath { get; set; } = string.Empty;
 
@@ -38,14 +41,22 @@ namespace Listenarr.Api.Dtos.ManualImport
                     return;
                 }
 
+                // Thrown during body binding, so only a mapped application exception
+                // reaches the client as a 400 instead of an unhandled 500.
                 if (value.IndexOfAny(Path.GetInvalidPathChars()) != -1)
                 {
-                    throw new ArgumentException("Path is empty or contains invalid characters.", nameof(value));
+                    throw new ApplicationValidationException(
+                        "manual_import_path_invalid",
+                        "Path contains invalid characters.");
                 }
 
-                if (value.Contains("..") || value.Contains("./") || value.Contains(".\\"))
+                // Only a whole ".." segment climbs a directory; names such as
+                // "chapter..mp3" or a folder ending in "." are ordinary files.
+                if (value.Split(PathSegmentSeparators).Contains(".."))
                 {
-                    throw new ArgumentException("Path traversal attempts are not allowed.", nameof(value));
+                    throw new ApplicationValidationException(
+                        "manual_import_path_traversal",
+                        "Path traversal attempts are not allowed.");
                 }
 
                 field = Path.GetFullPath(value);

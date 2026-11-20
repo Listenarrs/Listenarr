@@ -1,0 +1,12 @@
+{
+  "products": [
+    {
+      "asin": "B0DQR9D4YG",
+      "title": "Alchemised",
+      "authors": [{ "name": "SenLinYu", "asin": "B0DTNVW7SG" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook"
+    }
+  ],
+  "total_results": 1
+}

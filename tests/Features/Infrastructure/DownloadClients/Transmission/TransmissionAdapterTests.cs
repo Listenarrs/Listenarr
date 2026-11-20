@@ -18,7 +18,7 @@
 using System.Runtime.InteropServices;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks.Api;
+using Listenarr.Tests.Mocks.DownloadClients;
 
 using Listenarr.Infrastructure.Torrents;
 

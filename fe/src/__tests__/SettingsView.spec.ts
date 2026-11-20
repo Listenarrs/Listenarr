@@ -270,6 +270,115 @@ describe('SettingsView', () => {
     })
   })
 
+  it('refuses to post a startup config it never loaded', async () => {
+    // The POST body is built from this ref. If the GET failed the ref is still null,
+    // and posting anyway sends a body with nothing in it but the login-screen flag.
+    ;(apiService.getStartupConfig as Mock).mockRejectedValue(new Error('503'))
+    ;(apiService.saveStartupConfig as Mock).mockClear()
+    ;(apiService.getApplicationSettings as Mock).mockResolvedValue({
+      version: 3,
+      folderNamingPattern: '{Author}/{Series}/{Title}',
+      fileNamingPattern: '{Title}',
+    })
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(SettingsView, {
+      global: { plugins: [pinia, router], stubs: ['FolderBrowser'] },
+    })
+
+    const generalTab = wrapper
+      .findAll('button.tab-button')
+      .find((b) => b.text().includes('General Settings'))
+    await generalTab!.trigger('click')
+
+    const vm = wrapper.vm as unknown as { settings?: Settings; startupConfig?: unknown }
+    await vi.waitFor(() => {
+      expect(vm.settings?.version).toBe(3)
+    })
+    expect(vm.startupConfig ?? null).toBeNull()
+
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+    cfgStore.saveApplicationSettings = vi
+      .fn()
+      .mockImplementation(async (payload) => ({ ...payload, version: 4 }))
+
+    const saveBtn = wrapper
+      .findAll('button.btn.btn-primary')
+      .find((b) => b.text().includes('Save Settings'))
+    await saveBtn!.trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(cfgStore.saveApplicationSettings).toHaveBeenCalledTimes(1)
+    expect(apiService.saveStartupConfig as Mock).not.toHaveBeenCalled()
+  })
+
+  it('posts the startup config it loaded when the load succeeded', async () => {
+    ;(apiService.getStartupConfig as Mock).mockResolvedValue({
+      apiKey: 'loaded-api-key',
+      port: 5000,
+      bindAddress: '*',
+      authenticationRequired: 'false',
+    })
+    ;(apiService.saveStartupConfig as Mock).mockClear()
+    ;(apiService.getApplicationSettings as Mock).mockResolvedValue({
+      version: 3,
+      folderNamingPattern: '{Author}/{Series}/{Title}',
+      fileNamingPattern: '{Title}',
+    })
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(SettingsView, {
+      global: { plugins: [pinia, router], stubs: ['FolderBrowser'] },
+    })
+
+    const generalTab = wrapper
+      .findAll('button.tab-button')
+      .find((b) => b.text().includes('General Settings'))
+    await generalTab!.trigger('click')
+
+    const vm = wrapper.vm as unknown as { settings?: Settings }
+    await vi.waitFor(() => {
+      expect(vm.settings?.version).toBe(3)
+    })
+
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+    cfgStore.saveApplicationSettings = vi
+      .fn()
+      .mockImplementation(async (payload) => ({ ...payload, version: 4 }))
+
+    const saveBtn = wrapper
+      .findAll('button.btn.btn-primary')
+      .find((b) => b.text().includes('Save Settings'))
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => {
+      expect(apiService.saveStartupConfig as Mock).toHaveBeenCalledTimes(1)
+    })
+
+    const posted = (apiService.saveStartupConfig as Mock).mock.calls[0][0]
+    expect(posted.apiKey).toBe('loaded-api-key')
+    expect(posted.port).toBe(5000)
+    expect(posted.bindAddress).toBe('*')
+    expect(posted.authenticationRequired).toBe('false')
+  })
+
   it('toggles download client enabled state', async () => {
     const router = createRouter({
       history: createMemoryHistory(),

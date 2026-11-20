@@ -14,7 +14,7 @@ Listenarr uses a small set of shared checks so local hooks and CI describe the s
 - ESLint is configured in `fe/eslint.config.ts`.
 - Vue uses the essential Vue rules.
 - TypeScript uses the Vue TypeScript recommended rules.
-- Vitest and Cypress files use their matching recommended plugin rules.
+- Vitest files use their matching recommended plugin rules.
 - Prettier owns formatting; ESLint formatting rules stay disabled through the Prettier skip config.
 - Multi-line Vue event handlers must be a single expression, an inline function, or a named
   handler. If a handler needs multiple statements, prefer a named function; otherwise wrap the

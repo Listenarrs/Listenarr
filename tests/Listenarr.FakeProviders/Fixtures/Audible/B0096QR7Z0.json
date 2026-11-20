@@ -1,0 +1,13 @@
+{
+  "product": {
+    "asin": "B0096QR7Z0",
+    "title": "Allan Quatermain",
+    "language": "english",
+    "authors": [{ "name": "H. Rider Haggard" }],
+    "narrators": [{ "name": "Bill Homewood" }],
+    "series": [{ "asin": "B01F5TL5K4", "title": "Allan Quatermain", "sequence": "15" }],
+    "publisher_name": "Fixture Audio",
+    "release_date": "2012-09-07",
+    "runtime_length_min": 300
+  }
+}

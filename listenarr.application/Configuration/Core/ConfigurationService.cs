@@ -448,7 +448,8 @@ namespace Listenarr.Application.Configuration.Core
                         var admins = await userService.GetAdminUsersAsync();
                         if (admins == null || admins.Count == 0)
                         {
-                            throw new InvalidOperationException(
+                            throw new ApplicationValidationException(
+                                "admin_user_required",
                                 "Cannot enable the login screen: no admin user exists. " +
                                 "Set an admin username and password in the same save to " +
                                 "create one, or leave the login screen disabled.");

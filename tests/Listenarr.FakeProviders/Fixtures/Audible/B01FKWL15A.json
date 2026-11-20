@@ -1,0 +1,12 @@
+{
+  "product": {
+    "asin": "B01FKWL15A",
+    "title": "Twenty Thousand Leagues Under the Sea",
+    "language": "english",
+    "authors": [{ "name": "Jules Verne" }],
+    "narrators": [{ "name": "Bill Homewood" }],
+    "publisher_name": "Fixture Audio",
+    "release_date": "2016-05-20",
+    "runtime_length_min": 600
+  }
+}

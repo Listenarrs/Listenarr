@@ -492,6 +492,181 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
         }
 
         [Fact]
+        public async Task Age_Is_Measured_In_Utc_Whatever_Offset_The_Indexer_Sends()
+        {
+            // The published date here is ten minutes old, written with a +09:00 offset. A bare
+            // DateTime.TryParse converts it to the host's local time and hands back Kind=Local,
+            // which is then subtracted from DateTime.UtcNow, so the age came out wrong by the
+            // difference between the two offsets. That made every age check depend on where the
+            // server was, and for a minutes-scale check like this one it decides the outcome.
+            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            using var db = new ListenArrDbContext(options);
+            var indexer = new Listenarr.Domain.Search.Indexer
+            {
+                Name = "OffsetIndexer",
+                Url = "https://offset.local",
+                MinimumAge = 120,
+                Retention = 3650,
+                IsEnabled = true
+            };
+            db.Indexers.Add(indexer);
+            db.SaveChanges();
+
+            var service = new QualityProfileService(new QualityProfileRepository(db), NullLogger<QualityProfileService>.Instance, new EfIndexerRepository(db));
+            var profile = new QualityProfile { MaximumAge = 3650, MinimumSeeders = 0 };
+
+            var tenMinutesAgoInTokyo = DateTimeOffset.UtcNow
+                .AddMinutes(-10)
+                .ToOffset(TimeSpan.FromHours(9))
+                .ToString("o");
+
+            var result = new SearchResult
+            {
+                Title = "Fresh Post From Another Timezone",
+                PublishedDate = tenMinutesAgoInTokyo,
+                DownloadType = "nzb",
+                IndexerId = indexer.Id
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            // Ten minutes is under the two hour minimum however it is written down.
+            Assert.Contains(score.RejectionReasons, reason => reason.Contains("Too new", StringComparison.Ordinal));
+        }
+
+        [Theory]
+        [InlineData(200, "torrent", true)]
+        [InlineData(0, "torrent", false)]
+        [InlineData(200, "nzb", true)]
+        [InlineData(0, "nzb", false)]
+        public async Task Indexer_MaximumSize_Rejects_Results_Over_The_Limit(int indexerMaximumSize, string downloadType, bool expectRejection)
+        {
+            // Indexer.MaximumSize had no reader. The scorer's existing size gate reads
+            // QualityProfile.MaximumSize, which shadows it by name. The rows with the indexer
+            // limit unset are the control: the same result has to pass.
+            //
+            // The nzb rows pin the deliberate difference from the profile's setting of the same
+            // name. The profile size gate is skipped for Usenet, because a Usenet grab is not
+            // sized the way a torrent is; the indexer's ceiling is a property of the indexer and
+            // applies to both protocols, which is the shape Sonarr and Radarr use for their
+            // equivalent. Without these rows nothing stops someone moving the gate inside the
+            // !isNzb block and calling it a tidy-up.
+            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            using var db = new ListenArrDbContext(options);
+            var indexer = new Listenarr.Domain.Search.Indexer
+            {
+                Name = "SizeCappedIndexer",
+                Url = "https://size.local",
+                MaximumSize = indexerMaximumSize,
+                IsEnabled = true
+            };
+            db.Indexers.Add(indexer);
+            db.SaveChanges();
+
+            var service = new QualityProfileService(new QualityProfileRepository(db), NullLogger<QualityProfileService>.Instance, new EfIndexerRepository(db));
+            var profile = new QualityProfile { MinimumSeeders = 0, MaximumAge = 3650 };
+
+            var result = new SearchResult
+            {
+                Title = "Large Result",
+                PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o"),
+                DownloadType = downloadType,
+                Size = 300L * 1024 * 1024,
+                Seeders = 10,
+                IndexerId = indexer.Id
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            if (expectRejection)
+            {
+                Assert.Contains(score.RejectionReasons, reason => reason.Contains("too large for indexer", StringComparison.OrdinalIgnoreCase));
+                Assert.True(score.TotalScore < 0);
+            }
+            else
+            {
+                Assert.DoesNotContain(score.RejectionReasons, reason => reason.Contains("too large for indexer", StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        [Theory]
+        [InlineData(120, true)]
+        [InlineData(0, false)]
+        public async Task Indexer_MinimumAge_Rejects_Nzbs_That_Have_Not_Propagated(int minimumAgeMinutes, bool expectRejection)
+        {
+            // Indexer.MinimumAge had no reader either. It exists so a post that has not finished
+            // propagating is not grabbed as an incomplete download. The second case is the control.
+            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            using var db = new ListenArrDbContext(options);
+            var indexer = new Listenarr.Domain.Search.Indexer
+            {
+                Name = "PropagationIndexer",
+                Url = "https://usenet.local",
+                MinimumAge = minimumAgeMinutes,
+                Retention = 3650,
+                IsEnabled = true
+            };
+            db.Indexers.Add(indexer);
+            db.SaveChanges();
+
+            var service = new QualityProfileService(new QualityProfileRepository(db), NullLogger<QualityProfileService>.Instance, new EfIndexerRepository(db));
+            var profile = new QualityProfile { MaximumAge = 3650, MinimumSeeders = 0 };
+
+            var result = new SearchResult
+            {
+                Title = "Fresh Post",
+                PublishedDate = DateTime.UtcNow.AddMinutes(-10).ToString("o"),
+                DownloadType = "nzb",
+                IndexerId = indexer.Id
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            if (expectRejection)
+            {
+                Assert.Contains(score.RejectionReasons, reason => reason.Contains("Too new", StringComparison.Ordinal));
+                Assert.True(score.TotalScore < 0);
+            }
+            else
+            {
+                Assert.DoesNotContain(score.RejectionReasons, reason => reason.Contains("Too new", StringComparison.Ordinal));
+            }
+        }
+
+        [Fact]
+        public async Task Indexer_MinimumAge_Does_Not_Apply_To_Torrents()
+        {
+            // Propagation is a Usenet concern. A torrent that has just been posted is complete.
+            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            using var db = new ListenArrDbContext(options);
+            var indexer = new Listenarr.Domain.Search.Indexer
+            {
+                Name = "TorrentMinAge",
+                Url = "https://torrent.local",
+                MinimumAge = 120,
+                Type = "Torrent",
+                IsEnabled = true
+            };
+            db.Indexers.Add(indexer);
+            db.SaveChanges();
+
+            var service = new QualityProfileService(new QualityProfileRepository(db), NullLogger<QualityProfileService>.Instance, new EfIndexerRepository(db));
+            var profile = new QualityProfile { MaximumAge = 3650, MinimumSeeders = 0 };
+
+            var result = new SearchResult
+            {
+                Title = "Fresh Torrent",
+                PublishedDate = DateTime.UtcNow.AddMinutes(-10).ToString("o"),
+                DownloadType = "torrent",
+                Seeders = 10,
+                IndexerId = indexer.Id
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+            Assert.DoesNotContain(score.RejectionReasons, reason => reason.Contains("Too new", StringComparison.Ordinal));
+        }
+
+        [Fact]
         public async Task Torrent_Age_Rejection_Uses_ProfileMaxAge()
         {
             // profile maxAge = 10 days, result age = 12 days -> torrent should be rejected
@@ -587,6 +762,80 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
 
             Assert.False(score.IsRejected, "Result should not be rejected when MinimumScore = 0 and score > 0");
             Assert.True(score.TotalScore > 0, "Score should be positive");
+        }
+
+        [Theory]
+        [InlineData(2048, false)]
+        [InlineData(4096, false)]
+        [InlineData(1024, true)]
+        public async Task Profile_MaximumSize_SurvivesProfilesLargerThanTwoGigabytes(int maximumSizeMb, bool expectRejection)
+        {
+            // profile.MaximumSize * 1024 * 1024 was evaluated in int. MaximumSize is int MB and
+            // the quality profile form puts no upper bound on the input, so 2048 MB or more
+            // overflows to a negative number and every release is larger than it: the gate
+            // rejects everything. A 2 GB ceiling on an audiobook profile is not exotic.
+            //
+            // The 1024 row is the control. It is below the overflow, the same 1.5 GB result is
+            // genuinely over it, and it has to keep being rejected, so a fix that simply stopped
+            // rejecting fails here.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumSeeders = 0,
+                MaximumAge = 3650,
+                MaximumSize = maximumSizeMb
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Ordinary Torrent",
+                DownloadType = "torrent",
+                Size = 1536L * 1024 * 1024,
+                Seeders = 10,
+                PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.Equal(
+                expectRejection,
+                score.RejectionReasons.Any(reason => reason.Contains("too large (", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        [Theory]
+        [InlineData(2048, true)]
+        [InlineData(4096, true)]
+        [InlineData(512, false)]
+        public async Task Profile_MinimumSize_SurvivesProfilesLargerThanTwoGigabytes(int minimumSizeMb, bool expectRejection)
+        {
+            // The same overflow on the other gate, failing the opposite way round: the comparison
+            // becomes "smaller than a negative number", which nothing is, so the minimum stops
+            // rejecting anything and the setting silently does nothing.
+            //
+            // The 512 row is the control: below the overflow the 1 GB result clears the minimum
+            // and must not be rejected.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumSeeders = 0,
+                MaximumAge = 3650,
+                MinimumSize = minimumSizeMb
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Ordinary Torrent",
+                DownloadType = "torrent",
+                Size = 1024L * 1024 * 1024,
+                Seeders = 10,
+                PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.Equal(
+                expectRejection,
+                score.RejectionReasons.Any(reason => reason.Contains("too small (", StringComparison.OrdinalIgnoreCase)));
         }
     }
 }

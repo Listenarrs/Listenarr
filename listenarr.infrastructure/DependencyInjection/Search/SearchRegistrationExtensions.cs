@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Search.Matching;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Search;
@@ -31,6 +32,7 @@ internal static class SearchRegistrationExtensions
     public static IServiceCollection AddSearchInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IIndexerRepository, EfIndexerRepository>();
+        services.AddSingleton<IReleaseAnnotationCatalogSource, EmbeddedReleaseAnnotationCatalogSource>();
         return services;
     }
 }

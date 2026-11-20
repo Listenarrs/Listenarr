@@ -446,6 +446,28 @@ describe('RepairBooksModal', () => {
     expect(wrapper.text()).not.toContain('Loading the selected audiobooks')
   })
 
+  it('searches a title holding "Series:" whole, not as a search keyword (#1127)', async () => {
+    apiMocks.getAudiobook.mockResolvedValue({
+      ...mismatched,
+      title: 'The Wheel of Time Series: Book 1',
+      authors: ['Robert Jordan'],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-asin-clear"]').trigger('click')
+    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    const searchFields = apiMocks.advancedSearch.mock.calls.at(-1)?.[0]
+    expect(searchFields).toEqual(
+      expect.objectContaining({
+        title: 'The Wheel of Time Series: Book 1',
+        author: 'Robert Jordan',
+      }),
+    )
+    expect(searchFields).not.toHaveProperty('series')
+  })
+
   it('opens with nothing to repair: each book shows its current record and no new one yet', async () => {
     const wrapper = mountModal()
     await flushPromises()
@@ -1165,6 +1187,30 @@ describe('RepairBooksModal', () => {
       / - Request: [\d.]+ s$/,
     )
     expect(bookCard(wrapper, 8).get('[data-testid="match-results-header"]').text()).toMatch(
+      / - Cached results$/,
+    )
+  })
+
+  it('keeps apart searches whose title and author only differ by where a "|" splits them', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    const search = async (title: string, author: string) => {
+      await bookCard(wrapper).get('[data-testid="match-title"]').setValue(title)
+      await bookCard(wrapper).get('[data-testid="match-author"]').setValue(author)
+      await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+    }
+
+    apiMocks.advancedSearch.mockClear()
+    await search('Dune|Frank', 'Herbert')
+    await search('Dune', 'Frank|Herbert')
+
+    // Two different searches: two requests, the second answer not taken from the first
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(2)
+    expect(bookCard(wrapper).get('[data-testid="match-results-header"]').text()).not.toMatch(
       / - Cached results$/,
     )
   })

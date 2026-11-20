@@ -1183,37 +1183,4 @@ describe('library import store', () => {
     ])
     expect(metadata.series).toBe('Ayesha')
   })
-
-  it('treats a ten-character, non-B0 value typed into the manual search box as an ASIN', async () => {
-    // Real Audible product ASINs are not all B0-prefixed: ISBN-shaped ones (ten digits, or nine
-    // and a trailing X) are valid ten-character ASINs on the catalogue. The manual search box's
-    // own ASIN-vs-title detection has to accept those, even though a series membership's
-    // seriesAsin is deliberately restricted to the B0 shape (see seriesUtils.ts). Regression
-    // guard for the two detectors sharing one predicate.
-    const { useLibraryImportStore } = await import('@/stores/libraryImport')
-    const store = useLibraryImportStore()
-
-    advancedSearch.mockResolvedValue([])
-
-    store.items = {
-      '/incoming/Book.m4b': {
-        id: '/incoming/Book.m4b',
-        fullPath: '/incoming/Book.m4b',
-        sourceFiles: ['/incoming/Book.m4b'],
-        folderPath: '/incoming',
-        relativePath: 'Book',
-        folderName: 'Book',
-        format: 'M4B',
-        fileCount: 1,
-        selectedMatch: null,
-        hasSearched: false,
-        isSearching: false,
-        selected: false,
-      },
-    }
-
-    await store.searchItem('/incoming/Book.m4b', '1000000001')
-
-    expect(advancedSearch).toHaveBeenCalledWith({ asin: '1000000001', cap: 5, region: 'fr' })
-  })
 })

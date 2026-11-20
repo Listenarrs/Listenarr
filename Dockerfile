@@ -38,6 +38,9 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
 	&& dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+# Trim and set the mode of the packaged ffprobe here, so the final image's COPY carries only
+# this platform's binaries, already executable, and no later layer has to copy them again.
+RUN sh /src/docker/runtime/prepare-ffprobe.sh /app/publish
 
 FROM base AS final
 WORKDIR /app

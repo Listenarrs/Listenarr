@@ -90,9 +90,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
-            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var automaticScoring = scope.ServiceProvider.GetRequiredService<IAutomaticSearchScoringService>();
 
             var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
 
@@ -127,7 +127,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     isFirstBook = false;
 
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, downloadService, automaticScoring, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -160,8 +160,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         private async Task<int> ProcessAudiobookAsync(
             Audiobook audiobook,
             ISearchService searchService,
-            IQualityProfileService qualityProfileService,
             IDownloadService downloadService,
+            IAutomaticSearchScoringService automaticScoring,
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
@@ -212,8 +212,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             // Author-free fallback: release names often omit the author, so a full title+author
             // query can return nothing even when the book is available. Retry without the author,
-            // then constrain the broadened results to titles that still match this book, so a
-            // same-title/different-book release can't pass quality scoring and be grabbed.
+            // then assess every broadened result with the same identity and quality policy.
             if (searchResults.Count == 0)
             {
                 var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
@@ -223,9 +222,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
                         audiobook.Title, fallbackQuery);
                     var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
-                    searchResults = _resultClassifier.ConstrainFallbackResultsToTitle(fallbackResults, audiobook);
-                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} raw result(s), {Kept} kept after title match",
-                        audiobook.Title, fallbackResults.Count, searchResults.Count);
+                    searchResults = fallbackResults;
+                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
+                        audiobook.Title, fallbackResults.Count);
                 }
             }
 
@@ -249,7 +248,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
                 await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (IsContainableBroadcastFailure(ex, stoppingToken))
             {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
             }
@@ -260,8 +259,20 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 return 0;
             }
 
-            // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+            // Drop releases already blocked for this book before they are assessed.
+            //
+            // This is the path that actually re-grabs: it selects here and calls StartDownloadAsync
+            // directly rather than going through SearchAndDownloadAsync, so without this a release
+            // could fail, be blocked, and be grabbed again by the next automatic pass.
+            using (var blocklistScope = _serviceScopeFactory.CreateScope())
+            {
+                var blocklistService = blocklistScope.ServiceProvider.GetRequiredService<IBlocklistService>();
+                searchResults = await BlockedReleaseFilter.ExcludeAsync(
+                    blocklistService, audiobook.Id, searchResults, _logger);
+            }
+
+            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile, stoppingToken);
+            var scoredResults = assessment.Candidates;
 
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
@@ -274,6 +285,12 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     title = s.SearchResult.Title,
                     asin = s.SearchResult.Asin,
                     totalScore = s.TotalScore,
+                    identityStatus = s.Identity.Status.ToString(),
+                    identityReason = s.Identity.Reason,
+                    compatibilityReasons = s.Compatibility.Reasons,
+                    languageEvidence = s.Compatibility.Languages,
+                    editionEvidence = s.Compatibility.Editions,
+                    policyVersion = AutomaticSearchAssessment.PolicyVersion,
                     isRejected = s.IsRejected,
                     rejectionReasons = s.RejectionReasons,
                     source = s.SearchResult.Source,
@@ -286,7 +303,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 var hub2 = scope2.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
                 await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (IsContainableBroadcastFailure(ex, stoppingToken))
             {
                 _logger.LogDebug(ex, "Failed to broadcast scored search results for audiobook {Id}", audiobook.Id);
             }
@@ -303,10 +320,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 }
             }
 
-            var topResult = scoredResults
-                .Where(s => !s.IsRejected) // Only non-rejected results
-                .OrderByDescending(s => s.TotalScore)
-                .FirstOrDefault(); // Pick only the top scoring result
+            var topResult = automaticScoring.SelectBest(assessment);
 
             if (topResult == null)
             {
@@ -352,11 +366,22 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     return 0;
                 }
 
+                if (!await automaticScoring.IsCurrentAsync(assessment, audiobook.Id, stoppingToken)) return 0;
                 await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
                 downloadsQueued++;
 
                 _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
                     audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // The host is not stopping, so this is a local cancellation or timeout
+                // (HttpClient timeouts surface as TaskCanceledException). Name the submission step here,
+                // then rethrow: the per-book handler skips the LastSearchTime write, so the book
+                // stays eligible for the next cycle instead of waiting out the cooldown.
+                _logger.LogWarning("Canceled/timed out queuing download for audiobook '{Title}': {ResultTitle}. The book stays eligible for the next cycle",
+                    audiobook.Title, topResult.SearchResult.Title);
+                throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -366,6 +391,14 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             return downloadsQueued;
         }
+
+        // A debug broadcast must never decide whether a grab happens. Contain every failure,
+        // including an OperationCanceledException that is not the host stopping (a timeout
+        // surfaces as TaskCanceledException). A real shutdown still propagates.
+        private static bool IsContainableBroadcastFailure(Exception ex, CancellationToken stoppingToken) =>
+            ex is not OutOfMemoryException
+            && ex is not StackOverflowException
+            && !(ex is OperationCanceledException && stoppingToken.IsCancellationRequested);
 
     }
 }

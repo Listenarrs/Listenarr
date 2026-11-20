@@ -102,5 +102,15 @@ namespace Listenarr.Tests.Common
                 "Torrents",
                 filename);
         }
+
+        public static string GetAudioDataPath(string filename)
+        {
+            return Path.Join(
+                FindRepositoryRoot(),
+                "tests",
+                "Data",
+                "Audio",
+                filename);
+        }
     }
 }

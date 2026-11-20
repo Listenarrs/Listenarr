@@ -30,113 +30,33 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
             new(NullLogger.Instance);
 
         [Fact]
-        public void BuildTitleFallbackSearchQuery_DropsTheAuthor_KeepsTitleAndSeries()
+        public void BuildTitleFallbackSearchQuery_DropsTheAuthorAndTheSeries_KeepsTheTitle()
         {
             var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
-                .WithSeries("Standalone")
+                .WithTitle("A Princess of Mars")
+                .WithAuthor("Edgar Rice Burroughs")
+                .WithSeries("Barsoom")
                 .Build();
 
             var full = _classifier.BuildSearchQuery(book);
             var fallback = _classifier.BuildTitleFallbackSearchQuery(book);
 
-            // The full query carries the author; the fallback drops it but keeps title + series.
-            Assert.Contains("Andy Weir", full);
-            Assert.DoesNotContain("Andy Weir", fallback);
-            Assert.Contains("Artemis", fallback);
-            Assert.Contains("Standalone", fallback);
+            Assert.Contains("Edgar Rice Burroughs", full);
+            Assert.Equal("A Princess of Mars", fallback);
         }
 
         [Fact]
-        public void ConstrainFallbackResultsToTitle_KeepsExactTitleWithMatchingAuthor()
+        public void BuildTitleFallbackSearchQuery_UsesTheSharedQueryTitle()
         {
             var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
+                .WithTitle("A Princess of Mars (Unabridged)")
+                .WithAuthor("Edgar Rice Burroughs")
                 .Build();
-            var results = new List<SearchResult>
-            {
-                new SearchResult { Title = "Andy Weir - Artemis - 2017 - M4B" }, // this book
-                new SearchResult { Title = "Andy Weir - The Martian - 2014" },   // a different book
-            };
 
-            var kept = _classifier.ConstrainFallbackResultsToTitle(results, book);
+            var fallback = _classifier.BuildTitleFallbackSearchQuery(book);
 
-            Assert.Single(kept);
-            Assert.Equal("Andy Weir - Artemis - 2017 - M4B", kept[0].Title);
-        }
-
-        [Fact]
-        public void ConstrainFallbackResultsToTitle_RejectsSameWordDifferentTitle()
-        {
-            // "Artemis Fowl" must never be grabbed for "Artemis".
-            var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
-                .Build();
-            var results = new List<SearchResult>
-            {
-                new SearchResult { Title = "Eoin Colfer - Artemis Fowl - 2009" },
-            };
-
-            Assert.Empty(_classifier.ConstrainFallbackResultsToTitle(results, book));
-        }
-
-        [Fact]
-        public void ConstrainFallbackResultsToTitle_RejectsSameTitleDifferentAuthor()
-        {
-            // A different author's book of the same name must not be grabbed.
-            var book = new AudiobookBuilder()
-                .WithTitle("Revival")
-                .WithAuthor("Stephen King")
-                .Build();
-            var results = new List<SearchResult>
-            {
-                new SearchResult { Title = "Chris Weitz - Revival" },
-            };
-
-            Assert.Empty(_classifier.ConstrainFallbackResultsToTitle(results, book));
-        }
-
-        [Fact]
-        public void ConstrainFallbackResultsToTitle_SkipsUncorroboratedAuthorlessResult()
-        {
-            // Exact title but no author / artist / ASIN evidence — skipped rather than grabbed.
-            var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
-                .Build();
-            var results = new List<SearchResult>
-            {
-                new SearchResult { Title = "Artemis" },
-            };
-
-            Assert.Empty(_classifier.ConstrainFallbackResultsToTitle(results, book));
-        }
-
-        [Fact]
-        public void ConstrainFallbackResultsToTitle_KeepsWhenArtistFieldCorroborates()
-        {
-            var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
-                .Build();
-            var results = new List<SearchResult>
-            {
-                new SearchResult { Title = "Artemis", Artist = "Andy Weir" },
-            };
-
-            Assert.Single(_classifier.ConstrainFallbackResultsToTitle(results, book));
-        }
-
-        [Fact]
-        public void ConstrainFallbackResultsToTitle_EmptyInput_ReturnsEmpty()
-        {
-            var book = new AudiobookBuilder().WithTitle("Artemis").Build();
-
-            Assert.Empty(_classifier.ConstrainFallbackResultsToTitle(
-                new List<SearchResult>(), book));
+            Assert.Equal(AudiobookSearchQueryBuilder.BuildQueryTitle(book.Title), fallback);
+            Assert.Equal("A Princess of Mars", fallback);
         }
     }
 }

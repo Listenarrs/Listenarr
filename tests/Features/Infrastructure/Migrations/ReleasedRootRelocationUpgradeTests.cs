@@ -1,7 +1,7 @@
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -43,11 +43,12 @@ public sealed class ReleasedRootRelocationUpgradeTests : BaseTests
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");
-                legacy.RootFolders.Add(scenario.Root);
-                legacy.Audiobooks.Add(scenario.Audiobook);
-                legacy.LibraryDirectoryOwnerships.Add(scenario.Ownership);
-                legacy.RootFolderRelocations.Add(relocation);
-                await legacy.SaveChangesAsync();
+                await using var legacySeed = new Released134SeedDbContext(options);
+                legacySeed.RootFolders.Add(scenario.Root);
+                legacySeed.Audiobooks.Add(scenario.Audiobook);
+                legacySeed.LibraryDirectoryOwnerships.Add(scenario.Ownership);
+                legacySeed.RootFolderRelocations.Add(relocation);
+                await legacySeed.SaveChangesAsync();
                 await migrator.MigrateAsync();
             }
             using var mutationCoordinator = new FilesystemMutationCoordinator();

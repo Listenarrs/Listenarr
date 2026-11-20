@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.DownloadClients;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem;

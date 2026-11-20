@@ -22,7 +22,7 @@ using System.Text;
 
 using Listenarr.Application.Mapping;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks.Api;
+using Listenarr.Tests.Mocks.DownloadClients;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Xml.Linq;
 using Listenarr.Domain.Downloads.Exceptions;
@@ -444,9 +444,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             Assert.Equal(DownloadStatus.Completed, downloads[PerformanceBeyondOneHundredIndex].Status);
             Assert.Equal(DownloadStatus.Downloading, downloads[0].Status);
             Assert.Equal(DownloadStatus.Queued, downloads[996].Status);
+            // 1 s, or more when coverage collection instrumented the adapter (CI).
+            var limitMilliseconds = CoverageInstrumentation.TimeLimitMilliseconds(typeof(NzbgetAdapter), 1_000);
+            _output.WriteLine($"limitMs={limitMilliseconds.ToString(CultureInfo.InvariantCulture)}");
             Assert.True(
-                elapsedMilliseconds <= 1_000,
-                $"elapsedMs={elapsedMilliseconds.ToString("F3", CultureInfo.InvariantCulture)}");
+                elapsedMilliseconds <= limitMilliseconds,
+                $"elapsedMs={elapsedMilliseconds.ToString("F3", CultureInfo.InvariantCulture)}, limit {limitMilliseconds} ms");
             Assert.True(
                 allocatedBytes <= 67_108_864,
                 $"allocatedBytes={allocatedBytes}");

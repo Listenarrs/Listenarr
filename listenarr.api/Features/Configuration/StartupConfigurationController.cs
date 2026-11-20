@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.Json;
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -81,18 +82,40 @@ namespace Listenarr.Api.Features.Configuration
         }
 
         /// <summary>
-        /// Save the Listenarr startup configuration (API key, authentication, etc).
+        /// Update the Listenarr startup configuration (API key, authentication, etc).
         /// </summary>
-        /// <param name="config">StartupConfig object to save</param>
+        /// <remarks>
+        /// The body is a partial StartupConfig: properties it carries are written, properties
+        /// it omits keep the value already in config.json. Send a property as null or as an
+        /// empty string to clear it.
+        /// </remarks>
+        /// <param name="patch">Some subset of the StartupConfig properties.</param>
         /// <returns>The saved StartupConfig</returns>
         [Tags("Settings")]
         [HttpPost("startupconfig")]
         [ProducesResponseType(typeof(StartupConfig), 200)]
+        [ProducesResponseType(400)]
         [ProducesResponseType(401)]
         [ProducesResponseType(403)]
         [ProducesResponseType(500)]
-        public async Task<ActionResult<StartupConfig>> SaveStartupConfig([FromBody] StartupConfig config)
+        public async Task<ActionResult<StartupConfig>> SaveStartupConfig([FromBody] JsonElement patch)
         {
+            StartupConfig config;
+            try
+            {
+                config = StartupConfigPatchReader.ApplyTo(await _configurationService.GetStartupConfigAsync(), patch);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Rejected a startup configuration body that was not a JSON object.");
+                return BadRequest("Startup configuration body must be a JSON object.");
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Rejected a startup configuration body with a property of the wrong type.");
+                return BadRequest("Startup configuration body has a property of the wrong type.");
+            }
+
             config.ApiVersion = NormalizeStartupApiVersion(config.ApiVersion);
             await _configurationService.SaveStartupConfigAsync(config);
             var savedConfig = await _configurationService.GetStartupConfigAsync();

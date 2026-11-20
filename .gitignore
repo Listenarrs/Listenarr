@@ -124,9 +124,10 @@ lerna-debug.log*
 # Testing
 coverage/
 *.coverage
+TestResults/
+coverage-input/
+coverage-report/
 .nyc_output/
-/cypress/videos/
-/cypress/screenshots/
 test-results/
 playwright-report/
 .playwright-cli/
@@ -261,6 +262,8 @@ migrate-to-*.sh
 *.opus
 *.wma
 /listenarr.api/config/ffmpeg
+# Generated silence used as a tag round-trip fixture
+!/tests/Data/Audio/the-time-machine-silence.m4b
 
 # CI / publish outputs
 listenarr.api/publish/

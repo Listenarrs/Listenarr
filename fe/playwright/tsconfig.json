@@ -1,0 +1,13 @@
+{
+  "extends": "@tsconfig/node26/tsconfig.json",
+  "include": ["./**/*.ts", "../playwright.*.config.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "tsBuildInfoFile": "../node_modules/.tmp/tsconfig.playwright.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // The frontend integration specs run in the browser and read `window`, `sessionStorage`, ...
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  }
+}

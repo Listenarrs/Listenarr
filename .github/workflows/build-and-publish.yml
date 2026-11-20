@@ -139,6 +139,31 @@ jobs:
         if: inputs.include_osx
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r osx-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/osx-x64
 
+      # ffprobe comes from the Openur.FFprobeStatic package. Restore leaves it executable by its
+      # owner only, and the user who unzips a release is not always the user the service runs as,
+      # so set the mode for everyone before zipping.
+      - name: Check the packaged ffprobe in each portable build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ${{ env.API_OUTPUT }}/win-x64/ffprobe.exe
+          test -f ${{ env.API_OUTPUT }}/win-x64/licenses/ffprobe/NOTICE
+          unix_rids="linux-x64"
+          if [ "${{ inputs.include_osx }}" = "true" ]; then
+            unix_rids="$unix_rids osx-x64"
+          fi
+          for rid in $unix_rids; do
+            test -f "${{ env.API_OUTPUT }}/${rid}/ffprobe"
+            test -f "${{ env.API_OUTPUT }}/${rid}/licenses/ffprobe/NOTICE"
+            chmod 755 "${{ env.API_OUTPUT }}/${rid}/ffprobe"
+          done
+          version_line="$(${{ env.API_OUTPUT }}/linux-x64/ffprobe -version | sed -n 1p)"
+          echo "$version_line"
+          case "$version_line" in
+            "ffprobe version "*) ;;
+            *) echo "::error::The packaged linux-x64 ffprobe did not report a version." >&2; exit 1 ;;
+          esac
+
       # ── Zip and upload artifacts ─────────────────────────────────────────────
 
       - name: Zip Linux artifact
@@ -159,6 +184,21 @@ jobs:
           mkdir -p artifacts
           cd listenarr.api/publish/osx-x64
           zip -r ../../../artifacts/listenarr-${{ inputs.version }}-${{ inputs.short_sha }}-osx-x64.zip .
+
+      - name: Check ffprobe in the zipped artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          zipinfo artifacts/*-win-x64.zip ffprobe.exe
+          for artifact in artifacts/*-linux-x64.zip artifacts/*-osx-x64.zip; do
+            [ -e "$artifact" ] || continue
+            mode="$(zipinfo "$artifact" ffprobe | awk '{print $1}')"
+            echo "$artifact: ffprobe $mode"
+            if [ "$mode" != "-rwxr-xr-x" ]; then
+              echo "::error::$artifact carries ffprobe as $mode, expected -rwxr-xr-x." >&2
+              exit 1
+            fi
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -268,6 +308,12 @@ jobs:
           rm -rf "${{ env.DOCKER_OUTPUT }}"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/amd64"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-arm64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/arm64"
+          # Set ffprobe's mode before the image build: a chmod inside the image would copy the
+          # binary into a second layer.
+          for arch in amd64 arm64; do
+            test -f "${{ env.DOCKER_OUTPUT }}/${arch}/licenses/ffprobe/NOTICE"
+            chmod 755 "${{ env.DOCKER_OUTPUT }}/${arch}/ffprobe"
+          done
 
       - name: Show publish contents (sanity check)
         shell: bash
@@ -411,6 +457,40 @@ jobs:
             echo "$atcr_tags"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      # Build each platform locally first (the push steps below reuse the build cache) and run the
+      # packaged ffprobe as the user the app runs as, so an image whose ffprobe cannot start for
+      # that user is never pushed. arm64 runs under the QEMU set up above.
+      - name: Build runtime image for the ffprobe check (amd64)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: listenarr.api/Dockerfile.runtime
+          platforms: linux/amd64
+          load: true
+          tags: listenarr-ffprobe-check:amd64
+
+      - name: Build runtime image for the ffprobe check (arm64)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: listenarr.api/Dockerfile.runtime
+          platforms: linux/arm64
+          load: true
+          tags: listenarr-ffprobe-check:arm64
+
+      - name: Check ffprobe runs as the app user in each runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            version_line="$(docker run --rm --platform "linux/${arch}" --user listenarr --entrypoint /app/ffprobe "listenarr-ffprobe-check:${arch}" -version | sed -n 1p)"
+            echo "${arch}: $version_line"
+            case "$version_line" in
+              "ffprobe version "*) ;;
+              *) echo "::error::ffprobe did not report a version as the app user in the ${arch} image." >&2; exit 1 ;;
+            esac
+          done
 
       - name: Build and push Docker image to GHCR
         uses: docker/build-push-action@v4

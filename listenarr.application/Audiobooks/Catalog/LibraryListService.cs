@@ -71,6 +71,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
             var membershipsByAudiobookId = await _audiobookRepository.GetAllSeriesMembershipsGroupedByAudiobookIdAsync();
             var asinRegions = await _audiobookRepository.GetAsinRegionsAsync();
+            var asinsByAudiobookId = await _audiobookRepository.GetAsinIdentifiersGroupedByAudiobookIdAsync();
             var filesByAudiobookId = fileSummaryRows
                 .GroupBy(f => f.AudiobookId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<AudiobookFormatSummary>)g.ToList());
@@ -112,6 +113,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Narrators = a.Narrators?.ToArray(),
                     PublishYear = a.PublishYear,
                     PublishedDate = a.PublishedDate,
+                    Added = a.Added,
                     Series = a.Series,
                     SeriesNumber = a.SeriesNumber,
                     SeriesMemberships = membershipsByAudiobookId.TryGetValue(a.Id, out var memberships) && memberships.Count > 0
@@ -130,6 +132,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     AsinRegion = a.Asin != null && asinRegions.TryGetValue((a.Id, a.Asin.Trim().ToUpperInvariant()), out var asinRegion)
                         ? asinRegion
                         : null,
+                    BrokenReasons = FindBrokenReasons(a, asinsByAudiobookId),
                     OpenLibraryId = a.OpenLibraryId,
                     Publisher = a.Publisher,
                     Language = a.Language,
@@ -153,6 +156,20 @@ namespace Listenarr.Application.Audiobooks.Catalog
                          files)
                 };
             }).ToList();
+        }
+
+        // The book's main ASIN identifier (the repository lists it first) is what Audible is asked
+        // with; a book without identifiers falls back to its ASIN field
+        private static string[] FindBrokenReasons(
+            Audiobook audiobook,
+            Dictionary<int, List<AudiobookExternalIdentifier>> asinsByAudiobookId)
+        {
+            var main = asinsByAudiobookId.TryGetValue(audiobook.Id, out var asins) ? asins[0] : null;
+            return BrokenBookRules.FindReasons(
+                audiobook.Title,
+                audiobook.Authors,
+                main?.ValueNormalized ?? audiobook.Asin,
+                main?.Region);
         }
     }
 }

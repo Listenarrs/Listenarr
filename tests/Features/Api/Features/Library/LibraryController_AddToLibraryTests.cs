@@ -121,6 +121,20 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public void AddToLibrary_UsesOneControllerAndWorkflowPerRequestScope()
+        {
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
+
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>());
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>());
+        }
+
+        [Fact]
         public async Task AddToLibrary_ConcurrentIdentifierlessSameDestination_CommitsExactlyOnce()
         {
             var destination = Path.Join(tempRoot, "Identifierless", "Book");
@@ -133,11 +147,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 DestinationPath = destination,
                 Monitored = true
             };
-            var controller = _provider.GetRequiredService<LibraryController>();
+            // One scope per request, as in the app: two requests never share a DbContext, which isn't
+            // thread-safe; the same in-memory database stays behind both.
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
 
             var results = await Task.WhenAll(
-                controller.AddToLibrary(CreateRequest()),
-                controller.AddToLibrary(CreateRequest()));
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()));
 
             Assert.Single(results, result => result is OkObjectResult);
             Assert.Single(results, result => result is ConflictObjectResult);
@@ -627,6 +644,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await ReinitializeAsync(builder =>
                 builder.WithSingleton<INotificationService>(notifications.Object));
 
+            var beforeAdd = DateTime.UtcNow;
             var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
                 new LibraryController.AddToLibraryRequest
                 {
@@ -640,6 +658,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.IsType<OkObjectResult>(result);
             var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            var added = Assert.IsType<DateTime>(audiobook.Added);
+            Assert.Equal(DateTimeKind.Utc, added.Kind);
+            Assert.InRange(added, beforeAdd, DateTime.UtcNow);
             var history = Assert.Single(await _historyRepository.GetByAudiobookIdAsync(audiobook.Id));
             Assert.Equal("Added", history.EventType);
             Assert.Equal(audiobook.Id, history.AudiobookId);

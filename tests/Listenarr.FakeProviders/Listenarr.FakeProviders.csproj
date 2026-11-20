@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- One folder per provider: Fixtures/Audible/B008DFUGCQ.json is "Listenarr.FakeProviders.Fixtures/Audible/B008DFUGCQ.json". -->
+    <EmbeddedResource Include="Fixtures\**\*" Exclude="Fixtures\**\*.md"
+                      LogicalName="Listenarr.FakeProviders.Fixtures/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

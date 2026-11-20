@@ -373,7 +373,11 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         try
                         {
                             var lang = TorznabNewznabValueParser.ParseLanguageFromText(result.Title + " " + description);
-                            if (!string.IsNullOrEmpty(lang)) result.Language = lang;
+                            if (string.IsNullOrWhiteSpace(result.Language) && !string.IsNullOrEmpty(lang))
+                            {
+                                result.Language = lang;
+                                result.LanguageOrigin = IdentityEvidenceOrigin.ReleaseNameDerived;
+                            }
                         }
                         catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
                         { /* Non-critical */

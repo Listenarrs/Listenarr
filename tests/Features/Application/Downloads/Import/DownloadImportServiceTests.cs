@@ -20,7 +20,7 @@ using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Import

@@ -85,8 +85,12 @@ internal sealed partial class PinnedDirectoryCreation
                 "The file changed while it was being opened beneath its pinned parent.");
         }
 
+        // allowMetadataWrite matters only on Windows, where the pinned handle has to carry the
+        // write access itself. Unix has no share modes, so a metadata write there reopens the
+        // file beneath the pinned parent and verifies it against this handle instead.
         internal PinnedFileEntry OpenExistingFileForStableRead(
-            string fileName)
+            string fileName,
+            bool allowMetadataWrite = false)
         {
             ThrowIfDisposed();
             ValidateLeafName(fileName);
@@ -97,7 +101,8 @@ internal sealed partial class PinnedDirectoryCreation
                 ? OpenRelativeFileStableReadWindows(
                     _handle,
                     fileName,
-                    fullPath)
+                    fullPath,
+                    allowMetadataWrite)
                 : OpenRelativeFileUnix(_handle, fileName, fullPath);
             var entry = new PinnedFileEntry(
                 DuplicateSafeHandle(_handle),

@@ -69,6 +69,12 @@
           "Polly.Extensions.Http": "3.0.0"
         }
       },
+      "Openur.FFprobeStatic": {
+        "type": "Direct",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
+      },
       "Polly": {
         "type": "Direct",
         "requested": "[8.6.6, )",

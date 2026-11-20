@@ -87,7 +87,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
         {
             Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(client, given));
 
-            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+            // Created through the service: the translate above cached an empty set for this client,
+            // and only the service's own writers clear it.
+            await remotePathMappingService.CreateAsync(new RemotePathMappingBuilder()
                 .WithDownloadClientConfiguration(client)
                 .WithRemotePath(remotePath)
                 .WithLocalPath(localPath)

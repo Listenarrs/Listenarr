@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
@@ -322,8 +323,9 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
             var svc = _provider.GetRequiredService<IConfigurationService>();
             var startup = new StartupConfig { AuthenticationRequired = "true" };
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            var ex = await Assert.ThrowsAsync<ApplicationValidationException>(
                 () => svc.SaveStartupConfigAsync(startup));
+            Assert.Equal("admin_user_required", ex.Code);
             Assert.Contains("Cannot enable the login screen", ex.Message);
 
             emptyAdminUserService.Verify(u => u.GetAdminUsersAsync(), Times.Once);

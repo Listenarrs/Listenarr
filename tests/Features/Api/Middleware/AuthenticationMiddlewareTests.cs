@@ -18,7 +18,7 @@
 using System.Net;
 using System.Text;
 using Asp.Versioning.ApiExplorer;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Listenarr.Tests.Features.Api.Middleware

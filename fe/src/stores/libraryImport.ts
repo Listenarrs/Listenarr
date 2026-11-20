@@ -21,7 +21,13 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
-import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
+import {
+  isEmptyRecord,
+  recordOfResponse,
+  searchCandidates,
+  type SearchFields,
+} from '@/services/audiobookSearch'
+import { normalizeSearchRegion, regionLabel } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import { buildSeriesFields } from '@/utils/seriesUtils'
 import type { SeriesEntry } from '@/utils/seriesUtils'
@@ -74,20 +80,6 @@ function pickBestMatch(results: SearchResult[], detectedAuthor?: string): Search
 // The Audible catalogue has no usable record for the match's ASIN in its region: the book must not
 // be imported without it, the user picks the match (and its region) again
 class MatchRecordNotFoundError extends Error {}
-
-function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
-
-type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
-
-// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
-// stub: an ASIN but no title) and tag each one with the region it came from.
-function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
-  return results
-    .filter((result) => !(result.asin && !result.title))
-    .map((result) => ({ ...result, region: result.region || region }))
-}
 
 function normalizeGenres(genres: unknown): string[] | undefined {
   if (!Array.isArray(genres)) return genres as string[] | undefined
@@ -424,15 +416,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // automatic switch to another catalogue. Results are tagged with their region, so the import
   // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
   async function searchInRegion(
-    params: AdvancedSearchParams,
+    params: SearchFields & { cap: number },
     region?: string,
-    signal?: AbortSignal,
   ): Promise<SearchResult[]> {
-    const searchRegion = region || (await _configuredRegion())
-    const results = signal
-      ? await apiService.advancedSearch({ ...params, region: searchRegion }, signal)
-      : await apiService.advancedSearch({ ...params, region: searchRegion })
-    return usableInRegion(results, searchRegion)
+    return searchCandidates(params, region || (await _configuredRegion()))
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
@@ -506,34 +493,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     if (run === currentMatchingRun) isProcessing.value = false
   }
 
-  // ─── Per-row manual search ────────────────────────────────────────────────
-
-  // Manual search box detection, not a series-identifier guard: a real Audible product ASIN
-  // is not always B0-prefixed (ISBN-shaped ones, ten digits or nine and an X, are valid
-  // ten-character ASINs on the catalogue too), so this stays the loose ten-character check
-  // rather than looksLikeAsin, which is deliberately narrower for series-membership
-  // identifiers.
-  const MANUAL_SEARCH_ASIN_PATTERN = /^[A-Z0-9]{10}$/i
-
-  async function searchItem(id: string, query: string, region?: string) {
-    const item = items.value[id]
-    if (!item) return
-
-    items.value[id] = { ...item, isSearching: true }
-    try {
-      const isAsin = MANUAL_SEARCH_ASIN_PATTERN.test(query.trim())
-      const results = await searchInRegion(
-        isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
-        region,
-      )
-      items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
-      return results
-    } catch {
-      items.value[id] = { ...items.value[id], isSearching: false }
-      return []
-    }
-  }
-
   // ─── Match management ─────────────────────────────────────────────────────
 
   function selectMatch(id: string, match: SearchResult) {
@@ -605,10 +564,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       if ((e as { status?: number })?.status === 404) throw notFound
       throw new Error(`Audible metadata lookup failed: ${(e as Error)?.message ?? 'unknown error'}`)
     }
-    const raw: AudiblePayload =
-      (resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)) ?? {}
-    // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
-    if (raw.asin && !raw.title) throw notFound
+    const raw = recordOfResponse<AudiblePayload>(resp)
+    if (isEmptyRecord(raw)) throw notFound
     const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
     const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
     // The product record is the better source of series data than the search match, and
@@ -763,7 +720,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     startProcessing,
     stopProcessing,
     processNext,
-    searchItem,
     searchInRegion,
     configuredRegion: _configuredRegion,
     selectMatch,

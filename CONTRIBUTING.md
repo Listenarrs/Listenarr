@@ -143,13 +143,25 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
   - Add unit tests for ValueConverters and ValueComparers to ensure JSON behavior is stable (null handling, empty JSON).
   - Follow `tests/README.md`; backend tests should default to `BaseTests`, repository helpers, DI-resolved services/controllers, and builders such as `AudiobookBuilder` and `ApplicationSettingsBuilder`. Hand-wire setup only for test-specific overrides.
   - Use `WebApplicationFactory<Program>` for integration tests and apply `WithWebHostBuilder` when you need to override services.
-  - Use the test-host patching approach to keep tests hermetic (no external network or process calls).
+  - Use the test-host patching approach to keep tests hermetic (no external network or process calls). Metadata providers (Audible, Audnexus, OpenLibrary) are answered by `tests/Listenarr.FakeProviders` from per-provider fixtures (add a missing one as `tests/Listenarr.FakeProviders/Fixtures/README.md` explains); download clients and trackers use the mocks in `tests/Mocks/{Category}/`.
 
 **Testing:**
 - Run backend tests: `dotnet test`
 - Run frontend tests: `cd fe && npm run test:unit`
 - Run frontend type checks: `cd fe && npm run type-check`
+- Test coverage is off by default and never gated: see "Test Coverage" in `fe/README.md` to collect it locally, or run the `Run Tests` workflow manually with the `coverage` input to get a merged report of every test job
 - Ensure all tests pass before submitting PR
+
+**Running CI on your fork:**
+
+`npm run ci:fork -- [options]` (`scripts/ci/run-tests.mjs`) runs the `Run Tests` workflow on your fork of Listenarr, without opening a PR or committing: it pushes a snapshot of your working tree (uncommitted and untracked files included) to a throwaway `ci/wip-<branch>` branch of your fork, runs the workflow there, waits, prints one line per job and the logs of the failed steps, then deletes the branch. It needs git and the [GitHub CLI](https://cli.github.com/) signed in (`gh auth login`), and works the same on Linux, macOS and Windows.
+
+- **Fork:** the GitHub remote of your checkout owned by the `gh` user, or `--fork <owner/repo>`. A fork has Actions disabled until you enable them on its Actions tab (or push a `feature/*` branch, which triggers the workflow once).
+- **Where the Linux jobs run:** by default on an online self-hosted runner registered on your fork (Settings > Actions > Runners), the first one in the order GitHub lists them; `--runner <name or label>` picks one; `--runner github` uses GitHub-hosted runners. `backend-tests-windows` always runs on GitHub's Windows runner. A self-hosted runner needs Docker (privileged), `sudo`, PowerShell, Node.js and a workspace and `/tmp` on a regular filesystem such as ext4 (not overlayfs or ZFS).
+- **Runner order:** with several runners, set which one is tried first, by runner name; the next online one is used when the first is offline. For one run: `--prefer my-pc,my-server`. For every run: `LISTENARR_CI_RUNNERS=my-pc,my-server` in your environment (e.g. `export LISTENARR_CI_RUNNERS=my-pc,my-server` in `~/.bashrc`, or `setx LISTENARR_CI_RUNNERS my-pc,my-server` on Windows); `--prefer` wins over it. Runners not listed are not used.
+- **Only some jobs:** `--jobs unit-tests,e2e-tests`. Other workflow inputs: `--input coverage=true`.
+- **A pushed branch:** `--ref <branch>` runs the branch as it is on your fork, without a snapshot, so the run stays in the branch's Actions history.
+- **Other options:** `--tag <t>` (several snapshots at once), `--keep-branch`, `--no-wait` (print the run URL and return); `--help` lists them all.
 
 ### Compatibility and migration development policy
 
