@@ -226,7 +226,8 @@ public sealed partial class FileRegistrationRecoveryService(
                         ? FileRegistrationRecoveryDisposition.WaitingForOwnerRetry
                         : FileRegistrationRecoveryDisposition.AutomaticRecovery,
             CanRetry: recoverable,
-            CanAbandon: needsAttention,
+            CanAbandon: false,
+            CanResolve: needsAttention,
             journal.State == FileMutationJournalState.OperatorResolved
                 ? "The operator released this recovery block. Import success and content completeness were not established; all files were preserved."
                 : sourceRetained

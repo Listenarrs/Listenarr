@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
+[Trait("Area", "Library")]
+[Trait("Name", "FileRegistrationOperatorReviewTests")]
+[Trait("Category", "Infrastructure")]
 public sealed class FileRegistrationOperatorReviewTests : BaseTests
 {
     private sealed class Factory(DbContextOptions<ListenArrDbContext> options) : IDbContextFactory<ListenArrDbContext>
@@ -70,6 +73,22 @@ public sealed class FileRegistrationOperatorReviewTests : BaseTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.AdvanceAsync(id,
             FileMutationJournalState.SourceDeletionAuthorized, null, 865, null, default));
         Assert.Empty(await db.AudiobookFiles.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RecoveryStatus_OffersResolveNotAbandon_UntilOperatorReleasesRow()
+    {
+        var (_, service, id, _, _) = await SeedAsync();
+        var pending = await service.RetryAsync(id);
+        Assert.Equal(FileRegistrationRecoveryDisposition.RequiresOperatorAttention, pending.Disposition);
+        Assert.True(pending.CanResolve);
+        Assert.False(pending.CanAbandon);
+        var review = await service.InspectAsync(id);
+        await service.ResolveAsync(id, review.ReviewToken, "reviewed", true, "tester");
+        var released = await service.RetryAsync(id);
+        Assert.Equal(FileMutationJournalState.OperatorResolved, released.JournalState);
+        Assert.False(released.CanResolve);
+        Assert.False(released.CanAbandon);
     }
 
     [Fact]

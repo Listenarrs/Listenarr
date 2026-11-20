@@ -60,6 +60,7 @@ public sealed record FileRegistrationRecoveryStatus(
     FileRegistrationRecoveryDisposition Disposition,
     bool CanRetry,
     bool CanAbandon,
+    bool CanResolve,
     string PublicReason);
 
 public sealed record RegistrationFileObservation(string Status, long? Length, string? Sha256,
