@@ -22,21 +22,28 @@ namespace Listenarr.Application.Audiobooks.Renaming;
 
 public partial class RenameService
 {
+    private const string CompanionOperationScope = "organize-companion";
+
     /// <summary>
     /// Carries the non-audio companions (cover.jpg, metadata.json, ...) left in the previous
-    /// folder after a folder-changing organize, mirroring what manual import already does.
+    /// folder after a folder-changing organize, published the way import publishes companions:
+    /// a live source proof, an operation id derived from it, a publication plan, a verified
+    /// companion publication, and source retirement only once the destination is proven.
     /// Runs only when every tracked file left the previous folder and that folder held this
-    /// book alone (no other audio, not a library root, not a parent of the new folder), honours the import
-    /// blacklist, never overwrites, and removes the previous folder once nothing but
-    /// blacklisted files is left in it.
+    /// book alone (no other audio, not a library root, not a parent of the new folder). Hidden
+    /// and blacklisted files stay, an existing destination is never overwritten, and nothing is
+    /// deleted: the previous folder carries no ownership proof, so it is left in place.
+    /// A companion that cannot be published stays where it is; the organize result is unchanged.
     /// </summary>
     private async Task MoveCompanionFilesAfterRenameAsync(
+        Audiobook audiobook,
         string? previousFolder,
         string? newFolder,
         ApplicationSettings settings,
         IReadOnlyCollection<string> allowedRoots,
         FileSystemPathSemantics semantics,
-        RenameResult result)
+        RenameResult result,
+        CancellationToken cancellationToken)
     {
         if (result.RenamedFiles.Any(file => !file.Success || file.SourceRetained))
         {
@@ -82,6 +89,7 @@ public partial class RenameService
             return;
         }
 
+        var compatibilityBatchId = Guid.NewGuid();
         foreach (var companion in companions)
         {
             var destination = Path.Combine(next, Path.GetFileName(companion));
@@ -102,7 +110,13 @@ public partial class RenameService
 
             try
             {
-                if (!await _fileMover.PerformActionOn(FileAction.Move, source, target, Guid.NewGuid()))
+                if (!await PublishCompanionAsync(
+                        audiobook.Id,
+                        source,
+                        target,
+                        semantics,
+                        compatibilityBatchId,
+                        cancellationToken))
                 {
                     _logger.LogWarning("Companion file {FilePath} was not moved to {Destination}", source, target);
                 }
@@ -112,36 +126,80 @@ public partial class RenameService
                 _logger.LogWarning(ex, "Failed to move companion file {FilePath} to {Destination}", source, target);
             }
         }
+    }
 
-        try
+    private async Task<bool> PublishCompanionAsync(
+        int audiobookId,
+        string source,
+        string destination,
+        FileSystemPathSemantics semantics,
+        Guid compatibilityBatchId,
+        CancellationToken cancellationToken)
+    {
+        var capability = await _filePublicationSourceCapability.CheckAsync(source, cancellationToken);
+        if (!capability.IsSupported || !capability.SourceProof.HasValue)
         {
-            if (!_fileSystem.DirectoryExists(previous) || _fileSystem.EnumerateDirectories(previous).Any())
-            {
-                return;
-            }
-
-            // Leftovers the user blacklisted are files they do not want in the library, so they do not keep
-            // the folder alive. Anything else (audio, a companion that could not move, hidden or unknown
-            // files) keeps the folder and its content untouched.
-            var leftovers = _fileSystem.EnumerateFiles(previous, "*", SearchOption.TopDirectoryOnly).ToList();
-            if (leftovers.Any(file => FileUtils.IsAudioFile(file)
-                    || !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions)
-                    || !_fileSystem.TryValidateMutationTarget(file, allowedRoots, out _, out _)))
-            {
-                return;
-            }
-
-            foreach (var leftover in leftovers)
-            {
-                _fileSystem.DeleteFile(leftover);
-                _logger.LogInformation("Removed blacklisted leftover {FilePath} from the previous folder after organize", leftover);
-            }
-
-            _fileSystem.DeleteDirectory(previous, recursive: false);
+            _logger.LogWarning(
+                "Keeping companion file {FilePath} in place: its source cannot be verified ({Reason})",
+                source,
+                capability.Reason);
+            return false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+
+        var sourceProof = capability.SourceProof.Value;
+        var operationId = FileMoveOperationIdentity.CreateForPaths(
+            CompanionOperationScope,
+            audiobookId,
+            FileAction.Move,
+            source,
+            semantics,
+            sourceProof,
+            destination,
+            semantics);
+        var plan = _filePublicationCapabilityResolver == null
+            ? FilePublicationPlan.Durable(FileAction.Move)
+            : await _filePublicationCapabilityResolver.ResolveAsync(
+                FileAction.Move,
+                source,
+                destination,
+                sourceProof,
+                cancellationToken,
+                compatibilityBatchId,
+                CompatibilityCleanupOwner.Listenarr);
+        if (!plan.IsAllowed)
         {
-            _logger.LogDebug(ex, "Could not remove previous folder {Folder} after organize", previous);
+            _logger.LogWarning(
+                "Keeping companion file {FilePath} in place: {Reason}",
+                source,
+                plan.Message);
+            return false;
         }
+
+        // The destination is the book's new folder, which the verified audio move has already
+        // created, so no hierarchy is created here.
+        var preparation = await _fileMover.PrepareActionForRegistrationDetailedAsync(
+            plan,
+            source,
+            destination,
+            operationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            sourceProof,
+            isCompanionFile: true,
+            companionAudiobookId: audiobookId);
+        using var lease = preparation.RegistrationLease;
+        if (lease == null || !lease.PrepareCleanupRecovery(audiobookId))
+        {
+            return false;
+        }
+
+        if (lease.CompletePublication() == RegistrationPublicationCompletion.CommittedCleanupPending)
+        {
+            _logger.LogWarning(
+                "Organize companion publication committed, but cleanup remains pending for {Path}",
+                destination);
+        }
+
+        return plan.EffectiveAction != FileAction.Move
+            || await _fileMover.CompletePreparedMoveAsync(source, destination, lease, operationId);
     }
 }

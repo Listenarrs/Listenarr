@@ -42,6 +42,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IFileRenameCommitStore _fileRenameCommitStore;
         private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
         private readonly IVerifiedFileRenameTransactionCoordinator _verifiedFileRenameTransactionCoordinator;
+        private readonly IFilePublicationCapabilityResolver? _filePublicationCapabilityResolver;
 
         public RenameService(
             IConfigurationService configService,
@@ -61,7 +62,8 @@ namespace Listenarr.Application.Audiobooks.Renaming
             IFilePublicationSourceCapability filePublicationSourceCapability,
             IVerifiedFileRenameTransactionCoordinator verifiedFileRenameTransactionCoordinator,
             IRootFolderService? rootFolderService = null,
-            IHistoryRepository? historyRepository = null)
+            IHistoryRepository? historyRepository = null,
+            IFilePublicationCapabilityResolver? filePublicationCapabilityResolver = null)
         {
             _configService = configService;
             _fileNamingService = fileNamingService;
@@ -75,6 +77,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _semanticsResolver = semanticsResolver;
             _rootFolderService = rootFolderService;
             _historyRepository = historyRepository;
+            _filePublicationCapabilityResolver = filePublicationCapabilityResolver;
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
@@ -409,12 +412,14 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     if (folderRequested)
                     {
                         await MoveCompanionFilesAfterRenameAsync(
+                            audiobook,
                             operation.CurrentFolderPath,
                             operation.NewFolderPath,
                             settings,
                             allowedRoots,
                             semantics,
-                            result);
+                            result,
+                            CancellationToken.None);
                     }
                 }
 
