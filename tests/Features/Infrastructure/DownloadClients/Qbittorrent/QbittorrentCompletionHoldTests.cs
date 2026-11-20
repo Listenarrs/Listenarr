@@ -34,11 +34,14 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         private static readonly TimeSpan StabilityWindow = TimeSpan.FromSeconds(120);
 
         private readonly AdjustableTimeProvider _clock = new();
+        private readonly HoldLogRecorder _logs = new();
         private DownloadClientConfiguration _client = null!;
 
         public QbittorrentCompletionHoldTests()
         {
-            Init(builder => builder.WithSingleton<TimeProvider>(_clock));
+            Init(builder => builder
+                .WithSingleton<TimeProvider>(_clock)
+                .WithSingleton<ILoggerProvider>(_logs));
         }
 
         public override async Task InitializeAsync()
@@ -71,6 +74,30 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             _clock.Advance(TimeSpan.FromSeconds(30));
             await RunCycleAsync(Processor);
 
+            Assert.Equal(DownloadStatus.Downloading, (await HeldDownloadAsync())!.Status);
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(HeldId));
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
+        [Trait("Scenario", "An overdue hold kept by an incomplete poll is logged once")]
+        public async Task HeldCompletion_OverdueAndKeptByAnIncompletePoll_LogsOnceAndStaysHeld()
+        {
+            await HoldCompletionAsync();
+            Api.MalformedFilesForHash = HeldHash;
+
+            // Inside the window the hold is not overdue, so nothing is logged: the control for
+            // the count below.
+            _clock.Advance(TimeSpan.FromSeconds(30));
+            await RunCycleAsync(Processor);
+            Assert.Equal(0, _logs.Count(OverdueHoldLine));
+
+            _clock.Advance(StabilityWindow);
+            await RunCycleAsync(Processor);
+            _clock.Advance(TimeSpan.FromSeconds(30));
+            await RunCycleAsync(Processor);
+
+            Assert.Equal(1, _logs.Count(OverdueHoldLine));
             Assert.Equal(DownloadStatus.Downloading, (await HeldDownloadAsync())!.Status);
             Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(HeldId));
         }
@@ -151,6 +178,8 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Null(await _downloadRepository.GetByIdAsync(unobserved.Id));
         }
 
+        private const string OverdueHoldLine = "completion hold has passed its window but the client poll was incomplete";
+
         private static string HeldId => $"tracked-{HeldHash}";
 
         private QbittorrentApiMock Api => _provider.GetRequiredService<QbittorrentApiMock>();
@@ -222,5 +251,46 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 "save_path": {{JsonSerializer.Serialize(FileUtils.GetAbsolutePath("downloads", hash))}}
             }
             """;
+
+        private sealed class HoldLogRecorder : ILoggerProvider
+        {
+            private readonly object _gate = new();
+            private readonly List<string> _messages = [];
+
+            public ILogger CreateLogger(string categoryName) => new RecordingLogger(this);
+
+            public int Count(string fragment)
+            {
+                lock (_gate)
+                {
+                    return _messages.Count(message => message.Contains(fragment, StringComparison.Ordinal));
+                }
+            }
+
+            public void Dispose()
+            {
+            }
+
+            private sealed class RecordingLogger(HoldLogRecorder owner) : ILogger
+            {
+                public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+                public bool IsEnabled(LogLevel logLevel) => true;
+
+                public void Log<TState>(
+                    LogLevel logLevel,
+                    EventId eventId,
+                    TState state,
+                    Exception? exception,
+                    Func<TState, Exception?, string> formatter)
+                {
+                    ArgumentNullException.ThrowIfNull(formatter);
+                    lock (owner._gate)
+                    {
+                        owner._messages.Add(formatter(state, exception));
+                    }
+                }
+            }
+        }
     }
 }
