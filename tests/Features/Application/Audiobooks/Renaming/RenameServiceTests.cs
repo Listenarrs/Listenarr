@@ -1195,7 +1195,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Dictionary<string, string> sourceCompanions,
             Dictionary<string, string>? existingTargetFiles = null,
             string[]? sourceFolderParts = null,
-            Action<Mock<IFileMover>>? configureFileMover = null)
+            Action<Mock<IFileMover>>? configureFileMover = null,
+            CompanionPublicationProbe? probe = null,
+            IFilePublicationSourceCapability? sourceCapability = null,
+            IFilePublicationCapabilityResolver? publicationResolver = null)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join([libraryRoot, .. sourceFolderParts ?? ["Old"]]);
@@ -1227,7 +1230,17 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 ImportBlacklistExtensions = importBlacklist
             };
 
-            var (service, db, _) = BuildService(settings, configureFileMover);
+            probe ??= new CompanionPublicationProbe();
+            var (service, db, _) = BuildService(
+                settings,
+                mover =>
+                {
+                    probe.Mover = mover;
+                    FakeCompanionPublication(mover, probe);
+                    configureFileMover?.Invoke(mover);
+                },
+                filePublicationSourceCapabilityOverride: sourceCapability,
+                filePublicationCapabilityResolverOverride: publicationResolver);
             db.Audiobooks.Add(new Audiobook
             {
                 Id = 5,
@@ -1257,21 +1270,145 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             return (Assert.Single(results), sourceFolder, targetFolder);
         }
 
-        [Fact]
-        public async Task ExecuteRename_FolderChange_MovesCompanionFilesAndRemovesEmptyOldFolder()
+        private sealed record CompanionPublication(
+            FilePublicationPlan Plan,
+            string Source,
+            string Destination,
+            Guid OperationId,
+            FilePublicationSourceProof Proof,
+            bool IsCompanionFile,
+            int? CompanionAudiobookId);
+
+        private sealed class CompanionPublicationProbe
         {
+            public List<CompanionPublication> Publications { get; } = [];
+            public List<string> CompletedMoves { get; } = [];
+            public Mock<IFileMover>? Mover { get; set; }
+        }
+
+        // Stands in for FileMover's verified publication: the prepare step copies the source to the
+        // destination and hands back a lease; completing the move retires the source.
+        private static void FakeCompanionPublication(Mock<IFileMover> mover, CompanionPublicationProbe probe)
+        {
+            mover.Setup(m => m.PrepareActionForRegistrationDetailedAsync(
+                    It.IsAny<FilePublicationPlan>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<bool>(),
+                    It.IsAny<int?>()))
+                .Returns<FilePublicationPlan, string, string, Guid, string?, FilePublicationSourceProof, bool, int?>(
+                    (plan, source, destination, operationId, _, proof, isCompanionFile, companionAudiobookId) =>
+                    {
+                        probe.Publications.Add(new CompanionPublication(
+                            plan, source, destination, operationId, proof, isCompanionFile, companionAudiobookId));
+                        File.Copy(source, destination);
+                        var lease = new Mock<IAudiobookFileRegistrationLease>();
+                        lease.Setup(l => l.PrepareCleanupRecovery(It.IsAny<int>())).Returns(true);
+                        lease.Setup(l => l.CompletePublication()).Returns(RegistrationPublicationCompletion.Completed);
+                        return Task.FromResult(new FilePublicationPreparationResult(
+                            FilePublicationOutcome.Success,
+                            plan.RequestedAction,
+                            plan.EffectiveAction,
+                            plan.SourceDisposition,
+                            lease.Object));
+                    });
+            mover.Setup(m => m.CompletePreparedMoveAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    It.IsAny<Guid>()))
+                .Returns<string, string, IAudiobookFileRegistrationLease, Guid>((source, _, _, _) =>
+                {
+                    probe.CompletedMoves.Add(source);
+                    File.Delete(source);
+                    return Task.FromResult(true);
+                });
+        }
+
+        private static FilePublicationSourceProof ProofOf(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            return new FilePublicationSourceProof(
+                GetPhysicalObjectIdentity(path),
+                bytes.LongLength,
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_PublishesCompanionsThroughVerifiedCompanionMoves()
+        {
+            var probe = new CompanionPublicationProbe();
             var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
                 new List<string>(),
-                new Dictionary<string, string> { ["cover.jpg"] = "cover", ["metadata.json"] = "{}" });
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", ["metadata.json"] = "{}" },
+                probe: probe);
 
             Assert.True(result.Success);
             Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
             Assert.Equal("{}", await File.ReadAllTextAsync(Path.Join(targetFolder, "metadata.json")));
-            Assert.False(Directory.Exists(sourceFolder));
+            Assert.False(File.Exists(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.Equal(2, probe.Publications.Count);
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            foreach (var publication in probe.Publications)
+            {
+                Assert.True(publication.IsCompanionFile);
+                Assert.Equal(5, publication.CompanionAudiobookId);
+                Assert.Equal(FilePublicationPlan.Durable(FileAction.Move), publication.Plan);
+                Assert.Equal(
+                    FileMoveOperationIdentity.CreateForPaths(
+                        "organize-companion",
+                        5,
+                        FileAction.Move,
+                        publication.Source,
+                        semantics,
+                        publication.Proof,
+                        publication.Destination,
+                        semantics),
+                    publication.OperationId);
+            }
+
+            Assert.Equal(
+                probe.Publications.Select(p => p.Source).Order(),
+                probe.CompletedMoves.Order());
+            probe.Mover!.Verify(
+                m => m.PerformActionOn(It.IsAny<FileAction>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>()),
+                Times.Never);
         }
 
         [Fact]
-        public async Task ExecuteRename_FolderChange_RemovesOldFolderHoldingOnlyBlacklistedLeftovers()
+        public async Task ExecuteRename_FolderChange_DerivesTheCompanionOperationIdFromItsProof()
+        {
+            var probe = new CompanionPublicationProbe();
+            await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                probe: probe);
+
+            var publication = Assert.Single(probe.Publications);
+            Assert.Equal(
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("cover"u8.ToArray())),
+                publication.Proof.Sha256);
+            Assert.NotEqual(Guid.Empty, publication.OperationId);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_KeepsTheEmptiedOldFolder()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" });
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.True(Directory.Exists(sourceFolder));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(sourceFolder));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_KeepsOldFolderAndItsBlacklistedLeftovers()
         {
             var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
                 new List<string> { ".nfo" },
@@ -1280,7 +1417,113 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Join(targetFolder, "cover.jpg")));
             Assert.False(File.Exists(Path.Join(targetFolder, "book.nfo")));
-            Assert.False(Directory.Exists(sourceFolder));
+            Assert.Equal("nfo", await File.ReadAllTextAsync(Path.Join(sourceFolder, "book.nfo")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesACompanionWhoseSourceCannotBeVerified()
+        {
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            capability.Setup(c => c.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns<string, CancellationToken>((path, _) => Task.FromResult(
+                    Path.GetFileName(path) == "cover.jpg"
+                        ? FilePublicationSourceCapabilityResult.Unsupported("no stable identity")
+                        : FilePublicationSourceCapabilityResult.SupportedForProof(ProofOf(path))));
+            var probe = new CompanionPublicationProbe();
+
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", ["metadata.json"] = "{}" },
+                probe: probe,
+                sourceCapability: capability.Object);
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(targetFolder, "metadata.json")));
+            Assert.Single(probe.Publications);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesACompanionTheResolverBlocks()
+        {
+            var resolver = new Mock<IFilePublicationCapabilityResolver>(MockBehavior.Strict);
+            resolver.Setup(r => r.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    CompatibilityCleanupOwner.Listenarr))
+                .ReturnsAsync(FilePublicationPlan.Blocked(FileAction.Move, "blocked", "storage refuses"));
+            var probe = new CompanionPublicationProbe();
+
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                probe: probe,
+                publicationResolver: resolver.Object);
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Empty(probe.Publications);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_AdditiveCompanionPublicationKeepsTheSource()
+        {
+            var resolver = new Mock<IFilePublicationCapabilityResolver>(MockBehavior.Strict);
+            resolver.Setup(r => r.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    CompatibilityCleanupOwner.Listenarr))
+                .ReturnsAsync(FilePublicationPlan.Additive(FileAction.Move));
+            var probe = new CompanionPublicationProbe();
+
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                probe: probe,
+                publicationResolver: resolver.Object);
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.Equal(FileAction.Copy, Assert.Single(probe.Publications).Plan.EffectiveAction);
+            Assert.Empty(probe.CompletedMoves);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesACompanionWhosePublicationFails()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                configureFileMover: mover => mover
+                    .Setup(m => m.PrepareActionForRegistrationDetailedAsync(
+                        It.IsAny<FilePublicationPlan>(),
+                        It.IsAny<string>(),
+                        It.IsAny<string>(),
+                        It.IsAny<Guid>(),
+                        It.IsAny<string?>(),
+                        It.IsAny<FilePublicationSourceProof>(),
+                        It.IsAny<bool>(),
+                        It.IsAny<int?>()))
+                    .ReturnsAsync(new FilePublicationPreparationResult(
+                        FilePublicationOutcome.Failed,
+                        FileAction.Move,
+                        FileAction.Move,
+                        FilePublicationSourceDisposition.Unchanged)));
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
         }
 
         [Fact]
@@ -1368,13 +1611,17 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public async Task ExecuteRename_FolderChange_CompanionThatCannotMoveKeepsOrganizeSuccessfulAndOldFolder(bool moverThrows)
+        public async Task ExecuteRename_FolderChange_CompanionMoveThatCannotCompleteKeepsOrganizeSuccessful(bool moverThrows)
         {
             var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
                 new List<string>(),
                 new Dictionary<string, string> { ["cover.jpg"] = "cover" },
                 configureFileMover: mover => mover
-                    .Setup(m => m.PerformActionOn(FileAction.Move, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>()))
+                    .Setup(m => m.CompletePreparedMoveAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<string>(),
+                        It.IsAny<IAudiobookFileRegistrationLease>(),
+                        It.IsAny<Guid>()))
                     .Returns(() => moverThrows
                         ? Task.FromException<bool>(new IOException("disk gone"))
                         : Task.FromResult(false)));
@@ -1382,7 +1629,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
             Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
-            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
         }
 
         [Fact]
@@ -2874,7 +3120,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             IAudiobookFilePathIdentityResolver? identityResolverOverride = null,
             IMoveQueueService? moveQueueServiceOverride = null,
             IFilePublicationSourceCapability? filePublicationSourceCapabilityOverride = null,
-            IVerifiedFileRenameTransactionCoordinator? verifiedFileRenameTransactionCoordinatorOverride = null)
+            IVerifiedFileRenameTransactionCoordinator? verifiedFileRenameTransactionCoordinatorOverride = null,
+            IFilePublicationCapabilityResolver? filePublicationCapabilityResolverOverride = null)
         {
             var dbName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -3060,7 +3307,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 renameCommitStore.Object,
                 sourceCapability,
                 verifiedRenameCoordinator,
-                rootFolderServiceOverride);
+                rootFolderServiceOverride,
+                filePublicationCapabilityResolver: filePublicationCapabilityResolverOverride);
 
             return (service, db, dbName);
         }
