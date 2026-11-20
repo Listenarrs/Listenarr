@@ -185,7 +185,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
 
             Assert.Empty(monitored);
             var item = Assert.Single(tracked);
-            Assert.Equal("Book Relabeled", item.Title);
+            Assert.Equal("HASH2", item.Id);
         }
 
         [Fact]

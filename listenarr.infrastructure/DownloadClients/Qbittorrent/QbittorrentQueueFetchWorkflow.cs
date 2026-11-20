@@ -19,6 +19,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         ILogger<QbittorrentAdapter> logger,
         string clientType)
     {
+        private static readonly JsonSerializerOptions s_completeSnapshotJson = new() { AllowDuplicateProperties = false };
+
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
             => (await GetQueueSnapshotAsync(client, ids, ct, ignoreCategory)).Items;
 
@@ -85,7 +87,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     throw new DownloadClientAdapterPollingException(message);
                 }
 
-                var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(json);
+                var jsonOptions = ids.Count == 0 || ignoreCategory ? s_completeSnapshotJson : null;
+                var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(json, jsonOptions);
                 if (torrents == null)
                 {
                     var message = $"qBittorrent returned an invalid queue response for client {LogRedaction.SanitizeText(client.Id)}.";

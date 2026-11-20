@@ -35,7 +35,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             _logger = logger;
         }
 
-        public async Task<JsonElement> InvokeAsync(DownloadClientConfiguration client, object payload, CancellationToken ct)
+        public async Task<JsonElement> InvokeAsync(
+            DownloadClientConfiguration client,
+            object payload,
+            CancellationToken ct,
+            bool allowDuplicateProperties = true)
         {
             var httpClient = _httpClientFactory.CreateClient(_clientType);
             var baseUrl = BuildBaseUrl(client);
@@ -98,7 +102,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                     throw new HttpRequestException("Transmission RPC endpoint returned a non-JSON response. Verify the host and port point to the Transmission RPC endpoint (default port 9091).");
                 }
 
-                using var doc = JsonDocument.Parse(body);
+                using var doc = JsonDocument.Parse(body, new JsonDocumentOptions { AllowDuplicateProperties = allowDuplicateProperties });
                 return doc.RootElement.Clone();
             }
 

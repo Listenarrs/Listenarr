@@ -78,7 +78,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     throw new DownloadClientAdapterPollingException(message);
                 }
 
-                using var doc = JsonDocument.Parse(jsonContent);
+                using var doc = JsonDocument.Parse(jsonContent, new JsonDocumentOptions { AllowDuplicateProperties = isMonitorPoll && !trackedPresence });
                 if (!doc.RootElement.TryGetProperty("queue", out var queue) ||
                     !queue.TryGetProperty("slots", out var slots) ||
                     slots.ValueKind != JsonValueKind.Array)
@@ -197,7 +197,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 throw new DownloadClientAdapterPollingException($"SABnzbd tracked history request failed with status {response.StatusCode}.");
             }
 
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct), new JsonDocumentOptions { AllowDuplicateProperties = false });
             if (!document.RootElement.TryGetProperty("history", out var history) ||
                 !history.TryGetProperty("slots", out var historySlots) || historySlots.ValueKind != JsonValueKind.Array)
             {
@@ -281,7 +281,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return;
                 }
 
-                using var histDoc = JsonDocument.Parse(historyText);
+                var isFullPoll = monitoredIdSet.Count == 0;
+                using var histDoc = JsonDocument.Parse(historyText, new JsonDocumentOptions { AllowDuplicateProperties = !isFullPoll });
                 if (!histDoc.RootElement.TryGetProperty("history", out var history) ||
                     !history.TryGetProperty("slots", out var histSlots) ||
                     histSlots.ValueKind != JsonValueKind.Array)
@@ -295,7 +296,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return;
                 }
 
-                var isFullPoll = monitoredIdSet.Count == 0;
                 foreach (var slot in histSlots.EnumerateArray())
                 {
                     try
