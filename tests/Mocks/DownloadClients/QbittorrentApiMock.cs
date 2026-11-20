@@ -36,6 +36,12 @@ namespace Listenarr.Tests.Mocks.DownloadClients
         /// </summary>
         public int? FilesRequestsBeforeBreakerOpens { get; set; }
 
+        /// <summary>
+        /// Answer the files request for this torrent hash with a body that is not valid JSON, the
+        /// way a client can while the torrent itself is still listed.
+        /// </summary>
+        public string? MalformedFilesForHash { get; set; }
+
         private int _filesRequestCount;
 
         // Applied only to full-queue requests (no hashes filter), so a test can let the
@@ -156,6 +162,12 @@ namespace Listenarr.Tests.Mocks.DownloadClients
             if (FilesRequestsBeforeBreakerOpens is { } allowed && Interlocked.Increment(ref _filesRequestCount) > allowed)
             {
                 throw new BrokenCircuitException("The circuit is now open and is not allowing calls.");
+            }
+
+            if (MalformedFilesForHash != null
+                && string.Equals(HttpUtility.ParseQueryString(request.RequestUri!.Query)["hash"], MalformedFilesForHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return MockUtils.GetCannedResponse("[{\"name\": ");
             }
 
             return MockUtils.GetCannedResponse("[]");
