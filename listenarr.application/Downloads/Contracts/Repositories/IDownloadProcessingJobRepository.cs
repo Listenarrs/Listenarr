@@ -33,6 +33,21 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
 
         Task<List<DownloadProcessingJob>> GetDueRetryJobsAsync(CancellationToken cancellationToken = default);
         Task UpdateAsync(DownloadProcessingJob job);
+
+        /// <summary>
+        /// Save a download and the job that will import it in one transaction.
+        /// </summary>
+        /// <remarks>
+        /// The worker runs any pending job it can see, and it fails a job whose download is not
+        /// eligible for import. Writing the two separately lets it see the job before the download
+        /// is eligible, and a failure between the writes leaves a runnable job behind for a download
+        /// that is still blocked. The job is inserted when no row has its id yet and updated
+        /// otherwise; with no job, only the download is saved.
+        /// </remarks>
+        /// <exception cref="Listenarr.Application.Common.UniqueConstraintViolationException">
+        /// When another active job for the download was committed first. Nothing is saved.
+        /// </exception>
+        Task SaveWithDownloadAsync(Download download, DownloadProcessingJob? job);
         Task<DownloadProcessingJob?> GetByIdAsync(string jobId);
         Task<List<DownloadProcessingJob>> GetByDownloadIdAsync(string downloadId);
         Task<QueueStats> GetStatsAsync();

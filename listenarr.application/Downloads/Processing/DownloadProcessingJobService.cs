@@ -90,6 +90,7 @@ namespace Listenarr.Application.Downloads.Processing
             var existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
             if (existingActive != null)
             {
+                await jobRepository.SaveWithDownloadAsync(download, job: null);
                 logger.LogInformation("Download {DownloadId} already has active job {JobId}; no requeue needed", download.Id, existingActive.Id);
                 return existingActive.Id;
             }
@@ -102,25 +103,27 @@ namespace Listenarr.Application.Downloads.Processing
             var previous = (await jobRepository.GetByDownloadIdAsync(download.Id)).LastOrDefault();
             if (previous != null)
             {
-                await jobRepository.UpdateAsync(previous.Requeue("Requeued by request after the import was blocked"));
+                await jobRepository.SaveWithDownloadAsync(download, previous.Requeue("Requeued by request after the import was blocked"));
                 logger.LogInformation("Requeued download {DownloadId} for post-processing: {JobId}", download.Id, previous.Id);
                 return previous.Id;
             }
 
             // No job survives. Job retention deletes terminal jobs after a week, so a download
             // blocked longer than that has nothing left to reuse and needs a fresh one.
-            DownloadProcessingJob job;
+            var job = NewJobFor(download);
             try
             {
-                job = await jobRepository.AddAsync(NewJobFor(download));
+                await jobRepository.SaveWithDownloadAsync(download, job);
             }
             catch (UniqueConstraintViolationException)
             {
                 // Two retry requests for the same download raced here, both found nothing to
                 // reuse, and both tried to insert. The filtered unique index on
-                // ActiveDeduplicationKey lets exactly one through. EnqueueAsync handles the same
-                // race the same way; without this the loser reaches the controller's catch-all and
-                // the caller is told the retry failed when it was in fact queued.
+                // ActiveDeduplicationKey lets exactly one through, and the loser's download write
+                // rolls back with its insert; the winner saved the same unblocked state. EnqueueAsync
+                // handles the same race the same way; without this the loser reaches the
+                // controller's catch-all and the caller is told the retry failed when it was in
+                // fact queued.
                 existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
                 if (existingActive != null)
                 {

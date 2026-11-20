@@ -26,16 +26,14 @@ namespace Listenarr.Api.Features.Downloads;
 public class DownloadsController : ControllerBase
 {
     private readonly IDownloadRepository _downloadRepository;
-    private readonly IDownloadService _downloadService;
     private readonly ILogger<DownloadsController> _logger;
     private readonly IConfigurationService _configurationService;
     private readonly IDownloadProcessingJobService _downloadProcessingJobService;
     private readonly IMemoryCache? _cache;
 
-    public DownloadsController(IDownloadRepository downloadRepository, IDownloadService downloadService, ILogger<DownloadsController> logger, IConfigurationService configurationService, IDownloadProcessingJobService downloadProcessingJobService, IMemoryCache? cache = null)
+    public DownloadsController(IDownloadRepository downloadRepository, ILogger<DownloadsController> logger, IConfigurationService configurationService, IDownloadProcessingJobService downloadProcessingJobService, IMemoryCache? cache = null)
     {
         _downloadRepository = downloadRepository;
-        _downloadService = downloadService;
         _logger = logger;
         _configurationService = configurationService;
         _downloadProcessingJobService = downloadProcessingJobService;
@@ -229,15 +227,16 @@ public class DownloadsController : ControllerBase
 
             download.Unblock();
 
-            // Queue the work before persisting the unblock. Clearing the blocked status is what
-            // makes the download eligible for import, but nothing watches that field: the only
-            // thing that imports a download is a processing job, and the job that would have
-            // created one fires on the download client reporting completion, which already
-            // happened and will not happen again. Persisting first and queueing second would leave
-            // a download that reads as retrying and never is if the queue call failed.
+            // The unblock and the job are saved together by RequeueAsync, not here. Clearing the
+            // blocked status is what makes the download eligible for import, but nothing watches
+            // that field: the only thing that imports a download is a processing job, and the job
+            // that would have created one fires on the download client reporting completion, which
+            // already happened and will not happen again. Saved apart, a failure between the two
+            // writes leaves either a download that reads as retrying and never is, or a runnable
+            // job for a download that is still blocked, which the worker then fails; and a worker
+            // can pick the job up between them. ImportBlocked to ImportPending raises no
+            // notification in DownloadService.UpdateAsync, so going around it loses nothing.
             var jobId = await _downloadProcessingJobService.RequeueAsync(download);
-
-            await _downloadService.UpdateAsync(download);
 
             _logger.LogInformation("Requeued blocked import {DownloadId} as job {JobId}", LogRedaction.SanitizeText(id), jobId);
             return Ok(new
