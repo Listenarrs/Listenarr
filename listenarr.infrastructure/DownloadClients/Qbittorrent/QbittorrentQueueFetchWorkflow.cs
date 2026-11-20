@@ -95,11 +95,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    var hash = torrent != null && torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
-                        ? hashEl.GetString() ?? string.Empty
-                        : string.Empty;
-
-                    if (string.IsNullOrWhiteSpace(hash))
+                    if (torrent == null || !torrent.TryGetValue("hash", out var hashEl) ||
+                        hashEl.ValueKind != JsonValueKind.String || hashEl.GetString() is not { } hash ||
+                        string.IsNullOrWhiteSpace(hash))
                     {
                         if (ignoreCategory)
                         {
