@@ -127,6 +127,19 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         }
 
         [Fact]
+        public async Task ResolveHistoryStorage_NzoIdsResponseIsMalformedJson_FoundByScan()
+        {
+            _sabnzbdApiMock.HistoryQueryResponder = query => query["nzo_ids"] != null
+                ? "{\"history\": {\"slots\": [ not json"
+                : HistoryJson(OtherSlots(5).Prepend(Slot(TargetNzoId, _storagePath)));
+
+            var contentPath = await ResolveContentPathAsync();
+
+            Assert.Equal(_storagePath, contentPath);
+            Assert.Equal(2, HistoryQueries().Count);
+        }
+
+        [Fact]
         public async Task ResolveHistoryStorage_FoundByNzoIdWithoutStorage_DoesNotScanPages()
         {
             _sabnzbdApiMock.HistoryQueryResponder = query => query["nzo_ids"] == TargetNzoId

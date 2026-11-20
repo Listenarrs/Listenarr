@@ -109,10 +109,20 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return null;
                 }
 
-                var byId = await QueryHistoryAsync(requestContext, nzoId, new Dictionary<string, string>
+                HistoryLookup? byId = null;
+                try
                 {
-                    ["nzo_ids"] = nzoId
-                }, ct);
+                    byId = await QueryHistoryAsync(requestContext, nzoId, new Dictionary<string, string>
+                    {
+                        ["nzo_ids"] = nzoId
+                    }, ct);
+                }
+                catch (JsonException)
+                {
+                    // A malformed targeted response must not skip the paged scan below.
+                    logger.LogWarning("SABnzbd returned malformed JSON for the targeted history lookup of {NzoId}; falling back to the paged scan", nzoId);
+                }
+
                 if (byId is { Found: true })
                 {
                     return byId.Storage;
