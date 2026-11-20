@@ -1193,17 +1193,20 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         private async Task<(RenameResult Result, string SourceFolder, string TargetFolder)> RenameBookWithCompanionsAsync(
             List<string> importBlacklist,
             Dictionary<string, string> sourceCompanions,
-            Dictionary<string, string>? existingTargetFiles = null)
+            Dictionary<string, string>? existingTargetFiles = null,
+            string[]? sourceFolderParts = null)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
-            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var sourceFolder = Path.Join([libraryRoot, .. sourceFolderParts ?? ["Old"]]);
             var targetFolder = Path.Join(libraryRoot, "Author", "Book");
             Directory.CreateDirectory(sourceFolder);
             var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
             await File.WriteAllTextAsync(sourcePath, "audio");
             foreach (var (name, content) in sourceCompanions)
             {
-                await File.WriteAllTextAsync(Path.Join(sourceFolder, name), content);
+                var companionPath = Path.Join(sourceFolder, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(companionPath)!);
+                await File.WriteAllTextAsync(companionPath, content);
             }
 
             if (existingTargetFiles != null)
@@ -1291,6 +1294,74 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal("kept cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
             Assert.True(File.Exists(Path.Join(sourceFolder, "cover.jpg")));
             Assert.True(File.Exists(Path.Join(sourceFolder, "book.nfo")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesCompanionsWhenAnotherBooksAudioStaysInOldFolder()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["other-book.mp3"] = "other audio", ["cover.jpg"] = "other cover" });
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("other cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(sourceFolder, "other-book.mp3")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_NeverTakesCompanionsFromTheLibraryRoot()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "root cover" },
+                sourceFolderParts: []);
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("root cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesCompanionsWhenTheNewFolderIsInsideTheOldOne()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["author.jpg"] = "author portrait" },
+                sourceFolderParts: ["Author"]);
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("author portrait", await File.ReadAllTextAsync(Path.Join(sourceFolder, "author.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "author.jpg")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesHiddenFilesAndKeepsTheOldFolder()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", [".DS_Store"] = "finder" });
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, ".DS_Store")));
+            Assert.Equal("finder", await File.ReadAllTextAsync(Path.Join(sourceFolder, ".DS_Store")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_KeepsOldFolderAndItsSubdirectoryUntouched()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", [Path.Join("extras", "map.pdf")] = "map" });
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Equal("map", await File.ReadAllTextAsync(Path.Join(sourceFolder, "extras", "map.pdf")));
+            Assert.False(Directory.Exists(Path.Join(targetFolder, "extras")));
         }
 
         [Fact]
