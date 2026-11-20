@@ -25,6 +25,7 @@ bld/
 *.userosscache
 *.sln.docstates
 *.userprefs
+/tests/Listenarr.FakeProviders/Properties/launchSettings.json
 
 # Visual Studio Code
 .vscode/*
