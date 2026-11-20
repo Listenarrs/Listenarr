@@ -40,6 +40,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             "CREATE TRIGGER fail_job_insert BEFORE INSERT ON DownloadProcessingJobs " +
             "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
 
+        private const string FailJobUpdates =
+            "CREATE TRIGGER fail_job_update BEFORE UPDATE ON DownloadProcessingJobs " +
+            "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
+
         private readonly SqliteFactory _factory;
 
         public DownloadsControllerRetryAtomicityTests()
@@ -122,6 +126,86 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var download = await _downloadRepository.GetByIdAsync("d-retry-commits");
             Assert.Equal(DownloadStatus.ImportPending, download!.Status);
             Assert.Equal(0, download.ImportAttempts);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "A failed update of the reused job leaves the download blocked")]
+        public async Task RetryBlockedImport_WhenReusingThePreviousJobFails_LeavesTheDownloadBlocked()
+        {
+            // The reuse path updates the newest job and the download in one save. Failing the job
+            // half must roll the download half back, or the download reads ImportPending while its
+            // job is still the failed one. The pre-fix code did not take this path (it inserted a
+            // job and saved the download apart), so this guards the new path and is not a
+            // failing-before test.
+            await AddBlockedDownloadAsync("d-retry-reuse-fails");
+            await AddJobAsync("j-retry-reuse-fails", "d-retry-reuse-fails", ProcessingJobStatus.Failed);
+            await InstallTriggerAsync(FailJobUpdates);
+
+            var result = await MockUtils.CreateDownloadsController(_provider)
+                .RetryBlockedImport("d-retry-reuse-fails");
+
+            Assert.Equal(500, Assert.IsType<ObjectResult>(result).StatusCode);
+            var download = await _downloadRepository.GetByIdAsync("d-retry-reuse-fails");
+            Assert.Equal(DownloadStatus.ImportBlocked, download!.Status);
+            Assert.Equal(3, download.ImportAttempts);
+            Assert.Equal(
+                ProcessingJobStatus.Failed,
+                (await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-retry-reuse-fails")).Single().Status);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "Reusing the previous job commits both writes without a failure")]
+        public async Task RetryBlockedImport_ReusingThePreviousJobWithoutAFailure_CommitsBoth()
+        {
+            // The control for the reuse test above: the same setup minus the trigger lands both
+            // writes, so the blocked download there is the rollback and not a path that never saves.
+            await AddBlockedDownloadAsync("d-retry-reuse-commits");
+            await AddJobAsync("j-retry-reuse-commits", "d-retry-reuse-commits", ProcessingJobStatus.Failed);
+
+            Assert.IsType<OkObjectResult>(await MockUtils.CreateDownloadsController(_provider)
+                .RetryBlockedImport("d-retry-reuse-commits"));
+
+            Assert.Equal(
+                DownloadStatus.ImportPending,
+                (await _downloadRepository.GetByIdAsync("d-retry-reuse-commits"))!.Status);
+            Assert.Equal(
+                ProcessingJobStatus.Pending,
+                (await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-retry-reuse-commits")).Single().Status);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "A failed download write beside an existing active job leaves the download blocked")]
+        public async Task RetryBlockedImport_WhenTheDownloadOnlySaveFails_LeavesTheDownloadBlocked()
+        {
+            // An active job already exists, so only the download is saved. The job is not part of
+            // the write and must come through untouched. Like the reuse test this path is new, so
+            // it guards rather than fails before.
+            await AddBlockedDownloadAsync("d-retry-active-fails");
+            await AddJobAsync("j-retry-active-fails", "d-retry-active-fails", ProcessingJobStatus.Pending);
+            await InstallTriggerAsync(FailDownloadUpdates);
+
+            var result = await MockUtils.CreateDownloadsController(_provider)
+                .RetryBlockedImport("d-retry-active-fails");
+
+            Assert.Equal(500, Assert.IsType<ObjectResult>(result).StatusCode);
+            Assert.Equal(
+                DownloadStatus.ImportBlocked,
+                (await _downloadRepository.GetByIdAsync("d-retry-active-fails"))!.Status);
+            var job = (await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-retry-active-fails")).Single();
+            Assert.Equal("j-retry-active-fails", job.Id);
+            Assert.Equal(ProcessingJobStatus.Pending, job.Status);
+        }
+
+        private async Task AddJobAsync(string jobId, string downloadId, ProcessingJobStatus status)
+        {
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithId(jobId)
+                .WithDownload(new DownloadBuilder().WithId(downloadId).Build())
+                .WithStatus(status)
+                .Build());
         }
 
         private async Task AddBlockedDownloadAsync(string id)
