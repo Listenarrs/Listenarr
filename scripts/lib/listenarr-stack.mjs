@@ -82,6 +82,31 @@ export async function removeImages(appImage, hostImage) {
   await waitForExit(child, 'Listenarr image cleanup')
 }
 
+/** The local images of these repositories, as { repository, tag, createdAt } (`docker image ls`). */
+export function listImages(repositories) {
+  const output = execFileSync(
+    'docker',
+    ['image', 'ls', '--format', '{{json .}}', ...repositories.flatMap((repository) => ['--filter', `reference=${repository}`])],
+    { encoding: 'utf8' },
+  )
+  return output
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .map(({ Repository, Tag, CreatedAt }) => ({ repository: Repository, tag: Tag, createdAt: CreatedAt }))
+}
+
+/**
+ * Removes old reusable images. Without --force: an image a container still uses (another run on the
+ * same daemon) stays, and Docker reports it.
+ */
+export async function pruneImages(images) {
+  if (!images.length) return
+  console.log(`Removing ${images.length} older Listenarr E2E image(s): ${images.join(', ')}`)
+  const child = start('docker', ['rmi', ...images], { cwd: repositoryRoot })
+  await waitForExit(child, 'Listenarr image prune')
+}
+
 /** A hash of every row of every table: equal hashes mean an unchanged database. */
 export function databaseSnapshot(path) {
   const database = new DatabaseSync(path, { readOnly: true })

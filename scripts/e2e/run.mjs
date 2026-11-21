@@ -13,7 +13,8 @@
 //   fe/test-results/e2e-coverage-backend/, with summary.md for the library import code.
 // Both are reported, not gated; a CI run with the coverage input merges them with the other test jobs'
 // (scripts/test-coverage/aggregate.mjs).
-// The containers, the images of a dirty checkout and the temporary data are removed at the end.
+// The containers, the images of a dirty checkout and the temporary data are removed at the end; of the
+// reusable (commit-tagged) images, only the newest 3 commits' are kept (LISTENARR_E2E_KEEP_IMAGES, 0 keeps all).
 //
 //   node scripts/e2e/run.mjs [--coverage] [--stacks=N] [--serve] [-- <playwright test arguments>]
 //
@@ -28,14 +29,16 @@ import {
   availablePort,
   ensureImages,
   frontendDirectory,
+  listImages,
   playwrightCli,
+  pruneImages,
   removeImages,
   repositoryRoot,
   start,
   startListenarrStack,
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
-import { stackPlan } from '../lib/e2e-plan.mjs'
+import { imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -274,6 +277,15 @@ try {
       } catch (error) {
         console.error(`Could not clean up the Listenarr images: ${error.message}`)
       }
+    }
+    // Reusable images are kept for the next run on the same commit; only the newest few commits'
+    // are, so a long-lived Docker daemon (a self-hosted runner) does not fill up.
+    try {
+      const keep = Number(process.env.LISTENARR_E2E_KEEP_IMAGES ?? 3)
+      const current = plan.reusable ? plan.appImage.split(':')[1] : ''
+      await pruneImages(imagesToPrune(listImages(['listenarr-e2e-app', 'listenarr-e2e-host']), { current, keep }))
+    } catch (error) {
+      console.error(`Could not prune the older Listenarr images: ${error.message}`)
     }
   }
 }

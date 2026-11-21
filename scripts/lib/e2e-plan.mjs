@@ -40,3 +40,29 @@ export function stackPlan({
     })),
   }
 }
+
+/** HEAD-derived tags: 12 lowercase hex characters (see imageTags). Run-specific tags never match. */
+const headTag = /^[0-9a-f]{12}$/
+
+/**
+ * The HEAD-tagged images a run removes so they don't pile up on a long-lived Docker daemon: every
+ * `${name}-app` / `${name}-host` tag except `current` and the newest `keep - 1` others. `images` are
+ * `docker image ls` rows ({ repository, tag, createdAt }); a zero or invalid `keep` prunes nothing.
+ */
+export function imagesToPrune(images, { current, keep, name = 'listenarr-e2e' }) {
+  if (!Number.isInteger(keep) || keep < 1) return []
+  const repositories = [`${name}-app`, `${name}-host`]
+  const created = (value) => Date.parse(String(value).replace(/ [A-Z]{2,5}$/, ''))
+  const newest = new Map()
+  for (const { repository, tag, createdAt } of images) {
+    if (!repositories.includes(repository) || !headTag.test(tag)) continue
+    newest.set(tag, Math.max(newest.get(tag) ?? -Infinity, created(createdAt)))
+  }
+  const others = [...newest.keys()].filter((tag) => tag !== current).sort((a, b) => newest.get(b) - newest.get(a))
+  const removed = new Set(others.slice(keep - (newest.has(current) ? 1 : 0)))
+  return [...removed].flatMap((tag) =>
+    repositories
+      .filter((repository) => images.some((image) => image.repository === repository && image.tag === tag))
+      .map((repository) => `${repository}:${tag}`),
+  )
+}
