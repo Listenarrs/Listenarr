@@ -133,6 +133,7 @@ namespace Listenarr.Api.Features.Library
                 SeriesAsin = monitoredSeries.SeriesAsin,
                 Region = monitoredSeries.Region,
                 Language = monitoredSeries.Language,
+                QualityProfileId = monitoredSeries.QualityProfileId,
                 CreatedAt = monitoredSeries.CreatedAt,
                 UpdatedAt = monitoredSeries.UpdatedAt,
                 LastCheckedAt = monitoredSeries.LastCheckedAt,
@@ -174,6 +175,8 @@ namespace Listenarr.Api.Features.Library
             public string Region { get; set; } = "us";
 
             public string Language { get; set; } = "all";
+
+            public int? QualityProfileId { get; set; }
 
             public DateTime CreatedAt { get; set; }
 

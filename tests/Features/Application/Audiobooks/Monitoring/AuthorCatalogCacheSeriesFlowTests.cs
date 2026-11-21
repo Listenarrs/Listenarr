@@ -226,11 +226,23 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                     return new LibraryAddOperationResult { Added = true, Audiobook = audiobook };
                 });
 
+            var defaultProfile = new QualityProfile { Id = 1, Name = "Standard", IsDefault = true };
+            dbContext.QualityProfiles.Add(defaultProfile);
+            await dbContext.SaveChangesAsync();
+            var qualityProfileService = new Mock<IQualityProfileService>();
+            qualityProfileService
+                .Setup(service => service.GetDefaultAsync())
+                .ReturnsAsync(defaultProfile);
+            qualityProfileService
+                .Setup(service => service.GetByIdAsync(defaultProfile.Id))
+                .ReturnsAsync(defaultProfile);
+
             var monitoringService = new AuthorMonitoringService(
                 new EfMonitoredAuthorRepository(dbContext),
                 audiobookRepository,
                 catalogService,
                 libraryAddService.Object,
+                qualityProfileService.Object,
                 Mock.Of<ILogger<AuthorMonitoringService>>());
 
             return new Fixture(connection, dbContext, dbOptions, audible, audiobookRepository, catalogService, monitoringService);

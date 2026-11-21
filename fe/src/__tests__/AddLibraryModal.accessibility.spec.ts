@@ -24,7 +24,7 @@ vi.mock('@/services/api', () => ({
     getAudibleMetadata: vi.fn().mockResolvedValue({}),
     previewLibraryPath: vi.fn().mockResolvedValue({ fullPath: '', relativePath: '' }),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: '' }),
-    getQualityProfiles: vi.fn().mockResolvedValue([]),
+    getQualityProfiles: vi.fn().mockResolvedValue([{ id: 1, name: 'Standard', isDefault: true }]),
     getRootFolders: vi.fn().mockResolvedValue([]),
   },
 }))

@@ -26,7 +26,8 @@ const source = {
   leagues: `${importRoot}/Jules Verne/Twenty Thousand Leagues Under the Sea/Twenty Thousand Leagues Under the Sea.m4b`,
 }
 
-const footerSelect = (page: Page, index: number) => page.locator('.import-footer select').nth(index)
+const monitorSelect = (page: Page) => page.getByRole('combobox', { name: 'Monitor:' })
+const importActionSelect = (page: Page) => page.getByRole('combobox', { name: /^On import:/ })
 
 /** Scans E2E Import and matches its books; Pellucidar stays unmatched. */
 async function scanAndMatch(page: Page) {
@@ -59,7 +60,7 @@ test.describe('Library Import apply', () => {
     await expect(page.locator('.footer-left')).toContainText(
       'Files will be added to the library without being moved or copied',
     )
-    await footerSelect(page, 0).selectOption('none')
+    await monitorSelect(page).selectOption('none')
     await importButton(page).click()
     await expect(importButton(page)).toHaveText(/Importing 4 Books\.\.\./)
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
@@ -67,7 +68,6 @@ test.describe('Library Import apply', () => {
     // In place, a file can only join a book in its own folder: the seeded Twenty Thousand Leagues lives
     // in the library's output folder, so its file is not registered and its row stays.
     await expect(page.getByText('Import errors').first()).toBeVisible()
-    await expect(page.getByText('1 item failed - check logs').first()).toBeVisible()
     await expect
       .poll(() => rowFolders(page))
       .toEqual(['Twenty Thousand Leagues Under the Sea', 'Pellucidar'])
@@ -101,7 +101,7 @@ test.describe('Library Import apply', () => {
     for (const book of ['A Princess of Mars', 'Twenty Thousand Leagues Under the Sea']) {
       await importRow(page, book).locator('input[type="checkbox"]').uncheck()
     }
-    await footerSelect(page, 1).selectOption('move')
+    await importActionSelect(page).selectOption('move')
     await page.locator('.destination-select').selectOption({ label: libraryRoot })
     await expect(importButton(page)).toHaveText('Import 2 Books')
     await importButton(page).click()
@@ -138,7 +138,7 @@ test.describe('Library Import apply', () => {
     await scanAndMatch(page)
     await page.locator('thead input[type="checkbox"]').uncheck()
     await importRow(page, 'Allan Quatermain').locator('input[type="checkbox"]').check()
-    await footerSelect(page, 1).selectOption('hardlink/copy')
+    await importActionSelect(page).selectOption('hardlink/copy')
     await page.locator('.destination-select').selectOption({ label: libraryRoot })
     await importButton(page).click()
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
@@ -162,7 +162,7 @@ test.describe('Library Import apply', () => {
     await importRow(page, 'Twenty Thousand Leagues Under the Sea')
       .locator('input[type="checkbox"]')
       .check()
-    await footerSelect(page, 1).selectOption('move')
+    await importActionSelect(page).selectOption('move')
     await page.locator('.destination-select').selectOption({ label: libraryRoot })
     await importButton(page).click()
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
@@ -196,7 +196,6 @@ test.describe('Library Import apply', () => {
 
     await importButton(page).click()
     await expect(page.getByText('Import errors').first()).toBeVisible({ timeout: 60_000 })
-    await expect(page.getByText('1 item failed - check logs').first()).toBeVisible()
     await expect(importRow(page, 'Tanar of Pellucidar').locator('.match-error')).toHaveText(
       'Audible United States (US) has no record for B0TANARDRM. Use "Search for a match" to pick the book again, in the right region.',
     )

@@ -185,6 +185,12 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
 
     private async Task SeedAsync()
     {
+        await SendJsonAsync(HttpMethod.Post, "/api/v1/qualityprofile", new
+        {
+            name = "Integration Default",
+            isDefault = true,
+        }, HttpStatusCode.Created);
+
         foreach (var book in SeedBooks)
         {
             // Adding with authors triggers author enrichment; set them afterwards so the seed stays offline.

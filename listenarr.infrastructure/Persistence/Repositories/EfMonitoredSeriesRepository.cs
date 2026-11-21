@@ -44,16 +44,31 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 ? await _db.MonitoredSeries.FindAsync(new object[] { series.Id }, ct)
                 : null;
 
+            // Serialize new profile references with profile deletion. A sync that only
+            // updates timestamps or errors does not write the profile assignment.
+            var profileId = series.QualityProfileId;
+            var assigningProfile = profileId.HasValue && (existing == null
+                || _db.Entry(existing).Property(monitor => monitor.QualityProfileId).OriginalValue != profileId);
+            await using var transaction = assigningProfile && _db.Database.IsRelational()
+                && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            if (assigningProfile && !await _db.QualityProfiles.AnyAsync(profile => profile.Id == profileId, ct))
+            {
+                throw new ArgumentException($"Quality profile with ID {profileId} no longer exists. Select a valid quality profile.");
+            }
+
             if (existing == null)
             {
                 _db.MonitoredSeries.Add(series);
-                await _db.SaveChangesAsync(ct);
-                return series;
             }
-
-            _db.Entry(existing).CurrentValues.SetValues(series);
+            else
+            {
+                _db.Entry(existing).CurrentValues.SetValues(series);
+            }
             await _db.SaveChangesAsync(ct);
-            return existing;
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return existing ?? series;
         }
 
         public async Task<MonitoredSeries?> GetByNameRegionLanguageAsync(string normalizedName, string region, string language, CancellationToken ct = default)

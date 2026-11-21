@@ -8,12 +8,15 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
@@ -48,9 +51,10 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20261021212418_AddAutomaticSearchTiming";
     private const string ReleaseBlocklistMigrationId =
         "20261029020400_AddReleaseBlocklist";
-
     private const string AudiobookAddedDateMigrationId =
         ListenarrDatabaseMigrationPreflight.AudiobookAddedDateMigrationId;
+    private const string MonitoringQualityProfileMigrationId =
+        "20261121052354_AddMonitoringQualityProfile";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -68,6 +72,73 @@ public class SqliteMigrationSchemaTests : BaseTests
             .UseSqlite(connection, sqlite =>
                 sqlite.MigrationsAssembly(typeof(ListenArrDbContext).Assembly.GetName().Name))
             .Options;
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MonitoringProfile_OnlyBecomesDeletableAfterReassignment(bool author)
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:;Foreign Keys=True");
+        await connection.OpenAsync();
+        await using var context = new ListenArrDbContext(CreateOptions(connection));
+        var migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(AudiobookAddedDateMigrationId);
+
+        // The old schema has no profile column on either monitor.
+        await context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO MonitoredAuthors (AuthorName, AuthorNameNormalized, Region, Language, CreatedAt, UpdatedAt)
+            VALUES ('Author', 'author', 'us', 'english', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            INSERT INTO MonitoredSeries (SeriesName, SeriesNameNormalized, Region, Language, CreatedAt, UpdatedAt)
+            VALUES ('Series', 'series', 'us', 'english', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            """);
+        await migrator.MigrateAsync();
+
+        var monitoredAuthor = await context.MonitoredAuthors.SingleAsync();
+        var monitoredSeries = await context.MonitoredSeries.SingleAsync();
+        Assert.Null(monitoredAuthor.QualityProfileId);
+        Assert.Null(monitoredSeries.QualityProfileId);
+
+        var repository = new QualityProfileRepository(context);
+        var service = new QualityProfileService(repository, NullLogger<QualityProfileService>.Instance);
+        var original = await repository.AddAsync(new QualityProfileBuilder().WithName("Original").Build());
+        var replacement = await repository.AddAsync(new QualityProfileBuilder().WithName("Replacement").Build());
+        if (author)
+            monitoredAuthor.QualityProfileId = original.Id;
+        else
+            monitoredSeries.QualityProfileId = original.Id;
+        await context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(original.Id));
+        Assert.Contains("Reassign those monitors", error.Message);
+        var authors = new EfMonitoredAuthorRepository(context);
+        var series = new EfMonitoredSeriesRepository(context);
+        if (author)
+        {
+            monitoredAuthor.QualityProfileId = replacement.Id;
+            await authors.UpsertAsync(monitoredAuthor);
+        }
+        else
+        {
+            monitoredSeries.QualityProfileId = replacement.Id;
+            await series.UpsertAsync(monitoredSeries);
+        }
+        Assert.True(await service.DeleteAsync(original.Id));
+
+        if (author)
+        {
+            monitoredAuthor.QualityProfileId = original.Id;
+            await Assert.ThrowsAsync<ArgumentException>(() => authors.UpsertAsync(monitoredAuthor));
+        }
+        else
+        {
+            monitoredSeries.QualityProfileId = original.Id;
+            await Assert.ThrowsAsync<ArgumentException>(() => series.UpsertAsync(monitoredSeries));
+        }
+        context.ChangeTracker.Clear();
+        Assert.Equal(replacement.Id, author
+            ? (await context.MonitoredAuthors.SingleAsync()).QualityProfileId
+            : (await context.MonitoredSeries.SingleAsync()).QualityProfileId);
+    }
 
     [Fact]
     [Trait("Scenario", "EveryModelColumnExistsAfterMigrate")]
@@ -236,7 +307,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 OperationEvidencePublicationsMigrationId,
                 AutomaticSearchTimingMigrationId,
                 ReleaseBlocklistMigrationId,
-                AudiobookAddedDateMigrationId
+                AudiobookAddedDateMigrationId,
+                MonitoringQualityProfileMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);
