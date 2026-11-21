@@ -45,6 +45,37 @@ public sealed class LocalFileSystem : IFileSystem
 
     public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents);
 
+    public bool CreateFileAtomically(string path, string contents)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new ArgumentException($"'{path}' has no parent directory.", nameof(path));
+        // Beside the target, so the move below is a rename within one directory, which is atomic.
+        var temporaryPath = Path.Join(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, contents);
+            try
+            {
+                // Without overwrite: an existing file stays, even one held open by a reader (replacing
+                // an open file fails on Windows).
+                File.Move(temporaryPath, fullPath, overwrite: false);
+                return true;
+            }
+            catch (IOException) when (File.Exists(fullPath))
+            {
+                return false;
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
     public void DeleteFile(string path) => File.Delete(path);
 
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);

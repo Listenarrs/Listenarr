@@ -140,7 +140,9 @@ public static class ListenarrBuilderFactory
                 }
 
                 var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
-                fileSystem.WriteAllText(safeExternalConfigAbsolute, defaultJson);
+                // Parallel hosts sharing a content root (the test hosts do) may load the file while
+                // it is being written: write it whole, or a reader can parse a partial file.
+                fileSystem.CreateFileAtomically(safeExternalConfigAbsolute, defaultJson);
                 Console.WriteLine($"[Listenarr] Created default configuration at '{safeExternalConfigAbsolute}'. Edit this file to customize app settings.");
             }
         }
