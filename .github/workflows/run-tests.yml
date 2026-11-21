@@ -117,6 +117,9 @@ jobs:
       - name: E2E shard plan tests
         run: npm run --silent test:e2e-plan
 
+      - name: E2E import folder manifest tests
+        run: npm run --silent test:e2e-import-folders
+
       - name: Frontend lint
         run: npm run --silent lint:frontend
 

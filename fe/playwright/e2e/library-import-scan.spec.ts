@@ -9,15 +9,16 @@ import {
   scanButton,
   test,
 } from './support/test.js'
+import { folder, importBook } from './support/import-folders.js'
 
-// The book folders scripts/e2e/generate-library-fixtures.sh writes into the E2E Import root folder, in
+// The book folders of the E2E Import root folder (tests/Fixtures/Audiobooks/import-folders.json), in
 // the table's default order: by the title the scan read (the album tag), then by path.
 const importBooks = [
-  'Allan Quatermain',
-  'A Princess of Mars', // Barsoom
-  'Twenty Thousand Leagues Under the Sea', // Captain Nemo
-  'Pellucidar', // no tags: its folder
-  'Tanar of Pellucidar',
+  folder.Allan,
+  folder.Princess, // Barsoom
+  folder.Leagues, // Captain Nemo
+  folder.Pellucidar, // no tags: its folder
+  folder.Tanar,
 ]
 
 test.describe('Library Import scan', () => {
@@ -33,37 +34,35 @@ test.describe('Library Import scan', () => {
     await expect(page.locator('.import-row')).toHaveCount(importBooks.length)
     expect(await rowFolders(page)).toEqual(importBooks)
     await expect(page.locator('.import-row .folder-name')).toHaveText([
-      'Allan Quatermain',
+      folder.Allan,
       'Barsoom',
       'Captain Nemo',
-      'Pellucidar',
-      'Tanar of Pellucidar',
+      folder.Pellucidar,
+      folder.Tanar,
     ])
     await expect(page.locator('.scan-meta')).toHaveText(/Last scanned just now\s+·\s+5 unmatched/)
     await expect(page.locator('.summary-pill')).toHaveText('5 items')
 
     // Tags: the title, author and series the files carry, with the folder when it says otherwise;
     // the folder alone when there are none.
-    const princess = importRow(page, 'A Princess of Mars')
+    const princess = importRow(page, folder.Princess)
     await expect(princess.locator('.folder-meta')).toHaveText('Edgar Rice Burroughs - Barsoom')
-    await expect(princess.locator('.folder-origin')).toHaveText('Folder: A Princess of Mars')
+    await expect(princess.locator('.folder-origin')).toHaveText(`Folder: ${folder.Princess}`)
     await expect(princess.locator('.format-badge')).toHaveText(/m4b/i)
     await expect(princess.locator('.match-status.unsearched')).toBeVisible()
     await expect(princess.locator('input[type="checkbox"]')).toBeDisabled()
-    await expect(importRow(page, 'Pellucidar').locator('.folder-meta')).toHaveCount(0)
-    await expect(importRow(page, 'Pellucidar').locator('.folder-origin')).toHaveCount(0)
-    await expect(importRow(page, 'Tanar of Pellucidar').locator('.folder-origin')).toHaveCount(0)
+    await expect(importRow(page, folder.Pellucidar).locator('.folder-meta')).toHaveCount(0)
+    await expect(importRow(page, folder.Pellucidar).locator('.folder-origin')).toHaveCount(0)
+    await expect(importRow(page, folder.Tanar).locator('.folder-origin')).toHaveCount(0)
 
     // The three MP3 parts of one book are one row.
-    const allan = importRow(page, 'Allan Quatermain')
-    await expect(allan.locator('.file-count')).toHaveText('3 files')
+    const allan = importRow(page, folder.Allan)
+    await expect(allan.locator('.file-count')).toHaveText(
+      `${importBook('Allan').files.length} files`,
+    )
     await allan.locator('.grouped-files-summary').click()
     await expect(allan.locator('.grouped-files-summary')).toHaveText(/View grouped files \(3\)/)
-    await expect(allan.locator('.grouped-file-label')).toHaveText([
-      'Allan Quatermain - Part 01.mp3',
-      'Allan Quatermain - Part 02.mp3',
-      'Allan Quatermain - Part 03.mp3',
-    ])
+    await expect(allan.locator('.grouped-file-label')).toHaveText(importBook('Allan').fileNames)
     await expect(allan.locator('.grouped-file-badge')).toHaveCount(1)
 
     // The backend keeps the results: the next visit shows them without scanning, also in a browser
@@ -125,21 +124,21 @@ test.describe('Library Import scan', () => {
     await openLibraryImport(page)
     await page.locator('.folder-select').selectOption({ label: 'E2E Second' })
     await scan(page)
-    expect(await rowFolders(page)).toEqual(['Tarzan of the Apes'])
+    expect(await rowFolders(page)).toEqual([folder.Tarzan])
 
     await page.locator('.folder-select').selectOption({ label: 'E2E Import' })
     await expect(page.getByRole('heading', { name: 'No scan results yet' })).toBeVisible()
     await expect(page.locator('.import-row')).toHaveCount(0)
 
     await page.locator('.folder-select').selectOption({ label: 'E2E Second' })
-    await expect(importRow(page, 'Tarzan of the Apes')).toBeVisible()
-    expect(await rowFolders(page)).toEqual(['Tarzan of the Apes'])
+    await expect(importRow(page, folder.Tarzan)).toBeVisible()
+    expect(await rowFolders(page)).toEqual([folder.Tarzan])
   })
 
   test('a link from Settings scans the folder it names, once', async ({ page, listenarr }) => {
     const second = await listenarr.rootFolder('E2E Second')
     await openLibraryImport(page, `?rootFolder=${second.id}&scan=1`)
-    await expect(importRow(page, 'Tarzan of the Apes')).toBeVisible()
+    await expect(importRow(page, folder.Tarzan)).toBeVisible()
     await expect(page.locator('.folder-select option:checked')).toHaveText('E2E Second')
     // The scan request is dropped from the address: a reload shows the saved results, no new scan.
     await expect(page).toHaveURL(new RegExp(`/library-import\\?rootFolder=${second.id}$`))
@@ -149,7 +148,7 @@ test.describe('Library Import scan', () => {
       if (request.method() === 'POST' && request.url().includes('/scan-unmatched')) scans += 1
     })
     await page.reload()
-    await expect(importRow(page, 'Tarzan of the Apes')).toBeVisible()
+    await expect(importRow(page, folder.Tarzan)).toBeVisible()
     await expect(page.locator('.folder-select option:checked')).toHaveText('E2E Second')
     expect(scans).toBe(0)
   })
@@ -169,7 +168,7 @@ test.describe('Library Import scan', () => {
   test('a scan skips an unreadable folder, warns about it and keeps the readable books', async ({
     page,
   }) => {
-    const unreadable = hostPath('/e2e/import/Edgar Rice Burroughs/Pellucidar')
+    const unreadable = hostPath(importBook('Pellucidar').directory)
     await chmod(unreadable, 0o000)
     try {
       await openLibraryImport(page)
@@ -179,7 +178,7 @@ test.describe('Library Import scan', () => {
       )
       await expect(page.locator('.import-row')).toHaveCount(importBooks.length - 1)
       expect(await rowFolders(page)).toEqual(
-        importBooks.filter((folder) => folder !== 'Pellucidar'),
+        importBooks.filter((name) => name !== folder.Pellucidar),
       )
     } finally {
       await chmod(unreadable, 0o755)

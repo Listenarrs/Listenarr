@@ -266,8 +266,8 @@ migrate-to-*.sh
 # Generated silence used as a tag round-trip fixture
 !/tests/Data/Audio/the-time-machine-silence.m4b
 # Pre-tagged silence copied into the browser E2E library
-!/scripts/e2e/fixtures/*.m4b
-!/scripts/e2e/fixtures/*.mp3
+!/tests/Fixtures/Audiobooks/*.m4b
+!/tests/Fixtures/Audiobooks/*.mp3
 
 # CI / publish outputs
 listenarr.api/publish/

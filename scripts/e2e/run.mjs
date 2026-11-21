@@ -4,7 +4,8 @@
 // which answers metadata from fixtures and permits only the download scenarios' loopback qBittorrent
 // sidecar. The container cannot resolve external DNS names.
 //
-// The runner builds the images once, generates the audiobook folders once (generate-library-fixtures.sh),
+// The runner builds the images once, writes the audiobook folders once (import-folders.mjs, from
+// tests/Fixtures/Audiobooks/import-folders.json),
 // then starts one stack per Playwright shard, each with its own container, ports and seeded directories,
 // and runs the shards in parallel. With --coverage, coverage is collected on both sides:
 // - frontend: V8 coverage from Chromium, mapped to the sources, one report per shard under
@@ -38,6 +39,7 @@ import {
   startListenarrStack,
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
+import { writeImportFolders } from './import-folders.mjs'
 import { imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
@@ -103,15 +105,7 @@ let stacks = []
 let exitCode = 1
 try {
   fixtureTemplate = await mkdtemp(join(tmpdir(), 'listenarr-e2e-fixtures-'))
-  const generator = start(
-    'bash',
-    [
-      join(repositoryRoot, 'scripts', 'e2e', 'generate-library-fixtures.sh'),
-      fixtureTemplate,
-    ],
-    { cwd: repositoryRoot },
-  )
-  await waitForExit(generator, 'Synthetic audiobook library generation')
+  await writeImportFolders(fixtureTemplate)
 
   await ensureImages({ appImage: plan.appImage, hostImage: plan.hostImage, reuse: plan.reusable })
   // Register each stack as soon as it starts, so a later shard failing cannot orphan the earlier ones.

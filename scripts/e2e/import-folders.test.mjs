@@ -1,0 +1,108 @@
+import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { defaultManifestPath, readImportFolders, writeImportFolders } from './import-folders.mjs'
+
+async function withFixtures(manifest, files, run) {
+  const directory = await mkdtemp(join(tmpdir(), 'import-folders-test-'))
+  try {
+    for (const [name, content] of Object.entries(files)) await writeFile(join(directory, name), content)
+    const manifestPath = join(directory, 'import-folders.json')
+    await writeFile(manifestPath, JSON.stringify(manifest))
+    await run({ directory, manifestPath })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+async function tree(directory, prefix = '') {
+  const entries = await readdir(join(directory, prefix), { withFileTypes: true })
+  const paths = []
+  for (const entry of entries) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name
+    paths.push(entry.isDirectory() ? `${path}/` : path)
+    if (entry.isDirectory()) paths.push(...(await tree(directory, path)))
+  }
+  return paths.sort()
+}
+
+const manifest = {
+  roots: {
+    import: {
+      Mars: { folder: 'Burroughs/Mars', files: [{ name: 'Mars.m4b', fixture: 'mars.m4b' }] },
+      Allan: {
+        folder: 'Haggard/Allan',
+        files: [
+          { name: 'Allan - Part 01.mp3', fixture: 'allan.mp3' },
+          { name: 'Allan - Part 02.mp3', fixture: 'allan.mp3' },
+        ],
+      },
+    },
+    empty: {},
+  },
+}
+const fixtures = { 'mars.m4b': 'mars audio', 'allan.mp3': 'allan audio', 'README.md': 'docs' }
+
+test('writeImportFolders copies each fixture to its book folder, one folder per root', async () => {
+  await withFixtures(manifest, fixtures, async ({ manifestPath }) => {
+    const output = await mkdtemp(join(tmpdir(), 'import-folders-output-'))
+    try {
+      await writeImportFolders(output, { manifestPath })
+      assert.deepEqual(await tree(output), [
+        'empty/',
+        'import/',
+        'import/Burroughs/',
+        'import/Burroughs/Mars/',
+        'import/Burroughs/Mars/Mars.m4b',
+        'import/Haggard/',
+        'import/Haggard/Allan/',
+        'import/Haggard/Allan/Allan - Part 01.mp3',
+        'import/Haggard/Allan/Allan - Part 02.mp3',
+      ])
+      assert.equal(await readFile(join(output, 'import/Burroughs/Mars/Mars.m4b'), 'utf8'), 'mars audio')
+      assert.equal(await readFile(join(output, 'import/Haggard/Allan/Allan - Part 02.mp3'), 'utf8'), 'allan audio')
+    } finally {
+      await rm(output, { recursive: true, force: true })
+    }
+  })
+})
+
+test('readImportFolders names the book whose fixture is missing', async () => {
+  await withFixtures(manifest, { 'allan.mp3': 'allan audio' }, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /import\.Mars: no fixture mars\.m4b/)
+  })
+})
+
+test('readImportFolders names an audio file no book uses', async () => {
+  await withFixtures(manifest, { ...fixtures, 'unused.m4b': 'x' }, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /unused\.m4b is not used by any book/)
+  })
+})
+
+test('readImportFolders names two books sharing a folder', async () => {
+  const shared = structuredClone(manifest)
+  shared.roots.import.Allan.folder = 'Burroughs/Mars'
+  await withFixtures(shared, fixtures, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /import\.Allan: folder Burroughs\/Mars is already import\.Mars's/)
+  })
+})
+
+test('readImportFolders refuses a path that leaves its root', async () => {
+  const escaping = structuredClone(manifest)
+  escaping.roots.import.Mars.folder = '../Mars'
+  await withFixtures(escaping, fixtures, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /import\.Mars: folder \.\.\/Mars must stay inside its root/)
+  })
+  const nested = structuredClone(manifest)
+  nested.roots.import.Mars.files[0].name = 'sub/Mars.m4b'
+  await withFixtures(nested, fixtures, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /import\.Mars: file sub\/Mars\.m4b must be a plain file name/)
+  })
+})
+
+test('the checked-in manifest is valid: every fixture exists and is used', async () => {
+  const folders = await readImportFolders(defaultManifestPath)
+  assert.ok(Object.keys(folders.roots.import).length > 0)
+})

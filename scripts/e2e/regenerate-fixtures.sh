@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Regenerates the audiobook files the browser E2E suite imports (scripts/e2e/fixtures/): one second of
+# Regenerates the audiobook files the browser E2E suite imports (tests/Fixtures/Audiobooks/): one second of
 # silence each, in a real M4B or MP3 container, with the tags the library scan reads through ffprobe.
 # The specs assert on these tags (row titles, authors, series, the ASIN match, the three-part grouping
 # of the MP3), so keep them when changing a book. Needs ffmpeg; the E2E run itself only copies the
-# committed files (generate-library-fixtures.sh).
+# committed files into the folders tests/Fixtures/Audiobooks/import-folders.json lists
+# (scripts/e2e/import-folders.mjs).
 #
-#   scripts/e2e/regenerate-fixtures.sh [output directory, default scripts/e2e/fixtures]
+#   scripts/e2e/regenerate-fixtures.sh [output directory, default tests/Fixtures/Audiobooks]
 #   npm run e2e:regenerate-fixtures
 set -euo pipefail
 
-output=${1:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/fixtures}
+output=${1:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/tests/Fixtures/Audiobooks}
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required" >&2; exit 1; }
 mkdir -p "$output"
 
