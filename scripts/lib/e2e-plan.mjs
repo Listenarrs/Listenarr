@@ -66,3 +66,12 @@ export function imagesToPrune(images, { current, keep, name = 'listenarr-e2e' })
       .map((repository) => `${repository}:${tag}`),
   )
 }
+
+/**
+ * The number of stacks (and Playwright shards) when neither --stacks=N nor LISTENARR_E2E_STACKS says.
+ * Each stack runs an app container, a Vite server and a Chromium: on a 4-vCPU GitHub-hosted runner
+ * three of them only trade the test-time gain for start-up time (measured), so they pay off from 8 CPUs.
+ */
+export function defaultStackCount(cpus) {
+  return Number.isFinite(cpus) && cpus >= 8 ? 3 : 1
+}
