@@ -13,8 +13,10 @@ export default defineConfig({
   testDir: './playwright/e2e',
   testMatch: '**/*.spec.ts',
   outputDir,
-  // One container and one database: the tests run one at a time, each from the restored seed.
-  fullyParallel: false,
+  // One container and one database per shard: the tests of a shard run one at a time, each from the
+  // restored seed. fullyParallel only makes --shard split by test rather than by file, so one long spec
+  // file does not hold up a whole shard.
+  fullyParallel: true,
   workers: 1,
   forbidOnly: !!process.env.CI,
   timeout: 120_000,
