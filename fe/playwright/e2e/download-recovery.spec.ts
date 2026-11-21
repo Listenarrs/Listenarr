@@ -6,7 +6,7 @@ import { expect, test, type ListenarrApi } from './support/test.js'
 
 const exec = promisify(execFile)
 const qbitImage =
-  'lscr.io/linuxserver/qbittorrent@sha256:e887804fa9de4c60f5f0fb1f3a7e4febe40a8f69fe736f70c4e8589b1f868dab'
+  'ghcr.io/linuxserver/qbittorrent@sha256:e887804fa9de4c60f5f0fb1f3a7e4febe40a8f69fe736f70c4e8589b1f868dab'
 const clientId = 'e2e-qbittorrent'
 const clientName = 'E2E qBittorrent'
 const downloadPath = '/api/v1/download/send'

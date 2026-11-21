@@ -75,8 +75,8 @@ try {
       ...(coverage ? { LISTENARR_COVERAGE_DIR: '/coverage' } : {}),
     },
     dockerRunArguments: [
-      // The test host answers every IHttpClientFactory client itself; a request made any other way
-      // can't resolve a host name, so it fails at once rather than reach the network.
+      // The test host stubs outbound clients except for the loopback sidecar.
+      // Disabling DNS also isolates requests outside IHttpClientFactory from external hostnames.
       '--dns',
       '127.0.0.1',
       // dotnet-coverage writes its report when the host stops: give it the time.
