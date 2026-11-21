@@ -1,4 +1,5 @@
 using Listenarr.Api.Startup;
+using Listenarr.FakeProviders.Routes;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.DependencyInjection.Workers;
 using Listenarr.Infrastructure.FileSystem;
@@ -27,7 +28,8 @@ public static class FakeProvidersHost
         // The background workers are off in this host (LISTENARR_DISABLE_HOSTED_SERVICES); the import
         // tests driving this host still need the unmatched scan to run.
         builder.Services.AddUnmatchedScanWorker();
-        builder.Services.AddListenarrExternalApiTestStub();
+        var enableDownloadScenarios = builder.Configuration[DownloadScenarioEndpoints.EnableVariable] == "1";
+        builder.Services.AddListenarrExternalApiTestStub(enableDownloadScenarios);
 
         var app = builder.Build();
 
@@ -37,6 +39,10 @@ public static class FakeProvidersHost
         realtimeLogSink.InitializeListenarrRealtimeLogging(app.Services);
 
         app.UseListenarrRequestPipeline(endpoints => endpoints.MapListenarrRealtimeHubs(app.Environment));
+        if (enableDownloadScenarios)
+        {
+            DownloadScenarioEndpoints.Map(app);
+        }
 
         app.Run();
     }

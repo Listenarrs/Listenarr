@@ -1,8 +1,8 @@
 // Runs the browser E2E suite (fe/playwright/e2e): Chromium drives the frontend, served by the Vite dev
 // server, which forwards every API and SignalR request to Listenarr running in Docker. No Listenarr API
 // is stubbed: only the app's own outbound requests are, by tests/Listenarr.FakeProviders,
-// which answers the metadata providers from fixtures and anything else with 404; the container has no DNS
-// either, so the suite is deterministic and offline.
+// which answers metadata from fixtures and permits only the download scenarios' loopback qBittorrent
+// sidecar. The container cannot resolve external DNS names.
 //
 // The runner builds the images, generates the audiobook folders (generate-library-fixtures.sh),
 // seeds the library and root folders, then runs Playwright; every test restores the seeded database
@@ -70,7 +70,10 @@ try {
       { name: 'E2E Empty', path: '/e2e/empty' },
       { name: 'E2E Library', path: '/e2e/library' },
     ],
-    environment: coverage ? { LISTENARR_COVERAGE_DIR: '/coverage' } : {},
+    environment: {
+      LISTENARR_E2E_QBITTORRENT: '1',
+      ...(coverage ? { LISTENARR_COVERAGE_DIR: '/coverage' } : {}),
+    },
     dockerRunArguments: [
       // The test host answers every IHttpClientFactory client itself; a request made any other way
       // can't resolve a host name, so it fails at once rather than reach the network.
