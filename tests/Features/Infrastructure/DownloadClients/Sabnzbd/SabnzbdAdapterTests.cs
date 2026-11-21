@@ -274,6 +274,37 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
             Assert.Contains("limit=30", historyRequest.RequestUri.Query, StringComparison.Ordinal);
         }
 
+        [Theory]
+        [InlineData("SABnzbd_nzo_test")]
+        [InlineData("n")]
+        public async Task GetTrackedQueueAsync_LargeLookupKeepsAllHistoryRequestsFiltered(string idPrefix)
+        {
+            var ids = Enumerable.Range(0, 205).Select(index => $"{idPrefix}{index:D6}").ToList();
+            sabnzbdApiMock.QueueResponseOverride = """{"queue":{"noofslots":0,"slots":[]}}""";
+            sabnzbdApiMock.HistoryResponseOverride = """{"history":{"noofslots":0,"slots":[]}}""";
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            Assert.Empty(await adapter.GetTrackedQueueAsync(_client, ids));
+
+            var historyRequests = sabnzbdApiMock.RequestHistory
+                .Where(request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal))
+                .ToList();
+            Assert.True(historyRequests.Count > 1);
+            var requestedIds = new List<string>();
+            foreach (var request in historyRequests)
+            {
+                var filter = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["nzo_ids"]
+                    ?? throw new InvalidOperationException("Tracked history request did not include the ID filter.");
+                Assert.InRange(Uri.EscapeDataString(filter).Length, 1, 2048);
+                var batch = filter.Split(',');
+                Assert.InRange(batch.Length, 1, 100);
+                requestedIds.AddRange(batch);
+            }
+
+            Assert.Equal(ids.Order(), requestedIds.Order());
+        }
+
         [Fact]
         public async Task GetImportItemAsync_QueueItemWithStaleContentPath_ResolvesFromHistoryStorage()
         {

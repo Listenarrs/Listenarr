@@ -29,6 +29,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
     {
         private const int DisplayHistoryLimit = 30;
         private const int MonitorHistoryLimit = 100;
+        private const int MaxEncodedHistoryIdsLength = 2048;
+        private const int EncodedCommaLength = 3;
         private const string IncompleteSnapshotMessage = "Incomplete SABnzbd queue snapshot.";
 
         public async Task<List<QueueItem>> GetQueueAsync(
@@ -179,17 +181,28 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 throw new DownloadClientAdapterPollingException("Incomplete SABnzbd active queue during tracked lookup.");
             }
 
+            foreach (var batch in BatchHistoryIds(missingIds))
+            {
+                await ReadTrackedHistoryBatchAsync(requestContext, http, batch, found, ct);
+            }
+
+            return found;
+        }
+
+        private async Task ReadTrackedHistoryBatchAsync(
+            SabnzbdRequestContext requestContext,
+            HttpClient http,
+            HashSet<string> missingIds,
+            List<QueueItem> found,
+            CancellationToken ct)
+        {
             var parameters = new Dictionary<string, string>
             {
                 ["mode"] = "history",
                 ["output"] = "json",
-                ["limit"] = MonitorHistoryLimit.ToString(CultureInfo.InvariantCulture)
+                ["limit"] = MonitorHistoryLimit.ToString(CultureInfo.InvariantCulture),
+                ["nzo_ids"] = string.Join(',', missingIds)
             };
-            var ids = string.Join(',', missingIds);
-            if (Uri.EscapeDataString(ids).Length <= 2048)
-            {
-                parameters["nzo_ids"] = ids;
-            }
 
             using var response = await http.GetAsync(requestBuilder.BuildUrl(requestContext, parameters), ct);
             if (!response.IsSuccessStatusCode)
@@ -212,8 +225,33 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             {
                 throw new DownloadClientAdapterPollingException("Incomplete SABnzbd tracked history response.");
             }
+        }
 
-            return found;
+        private static IEnumerable<HashSet<string>> BatchHistoryIds(IEnumerable<string> ids)
+        {
+            var batch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var encodedLength = 0;
+            foreach (var id in ids)
+            {
+                var idLength = Uri.EscapeDataString(id).Length;
+                if (idLength > MaxEncodedHistoryIdsLength || id.Contains(','))
+                {
+                    throw new DownloadClientAdapterPollingException("SABnzbd tracked ID cannot be queried exactly.");
+                }
+
+                if (batch.Count > 0 && (batch.Count == MonitorHistoryLimit ||
+                    encodedLength + EncodedCommaLength + idLength > MaxEncodedHistoryIdsLength))
+                {
+                    yield return batch;
+                    batch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    encodedLength = 0;
+                }
+
+                encodedLength += batch.Count == 0 ? idLength : EncodedCommaLength + idLength;
+                batch.Add(id);
+            }
+
+            if (batch.Count > 0) yield return batch;
         }
 
         private static bool MatchesSlotCount(JsonElement count, JsonElement slots) =>

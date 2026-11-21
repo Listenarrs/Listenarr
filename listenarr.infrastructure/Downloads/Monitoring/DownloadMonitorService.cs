@@ -263,6 +263,9 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         {
             try
             {
+                var candidates = orphanCleanupService.GetEligibleDownloads(clientDownloads);
+                if (candidates.Count == 0) return;
+
                 // Durable orphan removal belongs to the monitor worker, not the
                 // queue display path. Use the same full-snapshot poller safeguards
                 // as queue display so a failed or incomplete client response is
@@ -284,7 +287,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     {
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         timeoutCts.CancelAfter(OrphanCleanupQueueTimeout);
-                        trackedItems = await downloadClientGateway.GetTrackedQueueItemsAsync(client, clientDownloads, timeoutCts.Token);
+                        trackedItems = await downloadClientGateway.GetTrackedQueueItemsAsync(client, candidates, timeoutCts.Token);
                         timeoutCts.Token.ThrowIfCancellationRequested();
                     }
                     catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -303,7 +306,8 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     client,
                     clientQueueResult,
                     liveItems,
-                    clientDownloads);
+                    candidates,
+                    cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
