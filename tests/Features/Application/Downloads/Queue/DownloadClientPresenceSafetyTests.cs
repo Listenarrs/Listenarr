@@ -58,22 +58,23 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         var port = ((IPEndPoint)portProbe.LocalEndpoint).Port;
         portProbe.Stop();
         using var listener = new HttpListener();
+        using var shutdown = new CancellationTokenSource();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         listener.Start();
         var requests = new ConcurrentQueue<string>();
         var server = Task.Run(async () =>
         {
-            while (listener.IsListening)
+            while (!shutdown.IsCancellationRequested)
             {
                 HttpListenerContext context;
                 try
                 {
                     context = await listener.GetContextAsync();
                 }
-                catch (Exception ex) when (!listener.IsListening &&
-                    ex is HttpListenerException or ObjectDisposedException or InvalidOperationException)
+                catch (Exception ex) when (shutdown.IsCancellationRequested &&
+                    ex is HttpListenerException or InvalidOperationException)
                 {
-                    // Stop can interrupt an outstanding accept on either platform.
+                    // Windows can abort this accept before Stop updates IsListening.
                     return;
                 }
 
@@ -123,6 +124,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         }
         finally
         {
+            shutdown.Cancel();
             listener.Stop();
             await server.WaitAsync(TimeSpan.FromSeconds(5));
         }
