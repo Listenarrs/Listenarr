@@ -233,12 +233,18 @@ async function runTests (options, deps) {
     ].flatMap((input) => ['-f', input])
     await sh('gh', ['workflow', 'run', options.workflow, '-R', fork, '--ref', branch, ...inputs])
 
+    // GitHub's branch and event filters on the run list can lag well behind the unfiltered list, so a
+    // run that is already going may be missing from the filtered answer: look in the workflow's latest
+    // runs as well, matching the commit, the event and the dispatch time there.
+    const list = (filters) => sh('gh', ['run', 'list', '-R', fork, '--workflow', options.workflow, ...filters,
+      '--json', 'databaseId,headSha,createdAt,event']).then(JSON.parse)
+    const ours = (runs) => runs.find((candidate) => candidate.headSha === commit && candidate.createdAt >= before &&
+      candidate.event === 'workflow_dispatch')?.databaseId
     let run
     for (let attempt = 0; attempt < 30 && !run; attempt++) {
       if (attempt) await deps.sleep(2000)
-      const runs = JSON.parse(await sh('gh', ['run', 'list', '-R', fork, '--workflow', options.workflow, '--branch', branch,
-        '--event', 'workflow_dispatch', '--json', 'databaseId,headSha,createdAt']))
-      run = runs.find((candidate) => candidate.headSha === commit && candidate.createdAt >= before)?.databaseId
+      run = ours(await list(['--branch', branch, '--event', 'workflow_dispatch'])) ??
+        ours(await list(['--limit', '50']))
     }
     if (!run) throw new ExitError(1, 'the run did not appear on GitHub')
     runId = run
