@@ -24,7 +24,7 @@ RUN apt-get update \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
-# - ffmpeg (ffprobe) for tests/Listenarr.BackendIntegrationTests; git; the browser libraries:
+# - ffmpeg (ffprobe) for tests/Listenarr.BackendIntegrationTests, and git
 # - the browser libraries: headless Playwright Chromium frontend integration tests
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \

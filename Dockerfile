@@ -53,17 +53,18 @@ RUN chmod +x /usr/local/bin/gosu
 
 RUN sh /tmp/listenarr-runtime/create-listenarr-user.sh
 
-# Install Node.js and the Discord bot's npm dependencies from a directory holding only the lockfile,
-# before the published app is copied in. A source-only change invalidates the publish COPY below but
-# leaves this (much slower) install cached. The published app still supplies the bot's source files.
-COPY ["tools/discord-bot/package.json", "tools/discord-bot/package-lock.json", "/opt/discord-bot/"]
-RUN sh /tmp/listenarr-runtime/install-discord-bot-runtime.sh /opt/discord-bot
+# Install Node.js only for the Discord bot runtime. npm is used for the install
+# and then removed from the final filesystem; the bot only needs node.
+# The install runs in the bot's final directory from its package files alone, before the published
+# app is copied in: a source-only change invalidates the publish COPY below but leaves this (much
+# slower) install cached. The publish COPY then adds the bot's sources next to node_modules, which
+# stays in place, so nothing is copied twice.
+COPY ["tools/discord-bot/package.json", "tools/discord-bot/package-lock.json", "/app/tools/discord-bot/"]
+RUN sh /tmp/listenarr-runtime/install-discord-bot-runtime.sh
 
 COPY --from=build /app/publish .
-RUN test -f /app/tools/discord-bot/package-lock.json \
-	&& mkdir -p /app/tools/discord-bot/node_modules \
-	&& cp -a /opt/discord-bot/node_modules/. /app/tools/discord-bot/node_modules/ \
-	&& rm -rf /opt/discord-bot
+# The published app must still ship the bot the dependencies above were installed for.
+RUN test -f /app/tools/discord-bot/index.js && test -f /app/tools/discord-bot/package-lock.json
 
 RUN sh /tmp/listenarr-runtime/finalize-app.sh
 
