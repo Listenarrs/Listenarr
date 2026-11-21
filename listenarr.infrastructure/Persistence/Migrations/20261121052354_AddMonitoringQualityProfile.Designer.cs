@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20261121051409_AddMonitoringQualityProfile")]
+    [Migration("20261121052354_AddMonitoringQualityProfile")]
     partial class AddMonitoringQualityProfile
     {
         /// <inheritdoc />
@@ -2788,22 +2788,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Ownership");
 
                     b.Navigation("Relocation");
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredAuthor", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.QualityProfile", null)
-                        .WithMany()
-                        .HasForeignKey("QualityProfileId")
-                        .OnDelete(DeleteBehavior.ClientNoAction);
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredSeries", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.QualityProfile", null)
-                        .WithMany()
-                        .HasForeignKey("QualityProfileId")
-                        .OnDelete(DeleteBehavior.ClientNoAction);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>

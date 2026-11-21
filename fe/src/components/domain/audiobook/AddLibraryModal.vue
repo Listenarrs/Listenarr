@@ -468,12 +468,13 @@
             </div>
 
             <div class="option-group">
-              <label class="form-label">Quality Profile</label>
+              <label :for="qualityProfileSelectId" class="form-label">Quality Profile</label>
               <select
+                :id="qualityProfileSelectId"
                 v-model="options.qualityProfileId"
                 class="form-select"
                 data-testid="quality-profile-select"
-                :disabled="qualityProfiles.length === 0"
+                :disabled="!qualityProfilesLoaded || qualityProfiles.length === 0"
               >
                 <option :value="null" disabled>Select a quality profile</option>
                 <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
@@ -526,6 +527,7 @@
           metadataLoading ||
           Boolean(destinationPathValidationError) ||
           Boolean(asinValidationError) ||
+          !qualityProfilesLoaded ||
           Boolean(qualityProfileValidationError) ||
           metadataLookupFailed
         "
@@ -539,7 +541,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick, useId } from 'vue'
 import type {
   AudibleBookMetadata,
   QualityProfile,
@@ -603,6 +605,7 @@ const toast = useToast()
 const isAdding = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
 const qualityProfilesLoaded = ref(false)
+const qualityProfileSelectId = useId()
 const serverQualityProfileValidationError = ref<string | null>(null)
 
 const options = ref({
@@ -1302,12 +1305,8 @@ const seedPreview = async () => {
     await configStore.loadQualityProfiles()
     if (!isCurrentSeed(generation)) return
     qualityProfiles.value = configStore.qualityProfiles
-    // Preselect the user-designated default; never invent a profile when none is marked default.
-    const selectedId = options.value.qualityProfileId
-    if (selectedId == null || !qualityProfiles.value.some((profile) => profile.id === selectedId)) {
-      options.value.qualityProfileId =
-        qualityProfiles.value.find((profile) => profile.isDefault)?.id ?? null
-    }
+    options.value.qualityProfileId =
+      qualityProfiles.value.find((profile) => profile.isDefault)?.id ?? null
     qualityProfilesLoaded.value = true
 
     // Load application settings to get default root
@@ -1628,7 +1627,7 @@ const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
 }
 
 const addToLibrary = async () => {
-  if (!props.book) return
+  if (!props.book || !qualityProfilesLoaded.value) return
   if (metadataLookupFailed.value) return
   if (asinValidationError.value) {
     toast.error('Invalid ASIN', asinValidationError.value)

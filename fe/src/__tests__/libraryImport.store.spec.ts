@@ -123,7 +123,7 @@ describe('library import store', () => {
       },
     }
     store.action = 'move'
-    await store.importSelected('/library')
+    await store.importSelected('/library', 17)
 
     expect(addToLibrary).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -134,7 +134,7 @@ describe('library import store', () => {
         genres: ['Science Fiction'],
         publishYear: '2012',
       }),
-      expect.anything(),
+      expect.objectContaining({ qualityProfileId: 17 }),
     )
   })
 

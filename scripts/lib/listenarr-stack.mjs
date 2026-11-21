@@ -96,6 +96,15 @@ async function seedLibrary(apiUrl, seedFile, rootFolders) {
     'X-XSRF-TOKEN': token,
   }
 
+  const profileResponse = await fetch(`${apiUrl}/api/v1/qualityprofile`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: 'E2E Default', isDefault: true }),
+  })
+  if (!profileResponse.ok) {
+    throw new Error(`Could not create the E2E quality profile: ${await profileResponse.text()}`)
+  }
+
   for (const { authors, ...metadata } of books) {
     const addResponse = await fetch(`${apiUrl}/api/v1/library/add`, {
       method: 'POST',

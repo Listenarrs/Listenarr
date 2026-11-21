@@ -485,6 +485,10 @@ export class ApiStubs {
     return this.stubJson('POST', '**/api/v1/library/add', { message: 'Audiobook added', audiobook }, alias)
   }
 
+  stubQualityProfiles(profiles: { id: number; name: string; isDefault: boolean }[]) {
+    return this.stubJson('GET', '**/api/v1/qualityprofile', profiles, 'getQualityProfiles')
+  }
+
   stubLibraryPathPreview(fullPath: string, relativePath: string, root: string, alias = 'previewLibraryPath') {
     return this.stubJson('POST', '**/api/v1/library/preview-path', { fullPath, relativePath, root }, alias)
   }

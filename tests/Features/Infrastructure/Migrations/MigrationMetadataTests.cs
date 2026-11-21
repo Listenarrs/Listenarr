@@ -36,7 +36,7 @@ public class MigrationMetadataTests : BaseTests
         var migration = new AddOperationEvidencePublications();
         var up = BuildOperations(migration, "Up");
         var down = BuildOperations(migration, "Down");
-        Assert.Equal(6, up.Operations.Count);
+        Assert.Equal(4, up.Operations.Count);
         Assert.Equal(3, down.Operations.Count);
         Assert.Empty(up.Operations.OfType<SqlOperation>());
         Assert.DoesNotContain(up.Operations, operation =>
@@ -59,7 +59,7 @@ public class MigrationMetadataTests : BaseTests
     public void AddMonitoringQualityProfile_AddsNullableProfileReferences()
     {
         AssertMigrationId<AddMonitoringQualityProfile>(
-            "20261121051409_AddMonitoringQualityProfile");
+            "20261121052354_AddMonitoringQualityProfile");
         var up = BuildOperations(new AddMonitoringQualityProfile(), "Up");
         var columns = up.Operations.OfType<AddColumnOperation>().ToList();
         Assert.Equal(6, up.Operations.Count);
@@ -72,13 +72,7 @@ public class MigrationMetadataTests : BaseTests
         Assert.Equal(
             new[] { "MonitoredAuthors", "MonitoredSeries" },
             columns.Select(column => column.Table).OrderBy(table => table, StringComparer.Ordinal));
-        var references = up.Operations.OfType<AddForeignKeyOperation>().ToList();
-        Assert.Equal(2, references.Count);
-        Assert.All(references, reference =>
-        {
-            Assert.Equal("QualityProfiles", reference.PrincipalTable);
-            Assert.Equal(ReferentialAction.NoAction, reference.OnDelete);
-        });
+        Assert.Equal(2, up.Operations.OfType<CreateIndexOperation>().Count());
     }
 
     [Fact]

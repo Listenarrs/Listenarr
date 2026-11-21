@@ -2787,22 +2787,6 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Navigation("Relocation");
                 });
 
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredAuthor", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.QualityProfile", null)
-                        .WithMany()
-                        .HasForeignKey("QualityProfileId")
-                        .OnDelete(DeleteBehavior.ClientNoAction);
-                });
-
-            modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredSeries", b =>
-                {
-                    b.HasOne("Listenarr.Domain.Audiobooks.QualityProfile", null)
-                        .WithMany()
-                        .HasForeignKey("QualityProfileId")
-                        .OnDelete(DeleteBehavior.ClientNoAction);
-                });
-
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>
                 {
                     b.HasOne("Listenarr.Domain.Audiobooks.RootFolderRelocation", "Relocation")

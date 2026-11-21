@@ -150,12 +150,10 @@ namespace Listenarr.Infrastructure.Persistence
             modelBuilder.Entity<Audiobook>().HasIndex(a => a.LastSearchTime);
             modelBuilder.Entity<MonitoredAuthor>().HasIndex(a => new { a.AuthorNameNormalized, a.Region, a.Language }).IsUnique();
             modelBuilder.Entity<MonitoredAuthor>().HasIndex(a => a.LastCheckedAt);
-            modelBuilder.Entity<MonitoredAuthor>().HasOne<QualityProfile>().WithMany()
-                .HasForeignKey(a => a.QualityProfileId).OnDelete(DeleteBehavior.ClientNoAction);
+            modelBuilder.Entity<MonitoredAuthor>().HasIndex(a => a.QualityProfileId);
             modelBuilder.Entity<MonitoredSeries>().HasIndex(s => new { s.SeriesNameNormalized, s.Region, s.Language }).IsUnique();
             modelBuilder.Entity<MonitoredSeries>().HasIndex(s => s.LastCheckedAt);
-            modelBuilder.Entity<MonitoredSeries>().HasOne<QualityProfile>().WithMany()
-                .HasForeignKey(s => s.QualityProfileId).OnDelete(DeleteBehavior.ClientNoAction);
+            modelBuilder.Entity<MonitoredSeries>().HasIndex(s => s.QualityProfileId);
             modelBuilder.Entity<AuthorCacheEntry>().HasIndex(a => new { a.AuthorNameNormalized, a.Region }).IsUnique();
             modelBuilder.Entity<AuthorCacheEntry>().HasIndex(a => new { a.AuthorAsin, a.Region });
             modelBuilder.Entity<SeriesCacheEntry>().HasIndex(s => new { s.SeriesNameNormalized, s.Region }).IsUnique();

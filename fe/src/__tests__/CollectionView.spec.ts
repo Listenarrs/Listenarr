@@ -1457,7 +1457,7 @@ describe('CollectionView', () => {
     expect(mockMonitorAuthor).not.toHaveBeenCalled()
   })
 
-  it('sends the selected quality profile when monitoring an author', async () => {
+  it.each([false, true])('sends the selected profile (existing monitor: %s)', async (existing) => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockGetAuthorCatalog.mockResolvedValue({
@@ -1465,6 +1465,12 @@ describe('CollectionView', () => {
       totalBooks: 0,
       books: [],
     })
+    if (existing) {
+      mockGetAuthorMonitoringStatus.mockResolvedValue({
+        isMonitored: true,
+        monitoredAuthor: { id: 7, qualityProfileId: 3 },
+      })
+    }
 
     const router = createRouter({
       history: createMemoryHistory(),
@@ -1491,10 +1497,14 @@ describe('CollectionView', () => {
     const select = wrapper.get('[data-testid="monitoring-quality-profile"]')
     expect((select.element as HTMLSelectElement).value).toBe('3')
     await select.setValue('2')
-    await wrapper.get('.author-monitor-btn').trigger('click')
+    const button = existing
+      ? wrapper.findAll('button').find((candidate) => candidate.text() === 'Save Profile')!
+      : wrapper.get('.author-monitor-btn')
+    await button.trigger('click')
     await flushPromises()
 
     expect(mockMonitorAuthor).toHaveBeenCalledWith(expect.objectContaining({ qualityProfileId: 2 }))
+    expect(mockUnmonitorAuthor).not.toHaveBeenCalled()
   })
 
   it('monitors a series using the configured region and language defaults', async () => {

@@ -117,10 +117,23 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<bool> DeleteAsync(int id)
         {
+            await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync()
+                : null;
             var existing = await _db.QualityProfiles.FindAsync(id);
             if (existing == null) return false;
+
+            if (await _db.MonitoredAuthors.AnyAsync(a => a.QualityProfileId == id)
+                || await _db.MonitoredSeries.AnyAsync(s => s.QualityProfileId == id))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot delete quality profile '{existing.Name}' because it is used by author or series monitoring. " +
+                    "Reassign those monitors to a different profile first.");
+            }
+
             _db.QualityProfiles.Remove(existing);
             await _db.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
             return true;
         }
 

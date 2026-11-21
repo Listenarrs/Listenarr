@@ -278,7 +278,7 @@
               data-testid="monitoring-quality-profile"
               aria-label="Quality profile for audiobooks added by monitoring"
               title="Quality profile for audiobooks added by monitoring"
-              :disabled="isCurrentAuthorMonitored || authorMonitoringBusy"
+              :disabled="authorMonitoringBusy"
             >
               <option :value="null" disabled>Select a quality profile</option>
               <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
@@ -286,7 +286,7 @@
               </option>
             </select>
             <span
-              v-else-if="qualityProfilesLoaded && !isCurrentAuthorMonitored"
+              v-else-if="qualityProfilesLoaded"
               class="monitoring-profile-warning"
               data-testid="monitoring-quality-profile-warning"
             >
@@ -296,6 +296,18 @@
                 >Settings → Quality Profiles</RouterLink
               >
             </span>
+            <button
+              v-if="isCurrentAuthorMonitored && qualityProfiles.length > 0"
+              class="toolbar-btn"
+              :disabled="
+                authorMonitoringBusy ||
+                !hasValidMonitoringQualityProfile ||
+                monitoringQualityProfileId === authorMonitoringStatus?.qualityProfileId
+              "
+              @click="saveAuthorMonitoringProfile"
+            >
+              Save Profile
+            </button>
             <button
               class="toolbar-btn author-monitor-btn"
               :class="{ active: isCurrentAuthorMonitored }"
@@ -334,7 +346,7 @@
               data-testid="monitoring-quality-profile"
               aria-label="Quality profile for audiobooks added by monitoring"
               title="Quality profile for audiobooks added by monitoring"
-              :disabled="isCurrentSeriesMonitored || seriesMonitoringBusy"
+              :disabled="seriesMonitoringBusy"
             >
               <option :value="null" disabled>Select a quality profile</option>
               <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
@@ -342,7 +354,7 @@
               </option>
             </select>
             <span
-              v-else-if="qualityProfilesLoaded && !isCurrentSeriesMonitored"
+              v-else-if="qualityProfilesLoaded"
               class="monitoring-profile-warning"
               data-testid="monitoring-quality-profile-warning"
             >
@@ -352,6 +364,18 @@
                 >Settings → Quality Profiles</RouterLink
               >
             </span>
+            <button
+              v-if="isCurrentSeriesMonitored && qualityProfiles.length > 0"
+              class="toolbar-btn"
+              :disabled="
+                seriesMonitoringBusy ||
+                !hasValidMonitoringQualityProfile ||
+                monitoringQualityProfileId === seriesMonitoringStatus?.qualityProfileId
+              "
+              @click="saveSeriesMonitoringProfile"
+            >
+              Save Profile
+            </button>
             <button
               class="toolbar-btn author-monitor-btn"
               :class="{ active: isCurrentSeriesMonitored }"
@@ -1372,11 +1396,14 @@ watch(
   { immediate: true },
 )
 
-// Ensure current sortKey is valid for the current view; reset to the type default if not
 // Show the retained profile for an active monitor; otherwise preselect the user's default.
 watch(
   [
     qualityProfiles,
+    type,
+    name,
+    () => authorMonitoringStatus.value?.id,
+    () => seriesMonitoringStatus.value?.id,
     () => authorMonitoringStatus.value?.qualityProfileId,
     () => seriesMonitoringStatus.value?.qualityProfileId,
   ],
@@ -1391,13 +1418,12 @@ watch(
       monitoringQualityProfileId.value = retained
       return
     }
-    if (!profiles.some((profile) => profile.id === monitoringQualityProfileId.value)) {
-      monitoringQualityProfileId.value = profiles.find((profile) => profile.isDefault)?.id ?? null
-    }
+    monitoringQualityProfileId.value = profiles.find((profile) => profile.isDefault)?.id ?? null
   },
   { immediate: true },
 )
 
+// Reset the sort key when it is unavailable for this collection type.
 watch(sortOptions, (newOpts) => {
   const vals = newOpts.map((o) => o.value)
   if (!vals.includes(sortKey.value)) {
@@ -2118,12 +2144,20 @@ function openAddToLibrary(audiobook: CollectionDisplayItem) {
   pendingAddBook.value = audiobook.addMetadata
 }
 
-async function toggleAuthorMonitoring() {
+function toggleAuthorMonitoring() {
+  return updateAuthorMonitoring(false)
+}
+
+function saveAuthorMonitoringProfile() {
+  return updateAuthorMonitoring(true)
+}
+
+async function updateAuthorMonitoring(saveProfile: boolean) {
   if (!isAuthorCollection.value || authorMonitoringBusy.value) return
 
   authorMonitoringBusy.value = true
   try {
-    if (authorMonitoringStatus.value) {
+    if (authorMonitoringStatus.value && !saveProfile) {
       await apiService.unmonitorAuthor(authorMonitoringStatus.value.id)
       authorMonitoringStatus.value = null
       toast.success(
@@ -2156,7 +2190,7 @@ async function toggleAuthorMonitoring() {
         ? `Added ${response.addedCount} audiobook${response.addedCount === 1 ? '' : 's'} from the current catalog.`
         : 'No new audiobooks needed to be added from the current catalog.'
 
-    toast.success('Author monitored', details)
+    toast.success(saveProfile ? 'Author monitoring profile saved' : 'Author monitored', details)
 
     if (response.failedCount > 0 || response.errorMessage) {
       const warningMessage =
@@ -2171,7 +2205,7 @@ async function toggleAuthorMonitoring() {
     toast.error('Author monitoring failed', message)
     errorTracking.captureException(err as Error, {
       component: 'CollectionView',
-      operation: 'toggleAuthorMonitoring',
+      operation: 'updateAuthorMonitoring',
       metadata: {
         author: name.value,
         region: authorCatalogRegion.value,
@@ -2183,12 +2217,20 @@ async function toggleAuthorMonitoring() {
   }
 }
 
-async function toggleSeriesMonitoring() {
+function toggleSeriesMonitoring() {
+  return updateSeriesMonitoring(false)
+}
+
+function saveSeriesMonitoringProfile() {
+  return updateSeriesMonitoring(true)
+}
+
+async function updateSeriesMonitoring(saveProfile: boolean) {
   if (!isSeriesCollection.value || seriesMonitoringBusy.value) return
 
   seriesMonitoringBusy.value = true
   try {
-    if (seriesMonitoringStatus.value) {
+    if (seriesMonitoringStatus.value && !saveProfile) {
       await apiService.unmonitorSeries(seriesMonitoringStatus.value.id)
       seriesMonitoringStatus.value = null
       toast.success(
@@ -2221,7 +2263,7 @@ async function toggleSeriesMonitoring() {
         ? `Added ${response.addedCount} audiobook${response.addedCount === 1 ? '' : 's'} from the current series catalog.`
         : 'No new audiobooks needed to be added from the current series catalog.'
 
-    toast.success('Series monitored', details)
+    toast.success(saveProfile ? 'Series monitoring profile saved' : 'Series monitored', details)
 
     if (response.failedCount > 0 || response.errorMessage) {
       const warningMessage =
@@ -2236,7 +2278,7 @@ async function toggleSeriesMonitoring() {
     toast.error('Series monitoring failed', message)
     errorTracking.captureException(err as Error, {
       component: 'CollectionView',
-      operation: 'toggleSeriesMonitoring',
+      operation: 'updateSeriesMonitoring',
       metadata: {
         series: name.value,
         region: seriesCatalogRegion.value,

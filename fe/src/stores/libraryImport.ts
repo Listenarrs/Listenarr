@@ -18,6 +18,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
+import { getApiValidationError } from '@/services/apiErrors'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
@@ -581,6 +582,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   async function importSelected(
     rootFolderPath: string,
+    qualityProfileId?: number,
   ): Promise<{ imported: number; errors: string[]; warnings: string[] }> {
     const toImport = itemList.value.filter((i) => i.selected && i.selectedMatch)
     importErrors.value = []
@@ -602,6 +604,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           }
           const { audiobook } = await apiService.addToLibrary(metadata, {
             monitored: monitor.value != 'none',
+            qualityProfileId,
             destinationPath: action.value === 'none' ? item.folderPath : rootFolderPath,
             searchResult: sanitizedMatch,
           })
@@ -609,6 +612,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         } catch (e: unknown) {
           // 409 = book already in library, extract existing audiobook from response body
           const err = e as { status?: number; body?: unknown }
+          const profileError = getApiValidationError(e, 'qualityProfileId')
+          if (profileError) throw new Error(profileError.message)
           if (err?.status === 409 && err?.body) {
             const body = typeof err.body === 'string' ? JSON.parse(err.body) : err.body
             if (body?.audiobook?.id) {
