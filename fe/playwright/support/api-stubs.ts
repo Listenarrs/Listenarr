@@ -198,6 +198,12 @@ type RecordedCall = {
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+/** A Library Import scan stubbed by `stubLibraryImportScanJob`, running until the test ends it. */
+export type LibraryImportScanJob = {
+  finish: (items: LibraryImportUnmatchedFile[]) => void
+  fail: (error: string) => void
+}
 type ReplySource = ApiReply | ((request: RecordedRequest) => ApiReply)
 type PendingCall = RecordedCall & { settled: boolean }
 
@@ -294,8 +300,9 @@ export class ApiStubs {
     return this.register(method, route, alias, { statusCode, body })
   }
 
-  stubAccount() {
-    return this.stubJson('GET', '**/api/v1/account/me', { authenticated: false }, 'getCurrentUser')
+  /** No user by default, as with authentication disabled; a signed-in user runs the app's authenticated start. */
+  stubAccount(user: { authenticated: boolean; name?: string } = { authenticated: false }) {
+    return this.stubJson('GET', '**/api/v1/account/me', user, 'getCurrentUser')
   }
 
   stubBootstrap() {
@@ -525,6 +532,37 @@ export class ApiStubs {
     )
   }
 
+  /**
+   * A Library Import scan the test ends itself: the job reports `Processing` until `finish` or `fail`,
+   * and the cancel endpoint marks it `Canceled`. Aliases end with the job id, so several scans can run
+   * in one test: `startLibraryImportScan-<jobId>`, `getLibraryImportScanResults-<jobId>`,
+   * `cancelLibraryImportScan-<jobId>`.
+   */
+  async stubLibraryImportScanJob(rootFolderId: number, jobId: string): Promise<LibraryImportScanJob> {
+    let reply: Record<string, unknown> = { jobId, status: 'Processing' }
+    await this.stubJson(
+      'POST',
+      `**/api/v1/rootfolders/${rootFolderId}/scan-unmatched`,
+      { jobId },
+      `startLibraryImportScan-${jobId}`,
+    )
+    await this.register('GET', `**/api/v1/rootfolders/unmatched-results/${jobId}`, `getLibraryImportScanResults-${jobId}`, () => ({
+      body: reply,
+    }))
+    await this.register('POST', `**/api/v1/rootfolders/unmatched-jobs/${jobId}/cancel`, `cancelLibraryImportScan-${jobId}`, () => {
+      reply = { jobId, status: 'Canceled' }
+      return { body: { jobId, status: 'Canceled' } }
+    })
+    return {
+      finish: (items) => {
+        reply = { jobId, status: 'Completed', items }
+      },
+      fail: (error) => {
+        reply = { jobId, status: 'Failed', error }
+      },
+    }
+  }
+
   /** What every integration test starts from; the `api` fixture registers it before the test body runs. */
   async stubIntegrationDefaults() {
     await this.register('GET', anyApiRoute, undefined, { body: [] })
@@ -559,8 +597,9 @@ export class ApiStubs {
     return this.stubJson('GET', '**/api/v1/system/health', health, 'getSystemHealth')
   }
 
-  stubRootFolders(folders: RootFolder[] = []) {
-    return this.stubJson('GET', '**/api/v1/rootfolders', folders, 'getRootFolders')
+  /** `delay` holds the answer back, for what the page shows while its folder list loads. */
+  stubRootFolders(folders: RootFolder[] = [], delay?: number) {
+    return this.register('GET', '**/api/v1/rootfolders', 'getRootFolders', { body: folders, delay })
   }
 
   stubSystemReadiness(readiness = systemReadinessFixture()) {

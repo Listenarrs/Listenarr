@@ -19,7 +19,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { getApiValidationError } from '@/services/apiErrors'
-import { signalRService } from '@/services/signalr'
+import { followUnmatchedScanJob } from '@/services/unmatchedScanJob'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
 import {
@@ -30,9 +30,52 @@ import {
 } from '@/services/audiobookSearch'
 import { normalizeSearchRegion, regionLabel } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 import { buildSeriesFields } from '@/utils/seriesUtils'
 import type { SeriesEntry } from '@/utils/seriesUtils'
-import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
+import type {
+  SearchResult,
+  AudibleBookMetadata,
+  UnmatchedFileItem,
+  UnmatchedFilesResponse,
+} from '@/types'
+
+// A scan of one root folder, from its start to its end. Kept for the browser session, so the page
+// shows it again after a reload, finished or not.
+export interface LibraryImportScanTask {
+  // Tells the scans of the session apart (the job id comes later, from the server)
+  id: string
+  jobId: string | null
+  rootFolderId: number
+  // The folder's name (or path) when the scan started, so it can be named on any page
+  folderName: string | null
+  // The folder's path when the scan started (a scan saved before paths were kept has none)
+  folderPath?: string | null
+  status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
+  startedAt: string
+  finishedAt: string | null
+  error: string | null
+  itemCount: number | null
+}
+
+const SCAN_TASK_SESSION_KEY = 'listenarr.libraryImport.scanTask'
+// The session's earlier scans, newest first: the Jobs page lists them
+const SCAN_HISTORY_SESSION_KEY = 'listenarr.libraryImport.scanHistory'
+const SCAN_HISTORY_KEPT = 50
+// The task bar dismissed, as the scan was then: dismissing hides the bar, the scan goes on, and
+// the bar shows again when the scan ends (a new state to tell)
+const TASK_BAR_HIDDEN_SESSION_KEY = 'listenarr.libraryImport.taskBarHidden'
+
+let scanTaskSequence = 0
+function newScanTaskId(): string {
+  scanTaskSequence += 1
+  return `library-import-scan-${Date.now()}-${scanTaskSequence}`
+}
+
+// A scan saved before scans had an id gets one from its start
+function withId(task: Omit<LibraryImportScanTask, 'id'> & { id?: string }): LibraryImportScanTask {
+  return { ...task, id: task.id || `library-import-scan-${task.startedAt}` }
+}
 
 export interface LibraryImportItem {
   id: string // = fullPath (unique key)
@@ -167,9 +210,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   function findMatchSearchEnded() {
     findMatchSearchCount.value = Math.max(0, findMatchSearchCount.value - 1)
   }
+  // The root folder the page shows: its rows are the only ones in items
   const rootFolderId = ref<number | null>(null)
-  const scanStatus = ref<'idle' | 'scanning' | 'done' | 'error'>('idle')
-  const scanError = ref<string | null>(null)
+  // The folder shown has results: saved ones, or those of a scan that finished
+  const resultsLoaded = ref(false)
   const scanWarnings = ref<string[]>([])
   const lastScannedAt = ref<string | null>(null)
   const action = ref<'none' | 'move' | 'hardlink/copy'>('none')
@@ -185,164 +229,278 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const processedCount = computed(() => itemList.value.filter((i) => i.hasSearched).length)
   const matchedCount = computed(() => itemList.value.filter((i) => i.selectedMatch).length)
 
-  // ─── Scan ─────────────────────────────────────────────────────────────────
+  // ─── Scan task ────────────────────────────────────────────────────────────
 
-  // Only the latest load or scan may write the state: starting one stops listening to the previous
-  // scan, and an older one answering late is ignored
-  let currentOperation = 0
-  let stopCurrentScan: (() => void) | null = null
+  // One scan runs at a time. It belongs to the folder it was started on, whatever folder the page
+  // shows meanwhile: its results are written to that folder's rows only, and only while it is shown
+  // (the server keeps them for when it is shown again)
+  const scanTask = ref<LibraryImportScanTask | null>(null)
+  // The scans that came before it, newest first (each one ended: one scan runs at a time)
+  const scanHistory = ref<LibraryImportScanTask[]>([])
+  const hiddenTaskBar = ref<string | null>(_loadHiddenTaskBar())
+  const taskBarVisible = computed(
+    () => !!scanTask.value && _taskBarKey(scanTask.value) !== hiddenTaskBar.value,
+  )
+  const scanTaskActive = computed(
+    () => scanTask.value?.status === 'starting' || scanTask.value?.status === 'running',
+  )
+  const scanStatus = computed<'idle' | 'scanning' | 'done'>(() => {
+    if (scanTaskActive.value && scanTask.value?.rootFolderId === rootFolderId.value)
+      return 'scanning'
+    return resultsLoaded.value ? 'done' : 'idle'
+  })
 
-  function _beginOperation(folderId: number): number {
-    stopCurrentScan?.()
-    stopCurrentScan = null
+  // Only the latest load of the folder shown may write its rows, and only the latest scan its task
+  let currentLoad = 0
+  let currentScan = 0
+  let stopFollowingScan: (() => void) | null = null
+
+  function _showFolder(folderId: number): number {
     // Start Matching works on the rows shown: another folder's rows replace them, so it stops
-    if (folderId !== rootFolderId.value) stopProcessing()
-    return ++currentOperation
+    if (folderId !== rootFolderId.value) {
+      stopProcessing()
+      items.value = {}
+      lastScannedAt.value = null
+      resultsLoaded.value = false
+    }
+    rootFolderId.value = folderId
+    scanWarnings.value = []
+    return ++currentLoad
   }
 
   async function initFromRootFolder(id: number) {
-    const operation = _beginOperation(id)
-    rootFolderId.value = id
-    scanStatus.value = 'idle'
-    scanWarnings.value = []
+    const load = _showFolder(id)
     try {
       const saved = await apiService.getSavedUnmatchedFiles(id)
-      if (operation !== currentOperation) return
-      if (saved.lastScannedAt) lastScannedAt.value = saved.lastScannedAt
+      if (load !== currentLoad) return
+      lastScannedAt.value = saved.lastScannedAt ?? null
       scanWarnings.value = saved.warnings ?? []
-      const persisted = _loadPersistedMatches(id)
-      const newItems: Record<string, LibraryImportItem> = {}
-      for (const item of saved.items) {
-        const existing = items.value[item.fullPath]
-        const p = persisted[item.fullPath]
-        if (existing) {
-          newItems[item.fullPath] = {
-            ...unmatchedToImportItem(item),
-            selectedMatch: existing.selectedMatch,
-            hasSearched: existing.hasSearched,
-            isSearching: false,
-            selected: existing.selected,
-            matchError: existing.matchError,
-          }
-        } else if (p) {
-          newItems[item.fullPath] = {
-            ...unmatchedToImportItem(item),
-            selectedMatch: p.selectedMatch,
-            hasSearched: p.hasSearched,
-            isSearching: false,
-            selected: p.selected,
-            matchError: p.matchError,
-          }
-        } else {
-          newItems[item.fullPath] = unmatchedToImportItem(item)
-        }
-      }
-      items.value = newItems
-      if (saved.items.length > 0) scanStatus.value = 'done'
+      _populateFromItems(saved.items, _loadPersistedMatches(id))
+      resultsLoaded.value = saved.items.length > 0
     } catch (e) {
       logger.debug('[libraryImport] Failed to load saved results:', e)
     }
   }
 
+  // Scans a folder and shows it. A scan running on another folder is canceled first (the page asks
+  // before); a scan already running on this folder goes on.
   async function triggerScan(id: number) {
-    const operation = _beginOperation(id)
-    const isCurrent = () => operation === currentOperation
-    // Matches already made in this folder carry over to the new results, even when it wasn't loaded
-    const persisted = _loadPersistedMatches(id)
-    if (rootFolderId.value !== id) {
-      // Another folder's rows must not show under this one, even if the scan fails
-      items.value = {}
-      lastScannedAt.value = null
-    }
-    rootFolderId.value = id
-    scanStatus.value = 'scanning'
-    scanError.value = null
-    scanWarnings.value = []
-    // The saved matches stay until this scan's results replace them: a scan that replaces this one
-    // reads them again
-
-    let jobId = ''
-    let settled = false
-    let offSignalR: (() => void) | null = null
-    let pollInterval: ReturnType<typeof setInterval> | null = null
-
-    function cleanUp() {
-      offSignalR?.()
-      if (pollInterval) {
-        clearInterval(pollInterval)
-        pollInterval = null
-      }
-    }
-
-    stopCurrentScan = cleanUp
-
-    async function onComplete(completedJobId: string) {
-      if (settled || !isCurrent()) return
-      settled = true
-      cleanUp()
-      try {
-        const response = await apiService.getUnmatchedResults(completedJobId)
-        if (!isCurrent()) return
-        _populateFromItems(response.items, persisted)
-        scanWarnings.value = response.warnings ?? []
-        _persistMatches()
-        lastScannedAt.value = new Date().toISOString()
-        scanStatus.value = 'done'
-      } catch (e) {
-        if (!isCurrent()) return
-        scanStatus.value = 'error'
-        scanError.value = (e as Error)?.message ?? 'Failed to fetch results'
-      }
-    }
-
-    function onFailed(error?: string) {
-      if (settled || !isCurrent()) return
-      settled = true
-      cleanUp()
-      scanStatus.value = 'error'
-      scanError.value = error ?? 'Scan failed'
-    }
-
-    // Register before POST — if scan is fast, SignalR may fire before scanUnmatchedFiles() returns.
-    // Allow the event if jobId is not yet assigned (jobId === '') — it must be ours.
-    offSignalR = signalRService.onUnmatchedScanComplete(async (payload) => {
-      if (!jobId || payload.jobId !== jobId) return
-      if (payload.error) {
-        onFailed(payload.error)
+    if (scanTaskActive.value) {
+      if (scanTask.value?.rootFolderId === id) {
+        _showFolder(id)
         return
       }
-      await onComplete(payload.jobId)
+      await cancelScan({ showPreviousResults: false })
+    }
+    const scan = ++currentScan
+    _showFolder(id)
+    if (scanTask.value) _archiveTask(scanTask.value)
+    const folder = useRootFoldersStore().folders.find((f) => f.id === id)
+    _setTask({
+      id: newScanTaskId(),
+      jobId: null,
+      rootFolderId: id,
+      folderName: folder ? folder.name || folder.path : null,
+      folderPath: folder ? folder.path : null,
+      status: 'starting',
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+      itemCount: null,
     })
 
+    let jobId: string
     try {
-      const result = await apiService.scanUnmatchedFiles(id)
-      jobId = result.jobId
-      if (settled || !isCurrent()) return // SignalR already handled it, or another scan replaced it
-      // Poll once immediately — handles fast scans
-      const check = await apiService.getUnmatchedResults(jobId)
-      if (!isCurrent()) return
-      if (check.status === 'Completed') {
-        await onComplete(jobId)
-      } else if (check.status === 'Failed') {
-        onFailed(check.error)
-      } else {
-        // Polling fallback — keeps checking every 2.5s if SignalR is unavailable or slow
-        pollInterval = setInterval(async () => {
-          if (settled || !jobId) return
-          try {
-            const poll = await apiService.getUnmatchedResults(jobId)
-            if (poll.status === 'Completed') await onComplete(jobId)
-            else if (poll.status === 'Failed') onFailed(poll.error)
-          } catch {
-            /* ignore transient errors, keep polling */
-          }
-        }, 2500)
-      }
+      jobId = (await apiService.scanUnmatchedFiles(id)).jobId
     } catch (e) {
-      onFailed((e as Error)?.message ?? 'Failed to start scan')
+      if (scan === currentScan) _endTask('failed', (e as Error)?.message ?? 'Failed to start scan')
+      return
+    }
+    if (scan !== currentScan) {
+      // Canceled before the server gave the job its id: cancel it now
+      void apiService.cancelUnmatchedScan(jobId).catch(() => undefined)
+      return
+    }
+    _setTask({ ...scanTask.value!, jobId, status: 'running' })
+    _followScan(scan, jobId)
+  }
+
+  // Stops the running scan on the server and on the page
+  async function cancelScan({ showPreviousResults = true } = {}) {
+    const task = scanTask.value
+    if (!task || !scanTaskActive.value) return
+    ++currentScan
+    stopFollowingScan?.()
+    stopFollowingScan = null
+    _endTask('canceled')
+    if (task.jobId) {
+      try {
+        await apiService.cancelUnmatchedScan(task.jobId)
+      } catch (e) {
+        logger.debug('[libraryImport] Failed to cancel the scan:', e)
+      }
+    }
+    // The folder shows its previous results again
+    if (showPreviousResults && rootFolderId.value === task.rootFolderId)
+      await initFromRootFolder(task.rootFolderId)
+  }
+
+  // Forgets a finished scan
+  function dismissScanTask() {
+    if (scanTaskActive.value) return
+    scanTask.value = null
+    try {
+      sessionStorage.removeItem(SCAN_TASK_SESSION_KEY)
+    } catch {
+      /* non-fatal */
     }
   }
 
+  // The task bar's dismiss button hides the bar: a running scan goes on, and its bar shows again
+  // when it ends; a scan that ended stays hidden
+  function dismissTaskBar() {
+    const task = scanTask.value
+    if (!task) return
+    hiddenTaskBar.value = _taskBarKey(task)
+    try {
+      sessionStorage.setItem(TASK_BAR_HIDDEN_SESSION_KEY, hiddenTaskBar.value)
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // A scan starting then running is one state: only its end shows the bar again
+  function _taskBarKey(task: LibraryImportScanTask): string {
+    const phase = task.status === 'starting' || task.status === 'running' ? 'active' : task.status
+    return `${task.id}:${phase}`
+  }
+
+  function _loadHiddenTaskBar(): string | null {
+    try {
+      return sessionStorage.getItem(TASK_BAR_HIDDEN_SESSION_KEY)
+    } catch {
+      return null
+    }
+  }
+
+  // Forgets one scan of the session: the current one (once it ended) or an earlier one
+  function dismissScan(id: string) {
+    if (scanTask.value?.id === id) {
+      dismissScanTask()
+      return
+    }
+    _saveHistory(scanHistory.value.filter((task) => task.id !== id))
+  }
+
+  // Forgets the scans that ended; a running one stays
+  function clearFinishedScans() {
+    dismissScanTask()
+    _saveHistory([])
+  }
+
+  function _archiveTask(task: LibraryImportScanTask) {
+    // The saved history first, or a scan started before the restore would replace it
+    _restoreHistory()
+    _saveHistory([task, ...scanHistory.value].slice(0, SCAN_HISTORY_KEPT))
+  }
+
+  function _saveHistory(history: LibraryImportScanTask[]) {
+    scanHistory.value = history
+    try {
+      sessionStorage.setItem(SCAN_HISTORY_SESSION_KEY, JSON.stringify(history))
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function _restoreHistory() {
+    if (scanHistory.value.length > 0) return
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SCAN_HISTORY_SESSION_KEY) ?? '[]')
+      if (Array.isArray(saved)) scanHistory.value = saved.map(withId).slice(0, SCAN_HISTORY_KEPT)
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // After a reload: the session's latest scan comes back, and is followed again if it was running;
+  // the earlier scans come back as they ended
+  function restoreScanTask() {
+    _restoreHistory()
+    if (scanTask.value) return
+    let saved: LibraryImportScanTask | null = null
+    try {
+      saved = JSON.parse(sessionStorage.getItem(SCAN_TASK_SESSION_KEY) ?? 'null')
+    } catch {
+      saved = null
+    }
+    const jobId = saved?.jobId
+    if (!saved || !jobId) return
+    const task = withId(saved)
+    const scan = ++currentScan
+    scanTask.value = task
+    if (task.status === 'starting' || task.status === 'running') {
+      _setTask({ ...task, status: 'running' })
+      _followScan(scan, jobId)
+    } else {
+      void _forgetIfServerLostIt(scan, jobId)
+    }
+  }
+
+  // A scan that ended is shown as it ended, unless the server no longer knows it (it restarted):
+  // its results are gone with it, so the scan is forgotten rather than lead to an empty folder
+  async function _forgetIfServerLostIt(scan: number, jobId: string) {
+    try {
+      await apiService.getUnmatchedResults(jobId)
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404 && scan === currentScan) dismissScanTask()
+    }
+  }
+
+  function _followScan(scan: number, jobId: string) {
+    stopFollowingScan = followUnmatchedScanJob(jobId, (outcome) => {
+      if (scan !== currentScan) return
+      stopFollowingScan = null
+      if (outcome.kind === 'completed') _applyScanResults(outcome.response)
+      else if (outcome.kind === 'failed') _endTask('failed', outcome.error)
+      else _endTask('canceled')
+    })
+  }
+
+  function _applyScanResults(response: UnmatchedFilesResponse) {
+    const task = scanTask.value!
+    const finishedAt = response.completedAt ?? new Date().toISOString()
+    _setTask({
+      ...task,
+      status: 'done',
+      finishedAt,
+      itemCount: response.items.length,
+    })
+    if (rootFolderId.value !== task.rootFolderId) return
+    // A load of this folder still pending would bring back older results
+    ++currentLoad
+    _populateFromItems(response.items, _loadPersistedMatches(task.rootFolderId))
+    scanWarnings.value = response.warnings ?? []
+    _persistMatches()
+    lastScannedAt.value = finishedAt
+    resultsLoaded.value = true
+  }
+
+  function _endTask(status: 'failed' | 'canceled', error: string | null = null) {
+    if (!scanTask.value) return
+    _setTask({ ...scanTask.value, status, error, finishedAt: new Date().toISOString() })
+  }
+
+  function _setTask(task: LibraryImportScanTask) {
+    scanTask.value = task
+    try {
+      sessionStorage.setItem(SCAN_TASK_SESSION_KEY, JSON.stringify(task))
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // The rows of these results, keeping the matches already made (in the rows shown, or saved)
   function _populateFromItems(
     scanItems: UnmatchedFileItem[],
     persisted: Record<string, PersistedEntry> = {},
@@ -705,8 +863,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     findMatchSearchStarted,
     findMatchSearchEnded,
     rootFolderId,
+    resultsLoaded,
     scanStatus,
-    scanError,
+    scanTask,
+    scanHistory,
+    taskBarVisible,
+    scanTaskActive,
     scanWarnings,
     lastScannedAt,
     action,
@@ -722,6 +884,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     // Actions
     initFromRootFolder,
     triggerScan,
+    cancelScan,
+    dismissScanTask,
+    dismissScan,
+    dismissTaskBar,
+    clearFinishedScans,
+    restoreScanTask,
     startProcessing,
     stopProcessing,
     processNext,

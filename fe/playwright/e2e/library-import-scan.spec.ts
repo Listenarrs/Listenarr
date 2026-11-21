@@ -190,8 +190,9 @@ test.describe('Library Import scan', () => {
     await openLibraryImport(page)
     await rm(hostPath('/e2e/import'), { recursive: true, force: true })
     await scanButton(page).click()
-    await expect(page.locator('.scan-error')).toBeVisible({ timeout: 60_000 })
-    await expect(page.locator('.scan-error')).not.toHaveText(/^\s*$/)
+    // The task bar says the scan failed, with the server's reason
+    await expect(page.getByTestId('scan-task')).toContainText('failed', { timeout: 60_000 })
+    await expect(page.locator('.scan-task-error')).not.toHaveText(/^\s*$/)
     await expect(scanButton(page)).toBeEnabled()
     await expect(page.locator('.import-row')).toHaveCount(0)
   })
@@ -202,7 +203,7 @@ test.describe('Library Import scan', () => {
     await openLibraryImport(page)
     await rm(hostPath('/e2e/import'), { recursive: true, force: true })
     await scanButton(page).click()
-    await expect(page.locator('.scan-error')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByTestId('scan-task')).toContainText('failed', { timeout: 60_000 })
     await expect(page.locator('.import-row')).toHaveCount(0)
   })
 
