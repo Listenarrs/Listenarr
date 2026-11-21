@@ -302,6 +302,13 @@ internal sealed class ReleaseSpanInterpreter(
         if (after > end || view.Text.AsSpan(digits, 4).IndexOfAnyExceptInRange('0', '9') >= 0) return false;
         if (after < end && !char.IsWhiteSpace(view.Text[after]) && !ReleaseAnnotationGrammar.Separator(view.Text[after])
             && view.Text[after] is not ('.' or '!' or '。')) return false;
+        // A number completed by its unit is a size or bitrate field, not a bare number.
+        var unit = after;
+        while (unit < end && char.IsWhiteSpace(view.Text[unit])) unit++;
+        var unitEnd = unit;
+        while (unitEnd < end && !char.IsWhiteSpace(view.Text[unitEnd]) && !ReleaseAnnotationGrammar.Separator(view.Text[unitEnd])) unitEnd++;
+        if (unit > after && unitEnd > unit
+            && ReleaseTechnicalRule.UnitField(view.Text[digits..unitEnd].TrimEnd('.', '!', '。'))) return false;
         // Only whitespace (or a scene dot) may separate the number from the title in
         // the original text; brackets, dashes and other delimiters are boundaries.
         var title = view.Span(titleEnd - 1, 1, ReleaseSpanRole.Unknown);

@@ -75,6 +75,10 @@ public sealed class ReleaseRecallRuleTests : BaseTests
     [InlineData("Marisol Vega - The Quiet Orchard  2049, Unabridged MP3")]
     [InlineData("Marisol Vega - The Quiet Orchard.2049 [M4B]")]
     [InlineData("Marisol.Vega-The.Quiet.Orchard.2049.Unabr-M4B-NMR")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 M4B")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 1000 MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 MBA")]
+    [InlineData("Marisol Vega - The Quiet Orchard 0000 MB")]
     public void NumberAdjacentToTheTitleIsNotReadAsAYear(string release)
     {
         var result = Match(Book(), release);
@@ -88,6 +92,28 @@ public sealed class ReleaseRecallRuleTests : BaseTests
     [InlineData("Marisol Vega - The Quiet Orchard 20491 Unabridged MP3")]
     public void OtherNumbersAdjacentToTheTitleStayUnexplained(string release) =>
         Assert.False(Match(Book(), release).IsConfirmed);
+
+    [Theory]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kb/s")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 k")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 GB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MiB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 mb")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000  MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps Unabridged MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB - Unabridged")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps, MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB 2010")]
+    [InlineData("The Quiet Orchard 1000 MB by Marisol Vega")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.1024.kbps-NMR")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.1000.MB.Unabr-M4B-NMR")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024kbps")]
+    public void UnitBearingSizeAndBitrateFieldsAfterTheTitleStayExplained(string release) =>
+        Assert.True(Match(Book(), release).IsConfirmed);
 
     [Theory]
     [InlineData("Marisol Vega - The Quiet Orchard (2010) [M4B]")]
