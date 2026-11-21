@@ -8,9 +8,9 @@
 # <output directory>/empty   a root folder without audio files
 # <output directory>/library the destination of Move and Hardlink / Copy
 #
-# The files in scripts/e2e/fixtures/ are the eight ~16 KB outputs of the pinned m4bard generator
-# (see fixtures/README.md). They are checked in so generation needs no ffmpeg, Python, venv or
-# network: copying a valid audio container keeps the embedded tags ffprobe reads at scan time.
+# The six files in scripts/e2e/fixtures/ (one second of silence each, 1 to 6 KB) carry the tags
+# ffprobe reads at scan time; copying them keeps those tags, so this needs no ffmpeg. How to
+# regenerate them: scripts/e2e/fixtures/README.md.
 set -euo pipefail
 
 script_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
