@@ -107,6 +107,24 @@ export async function pruneImages(images) {
   await waitForExit(child, 'Listenarr image prune')
 }
 
+/** Every container of the daemon, as { name, state, createdAt } (`docker ps -a`). */
+export function listContainers() {
+  const output = execFileSync('docker', ['ps', '--all', '--format', '{{json .}}'], { encoding: 'utf8' })
+  return output
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .map(({ Names, State, CreatedAt }) => ({ name: Names, state: State, createdAt: CreatedAt }))
+}
+
+/** Removes the stack containers earlier runs left behind, with their anonymous volumes. */
+export async function removeContainers(names) {
+  if (!names.length) return
+  console.log(`Removing ${names.length} leftover Listenarr E2E container(s): ${names.join(', ')}`)
+  const child = start('docker', ['rm', '--volumes', ...names], { cwd: repositoryRoot })
+  await waitForExit(child, 'Listenarr container leftover cleanup')
+}
+
 /** A hash of every row of every table: equal hashes mean an unchanged database. */
 export function databaseSnapshot(path) {
   const database = new DatabaseSync(path, { readOnly: true })
