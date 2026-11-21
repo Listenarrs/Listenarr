@@ -34,7 +34,7 @@ internal static class MoveSourceCompanionManifestBuilder
             return [];
         }
 
-        if (!await HasExclusiveAudiobookReferenceAsync(
+        if (!await AudiobookExclusiveFolderReference.IsExclusiveAsync(
                 audiobookId,
                 sourceRoot,
                 sourceIdentity.Semantics,
@@ -131,122 +131,6 @@ internal static class MoveSourceCompanionManifestBuilder
             throw Conflict(
                 $"Audiobook companion files could not be safely included in the move manifest: {exception.Message}");
         }
-    }
-
-    private static async Task<bool> HasExclusiveAudiobookReferenceAsync(
-        int audiobookId,
-        string sourceRoot,
-        FileSystemPathSemantics semantics,
-        IAudiobookRepository audiobookRepository,
-        IAudiobookFileRepository fileRepository,
-        CancellationToken cancellationToken)
-    {
-        var otherAudiobooks = (await audiobookRepository
-                .GetOtherPathReferenceSnapshotsAsync(audiobookId, cancellationToken))
-            .ToDictionary(candidate => candidate.AudiobookId);
-        foreach (var other in otherAudiobooks.Values)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(other.BasePath))
-            {
-                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                        other.BasePath,
-                        out var otherBasePath,
-                        out _))
-                {
-                    return false;
-                }
-
-                if (FileSystemPathIdentity.IsSameOrInside(
-                        otherBasePath,
-                        sourceRoot,
-                        semantics)
-                    || FileSystemPathIdentity.IsSameOrInside(
-                        sourceRoot,
-                        otherBasePath,
-                        semantics))
-                {
-                    return false;
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(other.FilePath))
-            {
-                if (!TryResolveOtherStoredFilePath(
-                        other.BasePath,
-                        other.FilePath,
-                        semantics,
-                        out var legacyPath))
-                {
-                    return false;
-                }
-
-                if (FileSystemPathIdentity.IsSameOrInside(
-                        legacyPath,
-                        sourceRoot,
-                        semantics))
-                {
-                    return false;
-                }
-            }
-        }
-
-        foreach (var file in await fileRepository
-            .GetOtherPathReferenceSnapshotsAsync(audiobookId, cancellationToken))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!otherAudiobooks.TryGetValue(file.AudiobookId, out var owner)
-                || !TryResolveOtherStoredFilePath(
-                    owner.BasePath,
-                    file.Path!,
-                    semantics,
-                    out var otherFilePath))
-            {
-                return false;
-            }
-
-            if (FileSystemPathIdentity.IsSameOrInside(
-                    otherFilePath,
-                    sourceRoot,
-                    semantics))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool TryResolveOtherStoredFilePath(
-        string? audiobookBasePath,
-        string storedPath,
-        FileSystemPathSemantics semantics,
-        out string resolvedPath)
-    {
-        resolvedPath = string.Empty;
-        if (FileSystemPathIdentity.TryDetectAbsoluteSyntax(storedPath, out _))
-        {
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    storedPath,
-                    out resolvedPath,
-                    out _))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(audiobookBasePath)
-            && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                audiobookBasePath,
-                out var basePath,
-                out _)
-            && FileSystemPathIdentity.TryResolveRelativePathWithinBase(
-                basePath,
-                storedPath,
-                semantics,
-                out resolvedPath);
     }
 
     private static async Task<bool> CaptureDirectoryAsync(

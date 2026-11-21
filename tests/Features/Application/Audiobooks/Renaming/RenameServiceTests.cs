@@ -1198,7 +1198,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Action<Mock<IFileMover>>? configureFileMover = null,
             CompanionPublicationProbe? probe = null,
             IFilePublicationSourceCapability? sourceCapability = null,
-            IFilePublicationCapabilityResolver? publicationResolver = null)
+            IFilePublicationCapabilityResolver? publicationResolver = null,
+            Func<string, Audiobook>? otherBook = null)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join([libraryRoot, .. sourceFolderParts ?? ["Old"]]);
@@ -1250,6 +1251,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 FilePath = sourcePath,
                 Files = new List<AudiobookFile> { CreateTrackedFile(51, 5, sourcePath) }
             });
+            if (otherBook != null)
+            {
+                db.Audiobooks.Add(otherBook(sourceFolder));
+            }
             await db.SaveChangesAsync();
 
             var results = await service.ExecuteRenameAsync(new List<RenameOperation>
@@ -1552,6 +1557,121 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal("other cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
             Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
             Assert.True(File.Exists(Path.Join(sourceFolder, "other-book.mp3")));
+        }
+
+        [Theory]
+        [InlineData("other.mp4")]
+        [InlineData("CD9/stray.mp3")]
+        [InlineData("Other/other.mp4")]
+        public async Task ExecuteRename_FolderChange_LeavesCompanionsWhenPossibleAudioStaysInOldFolder(string leftover)
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { [leftover] = "other audio", ["cover.jpg"] = "other cover" });
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("other cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.Equal("other audio", await File.ReadAllTextAsync(Path.Join(sourceFolder, leftover)));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, Path.GetFileName(leftover))));
+        }
+
+        public static TheoryData<string> OtherBookReferencesInsideOldFolder => new()
+        {
+            "base path below",
+            "tracked file below",
+            "legacy file below",
+            "base path above",
+            "unresolvable tracked file"
+        };
+
+        [Theory]
+        [MemberData(nameof(OtherBookReferencesInsideOldFolder))]
+        public async Task ExecuteRename_FolderChange_LeavesCompanionsWhenAnotherBookReferencesTheOldFolder(string reference)
+        {
+            // The other book's audio is absent from disk: only its database references show that the
+            // old folder is shared.
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "shared cover" },
+                otherBook: sourceFolder => OtherBook(reference, sourceFolder));
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("shared cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+        }
+
+        private static Audiobook OtherBook(string reference, string sourceFolder)
+        {
+            var below = Path.Join(sourceFolder, "Other");
+            var otherFile = Path.Join(below, "other.m4b");
+            var book = new Audiobook { Id = 6, Title = "Other", Authors = new List<string> { "Someone" } };
+            switch (reference)
+            {
+                case "base path below":
+                    book.BasePath = below;
+                    break;
+                case "tracked file below":
+                    book.BasePath = Path.Join(Path.GetDirectoryName(sourceFolder)!, "Elsewhere");
+                    book.Files = new List<AudiobookFile> { OtherTrackedFile(otherFile) };
+                    break;
+                case "legacy file below":
+                    book.FilePath = otherFile;
+                    break;
+                case "base path above":
+                    book.BasePath = Path.GetDirectoryName(sourceFolder);
+                    break;
+                case "unresolvable tracked file":
+                    book.Files = new List<AudiobookFile> { OtherTrackedFile("relative/other.m4b") };
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(reference), reference, null);
+            }
+
+            return book;
+        }
+
+        private static AudiobookFile OtherTrackedFile(string storedPath) =>
+            new() { Id = 61, AudiobookId = 6, Path = storedPath, Format = "m4b" };
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_AnotherBookInASiblingFolderDoesNotHoldBackCompanions()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                otherBook: sourceFolder =>
+                {
+                    var sibling = Path.Join(Path.GetDirectoryName(sourceFolder)!, "Sibling");
+                    return new Audiobook
+                    {
+                        Id = 6,
+                        Title = "Sibling",
+                        Authors = new List<string> { "Someone" },
+                        BasePath = sibling,
+                        FilePath = Path.Join(sibling, "sibling.m4b"),
+                        Files = new List<AudiobookFile> { OtherTrackedFile(Path.Join(sibling, "sibling.m4b")) }
+                    };
+                });
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(sourceFolder, "cover.jpg")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_LeavesABlacklistedDotfileInTheOldFolder()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string> { ".nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", [".private.nfo"] = "private" });
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Equal("private", await File.ReadAllTextAsync(Path.Join(sourceFolder, ".private.nfo")));
+            Assert.False(File.Exists(Path.Join(targetFolder, ".private.nfo")));
         }
 
         [Fact]

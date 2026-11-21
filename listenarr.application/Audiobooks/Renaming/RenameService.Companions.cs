@@ -30,7 +30,8 @@ public partial class RenameService
     /// a live source proof, an operation id derived from it, a publication plan, a verified
     /// companion publication, and source retirement only once the destination is proven.
     /// Runs only when every tracked file left the previous folder and that folder held this
-    /// book alone (no other audio, not a library root, not a parent of the new folder). Hidden
+    /// book alone: no other book references it in the database, no file that is or may be audio
+    /// is left in it or below it, it is not a library root and not a parent of the new folder. Hidden
     /// and blacklisted files stay, an existing destination is never overwritten, and nothing is
     /// deleted: the previous folder carries no ownership proof, so it is left in place.
     /// A companion that cannot be published stays where it is; the organize result is unchanged.
@@ -65,20 +66,34 @@ public partial class RenameService
             return;
         }
 
+        if (!await AudiobookExclusiveFolderReference.IsExclusiveAsync(
+                audiobook.Id,
+                previous,
+                semantics,
+                _audiobookRepository,
+                _audiobookFileRepository,
+                cancellationToken))
+        {
+            // Another book's base path or tracked files sit in, below or above that folder (or
+            // cannot be resolved), so its cover and metadata may be that book's.
+            return;
+        }
+
         List<string> companions;
         try
         {
-            var remaining = _fileSystem
-                .EnumerateFiles(previous, "*", SearchOption.TopDirectoryOnly)
-                .ToList();
-            if (remaining.Any(FileUtils.IsAudioFile))
+            if (_fileSystem
+                .EnumerateFiles(previous, "*", SearchOption.AllDirectories)
+                .Any(FileUtils.MayBeAudioPendingProbe))
             {
-                // Audio this book does not track is still there: the folder is shared with
-                // another book, whose cover and metadata must stay with it.
+                // Audio, or a container that may carry audio (.mp4), is still there or below it
+                // and this book no longer tracks it: the folder is shared with another book,
+                // tracked or not, whose cover and metadata must stay with it.
                 return;
             }
 
-            companions = remaining
+            companions = _fileSystem
+                .EnumerateFiles(previous, "*", SearchOption.TopDirectoryOnly)
                 .Where(file => !Path.GetFileName(file).StartsWith('.'))
                 .Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions))
                 .ToList();
