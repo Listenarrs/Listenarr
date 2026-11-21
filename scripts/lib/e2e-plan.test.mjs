@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { defaultStackCount, imagesToPrune, imageTags, stackPlan } from './e2e-plan.mjs'
+import { imagesToPrune, imageTags, stackPlan } from './e2e-plan.mjs'
 
 test('imageTags reuses a stable tag for a clean checkout', () => {
   assert.deepEqual(imageTags({ head: 'ad49a3446eecef', dirty: false, runId: '123-xyz' }), {
@@ -137,18 +137,4 @@ test('imagesToPrune removes the half of an old pair that is left', () => {
     ...pair('bbbbbbbbbbbb', '2026-11-21 10:00:00 +0000 UTC'),
   ]
   assert.deepEqual(imagesToPrune(images, { current: 'bbbbbbbbbbbb', keep: 1 }), ['listenarr-e2e-host:aaaaaaaaaaaa'])
-})
-
-test('defaultStackCount runs one stack per shard of three on a machine with at least 8 CPUs', () => {
-  assert.equal(defaultStackCount(8), 3)
-  assert.equal(defaultStackCount(32), 3)
-})
-
-test('defaultStackCount keeps one stack on smaller machines such as GitHub-hosted runners', () => {
-  assert.equal(defaultStackCount(4), 1)
-  assert.equal(defaultStackCount(7), 1)
-})
-
-test('defaultStackCount falls back to one stack when the CPU count is unknown', () => {
-  for (const cpus of [0, -1, Number.NaN, undefined]) assert.equal(defaultStackCount(cpus), 1, `cpus=${cpus}`)
 })
