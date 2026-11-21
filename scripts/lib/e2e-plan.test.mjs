@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { imagesToPrune, imageTags, stackPlan } from './e2e-plan.mjs'
+import { containersToRemove, imagesToPrune, imageTags, stackPlan } from './e2e-plan.mjs'
 
 test('imageTags reuses a stable tag for a clean checkout', () => {
   assert.deepEqual(imageTags({ head: 'ad49a3446eecef', dirty: false, runId: '123-xyz' }), {
@@ -137,4 +137,54 @@ test('imagesToPrune removes the half of an old pair that is left', () => {
     ...pair('bbbbbbbbbbbb', '2026-11-21 10:00:00 +0000 UTC'),
   ]
   assert.deepEqual(imagesToPrune(images, { current: 'bbbbbbbbbbbb', keep: 1 }), ['listenarr-e2e-host:aaaaaaaaaaaa'])
+})
+
+const now = Date.parse('2026-11-21T20:00:00Z')
+const container = (name, state, createdAt = '2026-11-20 20:41:03 +0000 UTC') => ({ name, state, createdAt })
+
+test('containersToRemove removes old stopped stack containers, sharded or single', () => {
+  const containers = [
+    container('listenarr-e2e-2-1562042-mwp7zdpr', 'exited'),
+    container('listenarr-e2e-1562042-mwp7zdpr', 'exited'),
+    container('listenarr-e2e-0-1562042-mwp7zdpr', 'created'),
+    container('listenarr-e2e-1-1562042-mwp7zdpr', 'dead'),
+  ]
+  assert.deepEqual(containersToRemove(containers, { now }), [
+    'listenarr-e2e-2-1562042-mwp7zdpr',
+    'listenarr-e2e-1562042-mwp7zdpr',
+    'listenarr-e2e-0-1562042-mwp7zdpr',
+    'listenarr-e2e-1-1562042-mwp7zdpr',
+  ])
+})
+
+test('containersToRemove keeps running, restarting and paused stack containers, even old ones', () => {
+  const containers = ['running', 'restarting', 'paused'].map((state) =>
+    container(`listenarr-e2e-0-42-${state}`, state),
+  )
+  assert.deepEqual(containersToRemove(containers, { now }), [])
+})
+
+test('containersToRemove keeps a stopped stack container younger than the threshold', () => {
+  const containers = [container('listenarr-e2e-0-42-abc', 'exited', '2026-11-21 19:00:00 +0000 UTC')]
+  assert.deepEqual(containersToRemove(containers, { now }), [])
+  assert.deepEqual(containersToRemove(containers, { now, minAgeMs: 30 * 60_000 }), ['listenarr-e2e-0-42-abc'])
+})
+
+test('containersToRemove keeps containers that are not E2E stacks', () => {
+  const containers = [
+    container('vsc-listenarr-cffefa42ec2b-uid', 'exited'),
+    container('listenarr-e2e-app', 'exited'),
+    container('my-listenarr-e2e-1-2-x', 'exited'),
+    container('listenarr-e2e-1-2-x-extra', 'exited'),
+    container('listenarr-e2e-abc-2-x', 'exited'),
+  ]
+  assert.deepEqual(containersToRemove(containers, { now }), [])
+})
+
+test('containersToRemove keeps a container whose creation date cannot be read', () => {
+  assert.deepEqual(containersToRemove([container('listenarr-e2e-0-42-abc', 'exited', 'yesterday')], { now }), [])
+})
+
+test('containersToRemove returns nothing for no containers', () => {
+  assert.deepEqual(containersToRemove([], { now }), [])
 })

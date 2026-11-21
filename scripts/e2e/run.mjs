@@ -30,9 +30,11 @@ import {
   availablePort,
   ensureImages,
   frontendDirectory,
+  listContainers,
   listImages,
   playwrightCli,
   pruneImages,
+  removeContainers,
   removeImages,
   repositoryRoot,
   start,
@@ -40,7 +42,7 @@ import {
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
 import { writeImportFolders } from './import-folders.mjs'
-import { imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
+import { containersToRemove, imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -274,8 +276,17 @@ try {
     }
     // Reusable images are kept for the next run on the same commit; only the newest few commits'
     // are, so a long-lived Docker daemon (a self-hosted runner) does not fill up.
+    const keep = Number(process.env.LISTENARR_E2E_KEEP_IMAGES ?? 3)
+    // Stack containers a crashed run left behind pin their images, so they go first (never running ones,
+    // nor recent ones, which a live run on the same daemon may own).
+    if (Number.isInteger(keep) && keep > 0) {
+      try {
+        await removeContainers(containersToRemove(listContainers(), { now: Date.now() }))
+      } catch (error) {
+        console.error(`Could not remove the leftover Listenarr containers: ${error.message}`)
+      }
+    }
     try {
-      const keep = Number(process.env.LISTENARR_E2E_KEEP_IMAGES ?? 3)
       const current = plan.reusable ? plan.appImage.split(':')[1] : ''
       await pruneImages(imagesToPrune(listImages(['listenarr-e2e-app', 'listenarr-e2e-host']), { current, keep }))
     } catch (error) {
