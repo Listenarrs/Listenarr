@@ -1,8 +1,15 @@
 #!/bin/sh
 set -eu
 
-if [ ! -f /app/tools/discord-bot/package-lock.json ]; then
-	echo "ERROR: /app/tools/discord-bot/package-lock.json is missing."
+# Usage: install-discord-bot-runtime.sh [app directory]
+#
+# The default is the published bot in /app/tools/discord-bot. The root Dockerfile passes a staging
+# directory holding only package.json and package-lock.json, so the npm install is cached on the
+# lockfile instead of being repeated whenever the published app changes.
+app_dir=${1:-/app/tools/discord-bot}
+
+if [ ! -f "$app_dir/package-lock.json" ]; then
+	echo "ERROR: $app_dir/package-lock.json is missing."
 	exit 1
 fi
 
@@ -11,7 +18,7 @@ apt-get install -y --no-install-recommends ca-certificates curl gnupg libcap2
 curl -fsSL https://deb.nodesource.com/setup_26.x | bash -
 apt-get install -y --no-install-recommends nodejs
 
-cd /app/tools/discord-bot
+cd "$app_dir"
 npm ci --omit=dev --no-audit --no-fund
 find node_modules -type f -name "*.map" -delete
 npm cache clean --force

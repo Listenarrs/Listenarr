@@ -6,11 +6,13 @@ import { defineConfig, devices } from '@playwright/test'
 const webPort = Number(process.env.LISTENARR_E2E_WEB_PORT ?? 5174)
 const webUrl = `http://127.0.0.1:${webPort}`
 const coverage = process.env.LISTENARR_COVERAGE === '1'
+// Each parallel shard writes its traces and videos under its own directory.
+const outputDir = process.env.LISTENARR_E2E_OUTPUT_DIR ?? './test-results/e2e'
 
 export default defineConfig({
   testDir: './playwright/e2e',
   testMatch: '**/*.spec.ts',
-  outputDir: './test-results/e2e',
+  outputDir,
   // One container and one database: the tests run one at a time, each from the restored seed.
   fullyParallel: false,
   workers: 1,
