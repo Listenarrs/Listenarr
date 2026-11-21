@@ -12,7 +12,7 @@ export default async function globalSetup(config: FullConfig) {
   const browser = await chromium.launch()
   try {
     const page = await browser.newPage({ baseURL })
-    for (const path of ['/', '/library-import', '/settings', '/wanted']) {
+    for (const path of ['/', '/library-import', '/settings', '/wanted', '/activity']) {
       await page.goto(path)
       await page.waitForLoadState('networkidle')
     }
