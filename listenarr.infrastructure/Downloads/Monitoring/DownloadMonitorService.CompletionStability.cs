@@ -43,10 +43,56 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _overdueHoldsLogged = new();
 
         /// <summary>
+        /// The configured completion stability window.
+        /// </summary>
+        /// <remarks>
+        /// Settings > Download exposes this as Download Completion Stability. It has had no reader
+        /// since #535/#492 removed the old one, so until now finalization began in the same pass
+        /// that first saw the client report completion.
+        /// </remarks>
+        private static TimeSpan GetCompletionStabilityWindow(ApplicationSettings settings) =>
+            TimeSpan.FromSeconds(Math.Max(0, settings.DownloadCompletionStabilitySeconds));
+
+        /// <summary>
+        /// The downloads this pass writes back: the ones the client listed, plus any held completion
+        /// it did not.
+        /// </summary>
+        /// <remarks>
+        /// The gateway returns only the downloads the client listed, because an unlisted one has no
+        /// new telemetry to write. A held completion the client stopped listing still has to reach
+        /// the release, or it would stay in its pre-completion status for good.
+        /// </remarks>
+        private static List<Download> WithHeldDownloadsMissingFromPoll(List<Download> listed, List<Download> polled, DownloadPollReport poll) =>
+            [.. listed, .. polled.Where(download => !poll.ReportedDownloadIds.Contains(download.Id) && download.GetCompletionObservedAt() != null)];
+
+        /// <summary>
+        /// Reverts the download to its previous status when its completion is held, and says so.
+        /// </summary>
+        /// <remarks>
+        /// Hold the transition, not the update. Progress and size still persist, so the row stays
+        /// current; only finalization waits. Reverting the status rather than skipping the write
+        /// also means the next cycle sees the same transition again and can let it through once the
+        /// window has passed. The same write persists when the client first reported the
+        /// completion, which is what survives a restart. The write goes through the client-poll
+        /// guard like any other, which compares the stored row with the previous snapshot, so the
+        /// reverted status does not make it look stale.
+        /// </remarks>
+        private bool HoldIfUnsettled(Download current, Download previous, DownloadPollReport poll, ApplicationSettings settings)
+        {
+            if (!HoldsPreviousStatus(current, previous, poll, GetCompletionStabilityWindow(settings)))
+            {
+                return false;
+            }
+
+            current.SetStatus(previous.Status);
+            return true;
+        }
+
+        /// <summary>
         /// Should this pass write the download back with its previous status?
         /// </summary>
         /// <remarks>
-        /// A held download the client did not list came back unchanged, so it goes to the release
+        /// A held download the client did not list has no new telemetry, so it goes to the release
         /// rather than the window: the window would read its unchanged status as the client no
         /// longer reporting it complete and discard the observation, including when the poll that
         /// left it out was incomplete. Writing its previous status back changes nothing unless the

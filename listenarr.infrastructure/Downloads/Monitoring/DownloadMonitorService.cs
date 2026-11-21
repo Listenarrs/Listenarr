@@ -133,11 +133,6 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 _pollingInterval = appSettings.PollingIntervalSeconds;
             }
 
-            // Settings > Download exposes this as Download Completion Stability. It has had no
-            // reader since #535/#492 removed the old one, so until now finalization began in the
-            // same pass that first saw the client report completion.
-            var stabilityWindow = TimeSpan.FromSeconds(Math.Max(0, appSettings.DownloadCompletionStabilitySeconds));
-
             var configuredClients = await configurationService.GetDownloadClientConfigurationsAsync();
             HashSet<string> enabledClientIds = configuredClients
                 .Where(c => c.IsEnabled && !string.IsNullOrWhiteSpace(c.Id))
@@ -205,29 +200,11 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     var pollReport = new DownloadPollReport();
                     var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken, pollReport);
 
-                    foreach (Download download in updatedDownloads)
+                    foreach (Download download in WithHeldDownloadsMissingFromPoll(updatedDownloads, clientDownloads, pollReport))
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
-
-                        if (previousDownload != null
-                            && HoldsPreviousStatus(download, previousDownload, pollReport, stabilityWindow))
-                        {
-                            // Hold the transition, not the update. Progress and size still persist,
-                            // so the row stays current; only finalization waits. Reverting the
-                            // status rather than skipping the write also means the next cycle sees
-                            // the same transition again and can let it through once the window has
-                            // passed. The same write persists when the client first reported the
-                            // completion, which is what survives a restart.
-                            download.SetStatus(previousDownload.Status);
-                            if (!await downloadService.TryUpdateFromClientPollAsync(previousDownload, download, cancellationToken))
-                            {
-                                clientDownloads.Remove(download);
-                            }
-
-                            continue;
-                        }
-
+                        var isHeld = previousDownload != null && HoldIfUnsettled(download, previousDownload, pollReport, appSettings);
                         if (previousDownload == null ||
                             !await downloadService.TryUpdateFromClientPollAsync(previousDownload, download, cancellationToken))
                         {
@@ -235,6 +212,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                             continue;
                         }
 
+                        if (isHeld) continue;
                         await TriggerCallbacks(client, download, previousDownload, cancellationToken);
                     }
 
