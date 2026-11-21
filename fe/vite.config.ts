@@ -17,6 +17,8 @@ export default defineConfig(({ mode }): UserConfig => {
   const apiTarget = process.env.LISTENARR_API_URL || 'http://localhost:4545'
 
   return {
+    // Parallel E2E shards get separate caches so dependency optimization cannot race.
+    cacheDir: process.env.LISTENARR_E2E_VITE_CACHE_DIR,
     plugins: [
       vue(),
       ...(analyzeBundle

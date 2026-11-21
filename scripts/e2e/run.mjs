@@ -15,7 +15,7 @@
 // (scripts/test-coverage/aggregate.mjs).
 // The containers, the images of a dirty checkout and the temporary data are removed at the end.
 //
-//   node scripts/e2e/run.mjs [--coverage] [--stacks N] [--serve] [-- <playwright test arguments>]
+//   node scripts/e2e/run.mjs [--coverage] [--stacks=N] [--serve] [-- <playwright test arguments>]
 //
 // --serve keeps one stack up (no sharding): run Playwright yourself with the variables it prints.
 // Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on to every shard.
