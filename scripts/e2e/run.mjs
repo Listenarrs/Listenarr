@@ -50,9 +50,12 @@ for (const option of flags) {
 }
 const coverage = flags.includes('--coverage')
 const serve = flags.includes('--serve')
+// --serve is a single-stack debugging mode; sharding only makes sense for the full suite.
 const count = stacksOption
   ? Number(stacksOption.slice('--stacks='.length))
-  : Number(process.env.LISTENARR_E2E_STACKS ?? 3)
+  : serve
+    ? 1
+    : Number(process.env.LISTENARR_E2E_STACKS ?? 3)
 if (serve && count !== 1) throw new Error('--serve works with one stack only (use --stacks=1).')
 
 if (!existsSync(playwrightCli)) {
@@ -108,10 +111,11 @@ try {
   await waitForExit(generator, 'Synthetic audiobook library generation')
 
   await ensureImages({ appImage: plan.appImage, hostImage: plan.hostImage, reuse: plan.reusable })
-  stacks = await Promise.all(
+  // Register each stack as soon as it starts, so a later shard failing cannot orphan the earlier ones.
+  const startResults = await Promise.allSettled(
     plan.stacks.map(async (descriptor, index) => {
       if (descriptor.backendCoverageDirectory) await mkdir(descriptor.backendCoverageDirectory, { recursive: true })
-      return startListenarrStack({
+      stacks[index] = await startListenarrStack({
         name: descriptor.name,
         apiPort: apiPorts[index],
         appImage: plan.appImage,
@@ -147,12 +151,20 @@ try {
       })
     }),
   )
+  const failedStart = startResults.find((result) => result.status === 'rejected')
+  if (failedStart) throw failedStart.reason
 
   if (serve) {
     const testEnvironment = {
       ...stacks[0].testEnvironment,
       LISTENARR_API_URL: stacks[0].apiUrl,
       LISTENARR_E2E_WEB_PORT: String(webPorts[0]),
+      ...(coverage
+        ? {
+            LISTENARR_COVERAGE: '1',
+            LISTENARR_E2E_COVERAGE_DIR: plan.stacks[0].frontendCoverageDirectory,
+          }
+        : {}),
     }
     console.log('\nListenarr E2E stack is running. In fe/, run Playwright with:\n')
     console.log(
@@ -178,6 +190,7 @@ try {
           LISTENARR_API_URL: stack.apiUrl,
           LISTENARR_E2E_WEB_PORT: String(webPorts[index]),
           LISTENARR_E2E_OUTPUT_DIR: join(frontendDirectory, 'test-results', 'e2e', String(index)),
+          LISTENARR_E2E_VITE_CACHE_DIR: join(frontendDirectory, 'node_modules', '.vite-e2e', String(index)),
           ...(coverage
             ? {
                 LISTENARR_COVERAGE: '1',
@@ -253,7 +266,7 @@ try {
   try {
     await convertVideos(join(frontendDirectory, 'test-results', 'e2e'))
   } finally {
-    await Promise.allSettled(stacks.map((stack) => stack.dispose()))
+    await Promise.allSettled(stacks.filter(Boolean).map((stack) => stack.dispose()))
     if (fixtureTemplate) await rm(fixtureTemplate, { recursive: true, force: true })
     if (!plan.reusable) {
       try {
