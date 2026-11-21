@@ -227,6 +227,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 });
 
             var defaultProfile = new QualityProfile { Id = 1, Name = "Standard", IsDefault = true };
+            dbContext.QualityProfiles.Add(defaultProfile);
+            await dbContext.SaveChangesAsync();
             var qualityProfileService = new Mock<IQualityProfileService>();
             qualityProfileService
                 .Setup(service => service.GetDefaultAsync())

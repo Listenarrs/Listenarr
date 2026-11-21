@@ -36,7 +36,7 @@ public class MigrationMetadataTests : BaseTests
         var migration = new AddOperationEvidencePublications();
         var up = BuildOperations(migration, "Up");
         var down = BuildOperations(migration, "Down");
-        Assert.Equal(4, up.Operations.Count);
+        Assert.Equal(6, up.Operations.Count);
         Assert.Equal(3, down.Operations.Count);
         Assert.Empty(up.Operations.OfType<SqlOperation>());
         Assert.DoesNotContain(up.Operations, operation =>
@@ -62,7 +62,7 @@ public class MigrationMetadataTests : BaseTests
             "20261121052354_AddMonitoringQualityProfile");
         var up = BuildOperations(new AddMonitoringQualityProfile(), "Up");
         var columns = up.Operations.OfType<AddColumnOperation>().ToList();
-        Assert.Equal(6, up.Operations.Count);
+        Assert.Equal(4, up.Operations.Count);
         Assert.Equal(2, columns.Count);
         Assert.All(columns, column =>
         {

@@ -404,6 +404,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Init(services => services
                 .WithSingleton(_seriesCatalogService.Object)
                 .WithSingleton(_libraryAddService.Object));
+            var profile = await _qualityProfileRepository.AddAsync(
+                new QualityProfileBuilder().WithName("Standard").Build());
+            var profileError = $"Quality profile with ID {profile.Id} does not exist. Select a valid quality profile.";
             var monitoredSeriesRepository = _provider.GetRequiredService<IMonitoredSeriesRepository>();
             var monitoredSeries = await monitoredSeriesRepository.UpsertAsync(new MonitoredSeries
             {
@@ -411,7 +414,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 SeriesNameNormalized = "mistborn",
                 Region = "us",
                 Language = "english",
-                QualityProfileId = 42
+                QualityProfileId = profile.Id
             });
 
             _seriesCatalogService
@@ -438,8 +441,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                     ValidationFailed = true,
                     ValidationCode = LibraryAddValidationCodes.QualityProfileInvalid,
                     ValidationField = "qualityProfileId",
-                    ValidationMessage = "Quality profile with ID 42 does not exist. Select a valid quality profile.",
-                    Message = "Quality profile with ID 42 does not exist. Select a valid quality profile."
+                    ValidationMessage = profileError,
+                    Message = profileError
                 });
 
             var service = _provider.GetRequiredService<ISeriesMonitoringService>();
@@ -451,10 +454,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Assert.False(result.Succeeded);
             Assert.Equal(0, result.AddedCount);
             Assert.Equal(1, result.FailedCount);
-            Assert.Contains("Quality profile with ID 42", result.ErrorMessage);
+            Assert.Equal(profileError, result.ErrorMessage);
             var stored = Assert.Single(await monitoredSeriesRepository.GetAllAsync());
             Assert.Null(stored.LastSuccessfulSyncAt);
-            Assert.Contains("Quality profile with ID 42", stored.LastError);
+            Assert.Equal(profileError, stored.LastError);
             _libraryAddService.Verify(add => add.AddToLibraryAsync(
                     It.IsAny<LibraryAddOperationRequest>(),
                     It.IsAny<CancellationToken>()),
