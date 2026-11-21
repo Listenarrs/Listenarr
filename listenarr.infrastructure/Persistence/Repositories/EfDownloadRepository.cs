@@ -48,15 +48,24 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task UpdateAsync(Download download)
         {
-            ApplyActiveDeduplicationKey(download);
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             await using var transaction = ctx.Database.IsRelational()
                 ? await ctx.Database.BeginTransactionAsync() : null;
+            await StageUpdateAsync(ctx, download);
+            await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
+        }
+
+        /// <summary>
+        /// Stage a full update of the download on a context the caller saves, so a write that has
+        /// to commit with other rows applies the same rules as <see cref="UpdateAsync"/>.
+        /// </summary>
+        internal static async Task StageUpdateAsync(ListenArrDbContext ctx, Download download)
+        {
+            ApplyActiveDeduplicationKey(download);
             var current = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == download.Id);
             PreserveImportSourceRetention(current, download);
             ctx.Downloads.Update(download);
-            await ctx.SaveChangesAsync();
-            if (transaction != null) await transaction.CommitAsync();
         }
 
         public async Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default)

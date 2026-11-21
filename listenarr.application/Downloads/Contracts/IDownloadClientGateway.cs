@@ -70,7 +70,11 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <param name="client"></param>
         /// <param name="downloads">List of downloads to update</param>
         /// <param name="cancellationToken"></param>
+        /// <param name="pollReport">
+        /// When given, receives which downloads the client reported in this poll and whether the
+        /// adapter accounted for every item the client listed.
+        /// </param>
         /// <returns>Same list with updated values</returns>
-        Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default);
+        Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default, DownloadPollReport? pollReport = null);
     }
 }

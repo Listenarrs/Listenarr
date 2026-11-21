@@ -23,6 +23,9 @@ namespace Listenarr.Tests.Mocks.DownloadClients
         public int FullSnapshotQueueRequestCount { get; private set; }
         public int FilteredQueueRequestCount { get; private set; }
         public Exception? FilteredQueueException { get; set; }
+        // Runs while a filtered (monitor) poll is in flight, so a test can change a row between
+        // the monitor loading it and writing it back.
+        public Func<Task>? DuringFilteredQueueRequest { get; set; }
         public int TrackedQueueRequestCount { get; private set; }
         public List<string>? LastTrackedQueueIds { get; private set; }
         public List<QueueItem>? TrackedQueueItemsMock { get; set; }
@@ -68,7 +71,7 @@ namespace Listenarr.Tests.Mocks.DownloadClients
             return Task.FromResult(BuildQueueItems(advanceProgress: false));
         }
 
-        public Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
         {
             LastRequestedQueueIds = [.. ids];
             LastQueueRequestWasFullSnapshot = false;
@@ -79,10 +82,15 @@ namespace Listenarr.Tests.Mocks.DownloadClients
                 throw FilteredQueueException;
             }
 
+            if (DuringFilteredQueueRequest != null)
+            {
+                await DuringFilteredQueueRequest();
+            }
+
             var idSet = ids.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return Task.FromResult(BuildQueueItems(advanceProgress: true)
+            return BuildQueueItems(advanceProgress: true)
                 .Where(item => !string.IsNullOrWhiteSpace(item.Id) && idSet.Contains(item.Id))
-                .ToList());
+                .ToList();
         }
 
         public Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)

@@ -156,6 +156,12 @@ namespace Listenarr.Application.Downloads.Queue
                                     queueItem.Language = matchedDownload.Language;
                                 }
 
+                                // Import states are Listenarr's own; a seeding torrent stays "completed" in its client.
+                                if (matchedDownload.Status is DownloadStatus.ImportPending or DownloadStatus.ImportBlocked)
+                                {
+                                    queueItem.Status = ToQueueStatus(matchedDownload.Status);
+                                    queueItem.ErrorMessage ??= matchedDownload.ErrorMessage;
+                                }
                                 logger.LogDebug(
                                     "Enriched queue item (original: {OriginalId}) with DB metadata from download {DownloadId}",
                                     originalClientId,
