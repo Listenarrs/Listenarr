@@ -80,7 +80,7 @@
       <LibraryImportScanTask
         v-if="store.scanTask && store.taskBarVisible"
         :task="store.scanTask"
-        :folder-name="folderName(store.scanTask.rootFolderId)"
+        :folder-name="taskFolderName(store.scanTask)"
         :shown="store.rootFolderId === store.scanTask.rootFolderId"
         @cancel="store.cancelScan()"
         @dismiss="store.dismissTaskBar()"
@@ -375,6 +375,11 @@ let resizeState: {
   startWidth: number
 } | null = null
 
+// Set once the page has its folder list and has read the address: until then, an address change is
+// left to the mount (which reads the address as it is by then), and a restored scan goes by its
+// saved folder name
+const folderListReady = ref(false)
+
 onMounted(async () => {
   if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
   await configStore.loadApplicationSettings()
@@ -383,6 +388,7 @@ onMounted(async () => {
   // A folder asked for in the address ("Scan for unmatched files" in Settings > Root Folders, a
   // job's link), else the default one
   const { requestedFolder, missing, scanRequested } = readAddressRequest()
+  folderListReady.value = true
   requestedFolderMissing.value = missing
 
   store.action = 'none'
@@ -445,7 +451,7 @@ function readAddressRequest() {
 watch(
   () => [route.name, route.query.rootFolder, route.query.scan] as const,
   async ([name, rootFolder]) => {
-    if (name !== 'library-import' || rootFolder === undefined) return
+    if (!folderListReady.value || name !== 'library-import' || rootFolder === undefined) return
     const { requestedFolder, missing, scanRequested } = readAddressRequest()
     requestedFolderMissing.value = missing
     if (!requestedFolder) return
@@ -513,6 +519,15 @@ async function showScanTaskFolder() {
 function folderName(folderId: number | null): string {
   const folder = rootFoldersStore.folders.find((f) => f.id === folderId)
   return folder ? folder.name || folder.path : 'a removed folder'
+}
+
+// A scan restored before the folder list has arrived goes by the name it was started with
+function taskFolderName(task: { rootFolderId: number; folderName: string | null }): string {
+  if (!folderListReady.value && task.folderName) {
+    const folder = rootFoldersStore.folders.find((f) => f.id === task.rootFolderId)
+    if (!folder) return task.folderName
+  }
+  return folderName(task.rootFolderId)
 }
 
 function folderPath(folderId: number | null): string {

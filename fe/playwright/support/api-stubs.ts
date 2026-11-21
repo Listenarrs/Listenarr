@@ -597,8 +597,9 @@ export class ApiStubs {
     return this.stubJson('GET', '**/api/v1/system/health', health, 'getSystemHealth')
   }
 
-  stubRootFolders(folders: RootFolder[] = []) {
-    return this.stubJson('GET', '**/api/v1/rootfolders', folders, 'getRootFolders')
+  /** `delay` holds the answer back, for what the page shows while its folder list loads. */
+  stubRootFolders(folders: RootFolder[] = [], delay?: number) {
+    return this.register('GET', '**/api/v1/rootfolders', 'getRootFolders', { body: folders, delay })
   }
 
   stubSystemReadiness(readiness = systemReadinessFixture()) {

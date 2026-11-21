@@ -13,6 +13,17 @@ const incoming = { id: 1, name: 'Incoming', path: '/incoming' }
 const archive = { id: 2, name: 'Archive', path: '/archive' }
 // The page follows a job by polling it every 2.5 s (SignalR only speeds it up)
 const jobEnd = { timeout: 10_000 }
+const rootFolders = [
+  rootFolderFixture({
+    ...incoming,
+    isDefault: true,
+    canScanFilesystem: true,
+    canMutateFilesystem: true,
+  }),
+  rootFolderFixture({ ...archive, canScanFilesystem: true, canMutateFilesystem: true }),
+]
+// Long enough to act while the page waits for its folder list
+const slowFolders = 3_000
 const signedIn = { authenticated: true, name: 'admin' }
 
 const incomingBook = libraryImportUnmatchedFixture({
@@ -49,15 +60,7 @@ async function startScan(page: Page, api: ApiStubs, jobId: string) {
 
 test.describe('Library Import scan tasks (API-stubbed)', () => {
   test.beforeEach(async ({ api }) => {
-    await api.stubRootFolders([
-      rootFolderFixture({
-        ...incoming,
-        isDefault: true,
-        canScanFilesystem: true,
-        canMutateFilesystem: true,
-      }),
-      rootFolderFixture({ ...archive, canScanFilesystem: true, canMutateFilesystem: true }),
-    ])
+    await api.stubRootFolders(rootFolders)
     await api.stubLibrary([])
     await api.stubLibraryImportSavedResults(incoming.id, [], 'savedIncoming')
     await api.stubLibraryImportSavedResults(archive.id, [], 'savedArchive')
@@ -156,6 +159,39 @@ test.describe('Library Import scan tasks (API-stubbed)', () => {
     scan.finish([incomingBook])
     await expect(taskBar(page)).toContainText('Scan of Incoming finished: 1 unmatched book', jobEnd)
     await expect(page.locator('.import-row', { hasText: 'Found Book' })).toBeVisible()
+  })
+
+  test("the bar names the scan's folder while the folder list loads", async ({ page, api }) => {
+    // Signed in: the app restores the scan before the page has its folder list
+    await api.stubAccount(signedIn)
+    await api.stubLibraryImportScanJob(incoming.id, 'scan-a')
+    await openLibraryImport(page, api)
+    await startScan(page, api, 'scan-a')
+
+    await api.stubRootFolders(rootFolders, slowFolders)
+    await page.reload()
+    await expect(taskBar(page)).toContainText('Scanning Incoming', { timeout: slowFolders / 2 })
+    await expect(taskBar(page)).not.toContainText('a removed folder')
+  })
+
+  test("a job's link followed while the page loads shows that folder", async ({ page, api }) => {
+    await api.stubAccount(signedIn)
+    const scan = await api.stubLibraryImportScanJob(archive.id, 'scan-b')
+    await openLibraryImport(page, api, archive.id)
+    await startScan(page, api, 'scan-b')
+    scan.finish([])
+    await expect(taskBar(page)).toContainText('Scan of Archive finished', jobEnd)
+
+    // Back on another folder, and the scan's link followed before the folder list has arrived
+    await api.stubRootFolders(rootFolders, slowFolders)
+    await page.goto(`/library-import?rootFolder=${incoming.id}`)
+    await page.getByTestId('jobs-menu').locator('button').first().click()
+    await page.getByTestId('notification-library-import-scan').getByRole('link').click()
+
+    await expect(folderSelect(page)).toHaveValue(String(archive.id), jobEnd)
+    await expect(page).toHaveURL(/[?&]rootFolder=2\b/)
+    await expect(page.getByTestId('requested-folder-missing')).toHaveCount(0)
+    await expect(page.getByTestId('results-header')).toContainText('Results for Archive')
   })
 
   test('the cog menu and System > Jobs list the scan and lead back to its results', async ({
