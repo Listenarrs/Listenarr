@@ -85,6 +85,26 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync(ct);
         }
 
+        public async Task<MonitoredAuthor?> UpdateQualityProfileAsync(int id, int qualityProfileId, CancellationToken ct = default)
+        {
+            await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            var author = await _db.MonitoredAuthors.SingleOrDefaultAsync(monitor => monitor.Id == id, ct);
+            if (author == null) return null;
+
+            if (!await _db.QualityProfiles.AnyAsync(profile => profile.Id == qualityProfileId, ct))
+            {
+                throw new ArgumentException($"Quality profile with ID {qualityProfileId} no longer exists. Select a valid quality profile.");
+            }
+
+            author.QualityProfileId = qualityProfileId;
+            author.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return author;
+        }
+
         public async Task<bool> DeleteAsync(int id, CancellationToken ct = default)
         {
             var author = await _db.MonitoredAuthors.FindAsync(new object[] { id }, ct);

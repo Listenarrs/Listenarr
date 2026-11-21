@@ -25,6 +25,57 @@ namespace Listenarr.BackendIntegrationTests;
 [Trait("Category", "BackendIntegration")]
 public sealed class LibraryPersistenceTests : BackendIntegrationTests
 {
+    [Theory]
+    [InlineData("authors", "monitoredAuthor")]
+    [InlineData("series", "monitoredSeries")]
+    public async Task UpdateMonitoringProfile_ChangesOnlyTheRequestedExistingMonitor(string collection, string monitorKey)
+    {
+        const string name = "Profile Update Review Fixture";
+        var monitorPath = $"/api/v1/{collection}/monitoring";
+        var statusPath = $"{monitorPath}/status?name={Uri.EscapeDataString(name)}&region=us&language=english";
+        var profile = await Host.SendJsonAsync(HttpMethod.Post, "/api/v1/qualityprofile", new
+        {
+            name = "Replacement Profile",
+            isDefault = false,
+        }, HttpStatusCode.Created);
+        var profileId = (int)profile["id"]!;
+        var request = new { name, region = "us", language = "english" };
+
+        var original = (await Host.SendJsonAsync(HttpMethod.Post, monitorPath, request))[monitorKey]!;
+        var originalId = (int)original["id"]!;
+        var persisted = (await Host.GetJsonAsync(statusPath))[monitorKey]!;
+        var updatePath = $"{monitorPath}/{originalId}/quality-profile";
+        var updated = await Host.SendJsonAsync(HttpMethod.Put, updatePath, new { qualityProfileId = profileId });
+        Assert.Equal(originalId, (int)updated["id"]!);
+        Assert.Equal(profileId, (int)updated["qualityProfileId"]!);
+        Assert.Equal((string?)persisted["lastCheckedAt"], (string?)updated["lastCheckedAt"]);
+        Assert.Equal((string?)persisted["lastSuccessfulSyncAt"], (string?)updated["lastSuccessfulSyncAt"]);
+
+        using (var invalid = await Host.SendAsync(HttpMethod.Put, updatePath, new { qualityProfileId = int.MaxValue }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+        Assert.Equal(profileId, (int)(await Host.GetJsonAsync(statusPath))[monitorKey]!["qualityProfileId"]!);
+
+        await Host.SendOkAsync(HttpMethod.Delete, $"{monitorPath}/{originalId}");
+        using (var stale = await Host.SendAsync(HttpMethod.Put, updatePath, new { qualityProfileId = profileId }))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        }
+        Assert.False((bool)(await Host.GetJsonAsync(statusPath))["isMonitored"]!);
+
+        var replacement = (await Host.SendJsonAsync(HttpMethod.Post, monitorPath, request))[monitorKey]!;
+        var replacementId = (int)replacement["id"]!;
+        Assert.NotEqual(originalId, replacementId);
+        using (var stale = await Host.SendAsync(HttpMethod.Put, updatePath, new { qualityProfileId = profileId }))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        }
+        var current = (await Host.GetJsonAsync(statusPath))[monitorKey]!;
+        Assert.Equal(replacementId, (int)current["id"]!);
+        Assert.Equal((int)replacement["qualityProfileId"]!, (int)current["qualityProfileId"]!);
+    }
+
     [Fact]
     public async Task DeleteBook_RemovesItWhileTheOtherBooksStayReadable()
     {
