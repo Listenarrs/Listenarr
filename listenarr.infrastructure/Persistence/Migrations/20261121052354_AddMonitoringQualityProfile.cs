@@ -31,33 +31,11 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                 name: "IX_MonitoredAuthors_QualityProfileId",
                 table: "MonitoredAuthors",
                 column: "QualityProfileId");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_MonitoredAuthors_QualityProfiles_QualityProfileId",
-                table: "MonitoredAuthors",
-                column: "QualityProfileId",
-                principalTable: "QualityProfiles",
-                principalColumn: "Id");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_MonitoredSeries_QualityProfiles_QualityProfileId",
-                table: "MonitoredSeries",
-                column: "QualityProfileId",
-                principalTable: "QualityProfiles",
-                principalColumn: "Id");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_MonitoredAuthors_QualityProfiles_QualityProfileId",
-                table: "MonitoredAuthors");
-
-            migrationBuilder.DropForeignKey(
-                name: "FK_MonitoredSeries_QualityProfiles_QualityProfileId",
-                table: "MonitoredSeries");
-
             migrationBuilder.DropIndex(
                 name: "IX_MonitoredSeries_QualityProfileId",
                 table: "MonitoredSeries");

@@ -15,13 +15,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
-import type { SearchResult, RootFolder } from '@/types'
+import { apiService } from '@/services/api'
+import type { QualityProfile, SearchResult, RootFolder } from '@/types'
 
 const success = vi.fn()
 const error = vi.fn()
@@ -34,6 +35,10 @@ vi.mock('@/services/toastService', () => ({
 describe('LibraryImportFooter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([
+      { id: 2, name: 'Standard', isDefault: true },
+      { id: 3, name: 'Lossless', isDefault: false },
+    ] as QualityProfile[])
   })
 
   it('shows a stable importing indicator while the batch is running', async () => {
@@ -86,7 +91,7 @@ describe('LibraryImportFooter', () => {
       },
     }
 
-    vi.spyOn(store, 'importSelected').mockImplementation(
+    const importSelected = vi.spyOn(store, 'importSelected').mockImplementation(
       () =>
         new Promise<{ imported: number; errors: string[] }>((resolve) => {
           resolveImport = resolve
@@ -102,11 +107,17 @@ describe('LibraryImportFooter', () => {
       },
     })
 
+    await flushPromises()
+    const profileSelect = wrapper.get('select:has(option[value="3"])')
+    expect((profileSelect.element as HTMLSelectElement).value).toBe('2')
+    await profileSelect.setValue('3')
+
     const importButton = wrapper.find('button.btn.btn-primary')
     await importButton.trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(importButton.text()).toContain('Importing 2 Books...')
+    expect(importSelected).toHaveBeenCalledWith('', 3)
     expect((importButton.element as HTMLButtonElement).disabled).toBe(true)
 
     resolveImport?.({ imported: 2, errors: [] })

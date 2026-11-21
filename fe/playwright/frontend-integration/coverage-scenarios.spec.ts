@@ -459,6 +459,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     )
     await api.stubRootFolders([rootFolderFixture({ id: 1, path: '/audiobooks', isDefault: true })])
     await api.stubSearch({ statusCode: 200, body: [result] }, 'addNewSearch')
+    await api.stubQualityProfiles([{ id: 1, name: 'Standard', isDefault: true }])
     await api.stubMetadata({ statusCode: 200, body: { metadata } }, 'addNewMetadata')
     await api.stubLibraryPathPreview(
       '/audiobooks/Selected Author/Selected Series/The Selected Edition',
@@ -485,6 +486,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     await expect(addButton).toBeEnabled()
     await addButton.click()
     const { request } = await api.wait('addAudiobookToLibrary')
+    expect(request.body.qualityProfileId).toBe(1)
     expect(request.body.metadata).toMatchObject({
       asin,
       title: metadata.title,
