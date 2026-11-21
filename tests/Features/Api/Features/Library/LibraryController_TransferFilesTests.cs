@@ -533,6 +533,197 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(target.Id));
         }
 
+        /// <summary>A destination that owns a file in its folder but has no saved BasePath.</summary>
+        private async Task<(Audiobook target, AudiobookFile existing, string folder)> ClearSavedFolderAsync(Audiobook target)
+        {
+            var folder = target.BasePath!;
+            var existing = await ClaimFileAsync(target, "existing.m4b");
+            target.BasePath = null;
+            await _audiobookRepository.UpdateAsync(target);
+            var reloaded = await _audiobookRepository.GetByIdAsync(target.Id);
+            Assert.Null(reloaded!.BasePath);
+            return (reloaded, existing, folder);
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "DestinationWithFilesButNoSavedFolder_RefusesSourceUnderAnotherRoot")]
+        public async Task TransferFiles_DestinationWithFilesButNoSavedFolder_RefusesSourceUnderAnotherRoot()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (_, savedTarget, _) = await CreateSourceAndTargetAsync();
+            var (target, existing, folder) = await ClearSavedFolderAsync(savedTarget);
+            var otherRoot = FileService.GetTempDirectory("transfer-other-root");
+            await AddAuthorizedRootAsync(otherRoot, "Second Library Root");
+            var source = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Elantris")
+                .WithAuthor("Brandon Sanderson")
+                .WithBasePath(Path.Join(otherRoot, "Brandon Sanderson", "Elantris"))
+                .Build());
+            var file = await ClaimFileAsync(source, "incoming.m4b");
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                await AllFilesTo(target),
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(0, payload.GetProperty("transferred").GetInt32());
+            Assert.Contains(Warnings(payload), w => w.Contains("different library root"));
+
+            // The folder the destination's own file resolves to still names its root, so
+            // nothing changes owner and the destination is not re-based anywhere.
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(file.Id, kept.Id);
+            Assert.Equal(file.Path, kept.Path);
+            Assert.True(File.Exists(file.Path!));
+            var owned = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.Equal(existing.Id, owned.Id);
+            Assert.Equal(Path.Join(folder, "existing.m4b"), owned.Path);
+            Assert.True(File.Exists(owned.Path!));
+            Assert.Null((await _audiobookRepository.GetByIdAsync(target.Id))!.BasePath);
+            Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(target.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "DestinationWithFilesButNoSavedFolder_KeepsItsFolder")]
+        public async Task TransferFiles_DestinationWithFilesButNoSavedFolder_KeepsItsFolder()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (source, savedTarget, root) = await CreateSourceAndTargetAsync();
+            var (target, existing, folder) = await ClearSavedFolderAsync(savedTarget);
+            var file = await ClaimFileAsync(source, "incoming.m4b");
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                await AllFilesTo(target),
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(1, payload.GetProperty("transferred").GetInt32());
+            Assert.Equal(1, payload.GetProperty("physicallyMoved").GetInt32());
+            Assert.Empty(Warnings(payload));
+
+            // The incoming file joins the destination's file in its folder; the folder does
+            // not widen to the author folder the two books share.
+            var owned = await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id);
+            Assert.Equal(
+                new[] { Path.Join(folder, "existing.m4b"), Path.Join(folder, "incoming.m4b") },
+                owned.Select(f => f.Path!).Order());
+            Assert.Contains(owned, f => f.Id == file.Id);
+            Assert.Contains(owned, f => f.Id == existing.Id);
+            Assert.All(owned, f => Assert.True(File.Exists(f.Path!)));
+            Assert.False(File.Exists(Path.Join(root, "incoming.m4b")));
+            Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(folder)!, "incoming.m4b")));
+            var basePath = (await _audiobookRepository.GetByIdAsync(target.Id))!.BasePath;
+            Assert.True(basePath == null || basePath == folder, $"Unexpected BasePath {basePath}");
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "DestinationNameTakenByDirectory_IsRefused_AndStaysWithSource")]
+        public async Task TransferFiles_DestinationNameTakenByDirectory_IsRefused_AndStaysWithSource()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var sourceFile = await ClaimFileAsync(source, "occupied.m4b");
+            Directory.CreateDirectory(Path.Join(target.BasePath, "occupied.m4b"));
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                await AllFilesTo(target),
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(0, payload.GetProperty("transferred").GetInt32());
+            Assert.Equal(0, payload.GetProperty("physicallyMoved").GetInt32());
+            Assert.Contains(Warnings(payload), w => w.Contains("already exists"));
+
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(sourceFile.Id, kept.Id);
+            Assert.Equal(sourceFile.Path, kept.Path);
+            Assert.Equal(sourceFile.PathOwnershipKey, kept.PathOwnershipKey);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.True(File.Exists(sourceFile.Path!));
+            Assert.True(Directory.Exists(Path.Join(target.BasePath, "occupied.m4b")));
+            Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(target.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "FolderlessDestination_TakesItsRootFromTheFirstFile")]
+        public async Task TransferFiles_FolderlessDestination_TakesItsRootFromTheFirstFile()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (source, target, root) = await CreateSourceAndTargetAsync(targetHasFolder: false);
+            var first = await ClaimFileAsync(source, "part1.m4b");
+            var otherRoot = FileService.GetTempDirectory("transfer-other-root");
+            await AddAuthorizedRootAsync(otherRoot, "Second Library Root");
+            // The source record also owns a file under the second root.
+            var strayPath = Path.Join(otherRoot, "Brandon Sanderson", "Arcanum Unbounded", "part2.m4b");
+            Directory.CreateDirectory(Path.GetDirectoryName(strayPath)!);
+            await File.WriteAllTextAsync(strayPath, "audio");
+            var strayIdentity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(source, strayPath);
+            Assert.Equal(PathIdentityState.Valid, strayIdentity.State);
+            var strayRow = AudiobookFile.CreateUnresolved(strayPath);
+            strayRow.AudiobookId = source.Id;
+            strayRow.Format = "m4b";
+            strayRow.ApplyPathIdentity(strayPath, strayIdentity);
+            var stray = (await _audiobookFileRepository.ClaimAsync(strayRow)).File!;
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                new LibraryController.TransferFilesRequest
+                {
+                    TargetAudiobookId = target.Id,
+                    FileIds = [first.Id, stray.Id]
+                },
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(1, payload.GetProperty("transferred").GetInt32());
+            Assert.Contains(Warnings(payload), w => w.Contains("part2.m4b") && w.Contains("different library root"));
+
+            var expectedFolder = Path.Join(root, "Brandon Sanderson", "Warbreaker");
+            var moved = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.Equal(first.Id, moved.Id);
+            Assert.Equal(Path.Join(expectedFolder, "part1.m4b"), moved.Path);
+            Assert.Equal(expectedFolder, (await _audiobookRepository.GetByIdAsync(target.Id))!.BasePath);
+            Assert.True(File.Exists(stray.Path!));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "UnresolvableDestination_TransfersNothing")]
+        public async Task TransferFiles_UnresolvableDestination_TransfersNothing()
+        {
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var file = await ClaimFileAsync(source, "part1.m4b");
+            var rename = DispatchProxy.Create<IRenameService, FailingPreviewProxy>();
+            var service = ActivatorUtilities.CreateInstance<AudiobookFileTransferService>(_provider, rename);
+
+            var result = await service.TransferAsync(
+                new AudiobookFileTransferRequest(source.Id, target.Id),
+                CancellationToken.None);
+
+            var item = Assert.Single(result.Items);
+            Assert.Equal(AudiobookFileTransferOutcome.DestinationUnavailable, item.Outcome);
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(file.Id, kept.Id);
+            Assert.Equal(file.PathOwnershipKey, kept.PathOwnershipKey);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(target.Id));
+        }
+
+        public class FailingPreviewProxy : DispatchProxy
+        {
+            protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
+                throw new InvalidOperationException("Tracked audiobook file path is missing or invalid.");
+        }
+
         [Fact]
         [Trait("Method", "TransferFiles")]
         [Trait("Scenario", "CancelledBeforeOwnershipChanges_ChangesNothing")]

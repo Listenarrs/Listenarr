@@ -171,7 +171,11 @@ public sealed partial class AudiobookFileTransferService(
         {
             try
             {
-                (items, relocationError) = await RelocateAsync(target, items, completionToken);
+                (items, relocationError) = await RelocateAsync(
+                    target,
+                    items,
+                    destinationPlan?.Folder,
+                    completionToken);
             }
             finally
             {

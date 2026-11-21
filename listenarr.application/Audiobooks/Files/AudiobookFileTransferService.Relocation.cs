@@ -17,6 +17,7 @@ public sealed partial class AudiobookFileTransferService
     private async Task<(List<AudiobookFileTransferItem> Items, string? Error)> RelocateAsync(
         Audiobook target,
         List<AudiobookFileTransferItem> items,
+        string? plannedFolder,
         CancellationToken cancellationToken)
     {
         RenamePreview? preview;
@@ -42,7 +43,9 @@ public sealed partial class AudiobookFileTransferService
         var semantics = new FileSystemPathSemantics(
             preview.CurrentFolderSemantics.Syntax,
             preview.CurrentFolderSemantics.CaseSensitivity);
-        var destinationFolder = await ResolveDestinationFolderAsync(
+        // The folder decided before ownership changed stays the destination: once the
+        // record owns the incoming files, a folder derived from its files would widen.
+        var destinationFolder = plannedFolder ?? await ResolveDestinationFolderAsync(
             target,
             preview,
             items,
@@ -86,6 +89,7 @@ public sealed partial class AudiobookFileTransferService
             }
 
             var destinationTaken = fileSystem.FileExists(destination)
+                || fileSystem.DirectoryExists(destination)
                 || plannedDestinations.Any(path => PathsEqual(path, destination, semantics))
                 || targetFiles.Any(file => file.Id != item.FileId
                     && !string.IsNullOrWhiteSpace(file.Path)

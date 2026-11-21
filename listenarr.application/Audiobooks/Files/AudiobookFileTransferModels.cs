@@ -33,7 +33,9 @@ public enum AudiobookFileTransferOutcome
     /// <summary>The destination folder already holds a file with this name.</summary>
     DestinationOccupied,
     /// <summary>The file is under a different library root than the destination audiobook.</summary>
-    OutsideDestinationRoot
+    OutsideDestinationRoot,
+    /// <summary>The destination audiobook's folder could not be resolved on this host.</summary>
+    DestinationUnavailable
 }
 
 public sealed record AudiobookFileTransferItem(

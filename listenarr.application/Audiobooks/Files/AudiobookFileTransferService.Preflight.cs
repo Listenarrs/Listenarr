@@ -1,4 +1,5 @@
 using Listenarr.Domain.Common;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Files;
 
@@ -13,19 +14,29 @@ public sealed partial class AudiobookFileTransferService
 
     /// <summary>
     /// What is known about the destination before anything changes. <see cref="AllowedRoot"/>
-    /// is the library root organize will confine the destination audiobook to, and
-    /// <see cref="Folder"/> is its own folder; either is null when it is only known once
-    /// the destination owns files (a record with no folder, or one parked at a library root).
+    /// is the library root organize will confine the destination audiobook to. A record
+    /// that owns nothing and has no folder gets its root from the first file it accepts.
+    /// <see cref="Folder"/> is the destination's own folder, or null when the files will
+    /// be placed in the canonical folder organize proposes once the destination owns them.
     /// </summary>
-    private sealed record DestinationPlan(
-        FileSystemPathSemantics Semantics,
-        string? AllowedRoot,
-        string? Folder,
-        IReadOnlyList<AudiobookFile> ExistingFiles);
+    private sealed class DestinationPlan(
+        FileSystemPathSemantics semantics,
+        string? allowedRoot,
+        string? folder,
+        IReadOnlyList<AudiobookFile> existingFiles,
+        IReadOnlyList<string> organizeRoots)
+    {
+        public FileSystemPathSemantics Semantics { get; } = semantics;
+        public string? AllowedRoot { get; set; } = allowedRoot;
+        public string? Folder { get; } = folder;
+        public IReadOnlyList<AudiobookFile> ExistingFiles { get; } = existingFiles;
+        public IReadOnlyList<string> OrganizeRoots { get; } = organizeRoots;
+    }
 
     /// <summary>
     /// Reads the destination the way organize will see it, so a file organize would
-    /// refuse to place is turned away while it still belongs to the source.
+    /// refuse to place is turned away while it still belongs to the source. Returns
+    /// null when the destination cannot be resolved; nothing is transferred then.
     /// </summary>
     private async Task<DestinationPlan?> PlanDestinationAsync(
         Audiobook target,
@@ -37,9 +48,12 @@ public sealed partial class AudiobookFileTransferService
             preview = (await renameService.PreviewRenameAsync([target.Id], cancellationToken))
                 .FirstOrDefault();
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
-            // Relocation reports this once it has files to plan for.
+            logger.LogWarning(
+                exception,
+                "Audiobook {TargetId}'s folder could not be resolved before a file transfer",
+                target.Id);
             return null;
         }
 
@@ -51,23 +65,27 @@ public sealed partial class AudiobookFileTransferService
         var semantics = new FileSystemPathSemantics(
             preview.CurrentFolderSemantics.Syntax,
             preview.CurrentFolderSemantics.CaseSensitivity);
+        var organizeRoots = await GetOrganizeRootsAsync();
+        // The preview resolves a record without a saved folder from the files it owns,
+        // so a missing BasePath alone does not make the destination folderless.
         var current = preview.CurrentFolderPath;
-        if (string.IsNullOrWhiteSpace(target.BasePath) || string.IsNullOrWhiteSpace(current))
+        if (string.IsNullOrWhiteSpace(current))
         {
-            // Organize derives a folderless record's root from the files it owns, so
-            // the transferred files define the root rather than conflict with it.
-            return new DestinationPlan(semantics, null, null, []);
+            return new DestinationPlan(semantics, null, null, [], organizeRoots);
         }
 
-        var allowedRoot = (await GetOrganizeRootsAsync())
-            .Where(root => IsSameOrInside(current, root, semantics))
-            .OrderByDescending(root => root.Length)
-            .FirstOrDefault() ?? current;
-        var folder = await IsLibraryRootAsync(current, semantics) ? null : current;
-        var existingFiles = folder == null
-            ? []
-            : await audiobookFileRepository.GetByAudiobookIdAsync(target.Id, cancellationToken);
-        return new DestinationPlan(semantics, allowedRoot, folder, existingFiles);
+        var allowedRoot = ContainingRoot(current, organizeRoots, semantics) ?? current;
+        var existingFiles = await audiobookFileRepository.GetByAudiobookIdAsync(target.Id, cancellationToken);
+        var ownsFolder = !await IsLibraryRootAsync(current, semantics)
+            && (!string.IsNullOrWhiteSpace(target.BasePath)
+                || existingFiles.All(file => string.IsNullOrWhiteSpace(file.Path)
+                    || PathsEqual(Path.GetDirectoryName(file.Path), current, semantics)));
+        return new DestinationPlan(
+            semantics,
+            allowedRoot,
+            ownsFolder ? current : null,
+            ownsFolder ? existingFiles : [],
+            organizeRoots);
     }
 
     /// <summary>
@@ -90,11 +108,17 @@ public sealed partial class AudiobookFileTransferService
 
         if (plan == null)
         {
-            return null;
+            return Rejected(
+                prepared.File,
+                AudiobookFileTransferOutcome.DestinationUnavailable,
+                "The destination audiobook's folder could not be resolved, so the file was not transferred. Rescan the destination audiobook first.");
         }
 
-        if (plan.AllowedRoot != null
-            && !IsSameOrInside(prepared.AbsolutePath, plan.AllowedRoot, plan.Semantics))
+        // A destination with nothing of its own takes its root from the first file, so
+        // files from two roots can never widen its folder to their common parent.
+        plan.AllowedRoot ??= ContainingRoot(prepared.AbsolutePath, plan.OrganizeRoots, plan.Semantics)
+            ?? Path.GetDirectoryName(prepared.AbsolutePath);
+        if (!IsSameOrInside(prepared.AbsolutePath, plan.AllowedRoot, plan.Semantics))
         {
             return Rejected(
                 prepared.File,
@@ -115,6 +139,7 @@ public sealed partial class AudiobookFileTransferService
         }
 
         var destinationTaken = fileSystem.FileExists(destination)
+            || fileSystem.DirectoryExists(destination)
             || plannedDestinations.Any(path => PathsEqual(path, destination, plan.Semantics))
             || plan.ExistingFiles.Any(file => !string.IsNullOrWhiteSpace(file.Path)
                 && PathsEqual(file.Path, destination, plan.Semantics));
@@ -149,6 +174,15 @@ public sealed partial class AudiobookFileTransferService
 
         return roots;
     }
+
+    private static string? ContainingRoot(
+        string path,
+        IReadOnlyList<string> roots,
+        FileSystemPathSemantics semantics) =>
+        roots
+            .Where(root => IsSameOrInside(path, root, semantics))
+            .OrderByDescending(root => root.Length)
+            .FirstOrDefault();
 
     private static bool IsSameOrInside(
         string? path,
