@@ -23,7 +23,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { availableParallelism, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   availablePort,
@@ -38,7 +38,7 @@ import {
   startListenarrStack,
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
-import { defaultStackCount, imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
+import { imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -58,9 +58,8 @@ const count = stacksOption
   ? Number(stacksOption.slice('--stacks='.length))
   : serve
     ? 1
-    : Number(process.env.LISTENARR_E2E_STACKS ?? defaultStackCount(availableParallelism()))
+    : Number(process.env.LISTENARR_E2E_STACKS ?? 3)
 if (serve && count !== 1) throw new Error('--serve works with one stack only (use --stacks=1).')
-console.log(`E2E: ${count} stack(s) on ${availableParallelism()} CPUs`)
 
 if (!existsSync(playwrightCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')

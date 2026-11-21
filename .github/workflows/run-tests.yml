@@ -345,9 +345,9 @@ jobs:
         working-directory: fe
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright E2E tests (browser, app in Docker, sharded by CPU count)
+      - name: Run Playwright E2E tests (browser, app in Docker, 3 shards)
         working-directory: fe
-        run: npm run test:e2e${{ inputs.coverage && ' -- --coverage' || '' }}
+        run: npm run test:e2e -- --stacks=3${{ inputs.coverage && ' --coverage' || '' }}
 
       - name: Upload coverage
         if: ${{ !cancelled() && inputs.coverage }}
