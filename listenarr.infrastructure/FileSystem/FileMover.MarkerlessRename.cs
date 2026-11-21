@@ -37,11 +37,20 @@ public partial class FileMover
         var journal = await _fileMutationJournalStore.GetAsync(
             operationId,
             cancellationToken);
-        if (journal == null)
+        if (journal != null)
         {
-            using var initialSource = pathLock.SourceParent.TryOpenExistingFile(
-                pathLock.SourceName,
-                requireDeleteAccess: true);
+            await ValidateMarkerlessRenameJournalAsync(
+                journal, pathLock, audiobookId, audiobookFileId);
+            return await ReconcileInterruptedMarkerlessRenameAsync(
+                journal, pathLock, cancellationToken);
+        }
+
+        // This pin is held across planning, native publication, and completion.
+        // A legacy diagnostic supplied by the caller cannot identify this live entry.
+        using var initialSource = pathLock.SourceParent.TryOpenExistingFile(
+            pathLock.SourceName,
+            requireDeleteAccess: true);
+        {
             using var initialDestination =
                 pathLock.DestinationParent.TryOpenExistingFile(
                     pathLock.DestinationName,
@@ -49,21 +58,16 @@ public partial class FileMover
             if (initialSource == null
                 || initialDestination != null
                 || !initialSource.VisiblePathMatches()
-                || !initialSource.MatchesObjectIdentity(
-                    expectedSourcePhysicalObjectIdentity)
                 || !initialSource.IsOnSameVolume(
                     pathLock.DestinationParent))
             {
                 return false;
             }
 
-            long sourceLength;
-            using (var stream = initialSource.OpenReadStream(
-                bufferSize: 128 * 1024,
-                asynchronous: false))
-            {
-                sourceLength = stream.Length;
-            }
+            var sourceProof = await CaptureMarkerlessSourceProofAsync(
+                initialSource,
+                cancellationToken,
+                includeSha256: true);
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
                     operationId,
@@ -73,8 +77,8 @@ public partial class FileMover
                     pathLock.SourceParent.GetDirectoryObjectIdentity(),
                     pathLock.DestinationParent.GetDirectoryObjectIdentity(),
                     expectedSourcePhysicalObjectIdentity,
-                    sourceLength,
-                    SourceSha256: null,
+                    sourceProof.Length,
+                    sourceProof.Sha256,
                     audiobookId,
                     audiobookFileId),
                 cancellationToken);
@@ -83,36 +87,16 @@ public partial class FileMover
                 await AfterMarkerlessRenameJournalPlannedForTestAsync();
             }
         }
-        else
-        {
-            await ValidateMarkerlessRenameJournalAsync(
-                journal,
-                pathLock,
-                expectedSourcePhysicalObjectIdentity,
-                audiobookId,
-                audiobookFileId);
-            if (!JournalParentGenerationsMatchGate(journal, pathLock))
-            {
-                await MarkMarkerlessRenameNeedsAttentionAsync(
-                    journal,
-                    "A markerless rename parent directory changed physical generation while the operation was interrupted.",
-                    cancellationToken);
-                return false;
-            }
-        }
-
         if (journal.State == FileMutationJournalState.NeedsAttention)
         {
             return false;
         }
         if (journal.State == FileMutationJournalState.OwnerMetadataReconciled)
         {
-            return OwnerMetadataReconciledTargetMatches(pathLock, journal);
+            return await OwnerMetadataReconciledTargetMatchesAsync(pathLock, journal, cancellationToken);
         }
 
-        using var sourceEntry = pathLock.SourceParent.TryOpenExistingFile(
-            pathLock.SourceName,
-            requireDeleteAccess: true);
+        var sourceEntry = initialSource;
         using var destinationEntry =
             pathLock.DestinationParent.TryOpenExistingFile(
                 pathLock.DestinationName,
@@ -134,15 +118,12 @@ public partial class FileMover
             return false;
         }
 
-        string targetPhysicalObjectIdentity;
         if (sourceEntry != null)
         {
             if (journal.State != FileMutationJournalState.Planned
                 || !VisiblePathMatchesOrThrowUnavailable(
                     sourceEntry,
                     "The markerless rename source is temporarily unavailable while its generation is being verified.")
-                || !sourceEntry.MatchesObjectIdentity(
-                    expectedSourcePhysicalObjectIdentity)
                 || !sourceEntry.IsOnSameVolume(
                     pathLock.DestinationParent))
             {
@@ -164,10 +145,7 @@ public partial class FileMover
             {
                 pathLock.DestinationParent.FlushDirectoryEntry();
             }
-            targetPhysicalObjectIdentity = sourceEntry.GetObjectIdentity();
-            if (!sourceEntry.VisiblePathMatches()
-                || !sourceEntry.MatchesObjectIdentity(
-                    expectedSourcePhysicalObjectIdentity))
+            if (!sourceEntry.VisiblePathMatches())
             {
                 throw new IOException(
                     "The markerless rename target could not be verified after publication.");
@@ -177,44 +155,7 @@ public partial class FileMover
                 await AfterMarkerlessRenamePublishedBeforeTargetStateForTestAsync();
             }
         }
-        else
-        {
-            if (destinationEntry == null
-                || !VisiblePathMatchesOrThrowUnavailable(
-                    destinationEntry,
-                    "The markerless rename destination is temporarily unavailable while interrupted publication is being verified."))
-            {
-                await MarkMarkerlessRenameNeedsAttentionAsync(
-                    journal,
-                    "The markerless rename destination is unavailable.",
-                    cancellationToken);
-                return false;
-            }
-            targetPhysicalObjectIdentity = destinationEntry.GetObjectIdentity();
-            if (!destinationEntry.MatchesObjectIdentity(
-                    expectedSourcePhysicalObjectIdentity))
-            {
-                await MarkMarkerlessRenameNeedsAttentionAsync(
-                    journal,
-                    "The markerless rename destination identifies another physical file generation.",
-                    cancellationToken);
-                return false;
-            }
-        }
-
         var publishedTarget = sourceEntry ?? destinationEntry!;
-        if (!string.IsNullOrWhiteSpace(
-                journal.TargetPhysicalObjectIdentity)
-            && !publishedTarget.MatchesObjectIdentity(
-                journal.TargetPhysicalObjectIdentity))
-        {
-            await MarkMarkerlessRenameNeedsAttentionAsync(
-                journal,
-                "The markerless rename target changed after publication.",
-                cancellationToken);
-            return false;
-        }
-
         var durableTargetPhysicalObjectIdentity =
             journal.TargetPhysicalObjectIdentity ?? expectedSourcePhysicalObjectIdentity;
         if (journal.State < FileMutationJournalState.TargetIdentityPersisted)
@@ -303,10 +244,16 @@ public partial class FileMover
                             await BeforeMarkerlessCompletedJournalCommitForTestAsync();
                         }
 
+                        if (!MarkerlessRenamePublicationStillMatches(pathLock, publishedTarget))
+                        {
+                            return RegistrationPublicationMatchOutcome.Mismatch;
+                        }
                         return await ProbeMarkerlessMoveCompletionAsync(
                             pathLock,
                             journal,
-                            validationToken);
+                            validationToken,
+                            requirePersistedParentIdentity: false,
+                            requireTargetPhysicalIdentity: false);
                     },
                     cancellationToken);
             if (completionValidation == RegistrationPublicationMatchOutcome.Unavailable)
@@ -348,19 +295,15 @@ public partial class FileMover
     private async Task ValidateMarkerlessRenameJournalAsync(
         FileMutationJournal journal,
         FileMoveGateLease pathLock,
-        string expectedSourcePhysicalObjectIdentity,
         int? audiobookId,
         int? audiobookFileId)
     {
-        if (journal.ProtocolVersion != FileMutationProtocol.Current
+        if (journal.ProtocolVersion <= 0
+            || journal.ProtocolVersion > FileMutationProtocol.Current
             || journal.Action != FileAction.Move
             || journal.AudiobookId != audiobookId
             || journal.AudiobookFileId != audiobookFileId
-            || !await JournalPathsMatchGateAsync(journal, pathLock)
-            || !string.Equals(
-                journal.SourcePhysicalObjectIdentity,
-                expectedSourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || !await JournalPathsMatchGateAsync(journal, pathLock))
         {
             throw new InvalidOperationException(
                 "The durable markerless rename identity does not match the requested operation.");

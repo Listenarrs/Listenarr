@@ -39,7 +39,8 @@ public partial class FileMover
                 Message: plan.Message);
         }
 
-        if (plan.Mode == FilePublicationExecutionMode.AdditiveCopyRetainSource)
+        if (plan.Mode is FilePublicationExecutionMode.AdditiveCopyRetainSource
+            or FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
         {
             return await PrepareCompatibilityActionForRegistrationAsync(
                 plan,
@@ -49,25 +50,6 @@ public partial class FileMover
                 expectedRegisteredPhysicalObjectIdentity,
                 expectedSourceProof,
                 isCompanionFile);
-        }
-
-        if (!expectedSourceProof.HasDurablePhysicalObjectIdentity)
-        {
-            const string message =
-                "Durable publication requires a durable source object identity.";
-            LogMutation(
-                FileMutationOutcome.Blocked,
-                plan.RequestedAction,
-                source,
-                destination,
-                message);
-            return new FilePublicationPreparationResult(
-                FilePublicationOutcome.Blocked,
-                plan.RequestedAction,
-                plan.EffectiveAction,
-                plan.SourceDisposition,
-                ReasonCode: "durable_source_identity_unavailable",
-                Message: message);
         }
 
         var lease = await PrepareActionForRegistrationCoreAsync(

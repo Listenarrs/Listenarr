@@ -22,7 +22,7 @@ using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Cleanup
 {
-    public class MovedDownloadCleanupProcessor(
+    public partial class MovedDownloadCleanupProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
     {
@@ -45,11 +45,11 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             string CorrelationId,
             string? ProcessingJobId,
             DateTime? ProvenAt,
-            bool SourceRetained = false)
+            bool? SourceRetained = null)
         {
             public bool AllowsDestructiveCleanup =>
                 Kind is not ImportProofKind.LegacyMovedState
-                && !SourceRetained;
+                && SourceRetained is false;
         }
 
         /// <summary>
@@ -131,6 +131,14 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                         continue;
                     }
 
+                    var clientRetained = bool.TryParse(download.GetMetadataString(
+                        Download.ImportSourceRetentionRequiredMetadataKey), out var required) && required;
+                    if (clientRetained && !await CanReleaseClientOwnedSourceAsync(
+                            downloadClientGateway, clientConfig, download, cancellationToken))
+                    {
+                        continue;
+                    }
+
                     var hasCanBeRemoved = false;
                     var canBeRemoved = false;
                     if (download.Metadata != null && download.Metadata.TryGetValue("CanBeRemoved", out var canRemoveObj))
@@ -165,13 +173,18 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     }
 
                     var deleteFiles = removalPolicy == "remove_and_delete";
-                    if (deleteFiles && !proof.AllowsDestructiveCleanup)
+                    if (deleteFiles && (clientRetained || !proof.AllowsDestructiveCleanup))
                     {
-                        // Legacy Moved alone is enough to clean stale client/DB state, but not
-                        // enough to prove it is safe to delete files from the external client.
+                        var reason = proof.Kind == ImportProofKind.LegacyMovedState
+                            ? "only legacy Moved-state import proof is available"
+                            : clientRetained || proof.SourceRetained is true
+                                ? "the import retained its source"
+                                : "the source-retention disposition is unavailable";
                         logger.LogWarning(
-                            "Deferred removal: Download {DownloadId} has only legacy Moved-state import proof; remove_and_delete was downgraded to remove",
-                            download.Id);
+                            "Deferred removal: Download {DownloadId} cannot be deleted because {Reason}; " +
+                            "remove_and_delete was downgraded to remove",
+                            download.Id,
+                            reason);
                         deleteFiles = false;
                     }
 
@@ -222,7 +235,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     // If the primary client did not remove a torrent, try other enabled torrent
                     // clients by hash. This keeps cleanup resilient to older records assigned to
                     // the wrong DownloadClientId.
-                    if (!removed && !string.IsNullOrEmpty(torrentHash))
+                    if (!removed && !clientRetained && !string.IsNullOrEmpty(torrentHash))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                             { "qbittorrent", "transmission" };
@@ -316,6 +329,11 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             IDownloadHistoryRepository downloadHistoryRepository,
             CancellationToken cancellationToken)
         {
+            var persistedSourceRetained = bool.TryParse(
+                download.GetMetadataString(Download.SourceRetainedMetadataKey),
+                out var parsedPersistedSourceRetained)
+                    ? parsedPersistedSourceRetained
+                    : (bool?)null;
             var completedJob = (await processingJobRepository.GetByDownloadIdAsync(download.Id))
                 .Where(job => job.Status == ProcessingJobStatus.Completed)
                 .OrderByDescending(job => job.CompletedAt ?? job.CreatedAt)
@@ -327,22 +345,12 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     completedJob.GetOrCreateCorrelationId(),
                     completedJob.Id,
                     completedJob.CompletedAt,
-                    completedJob.JobData.TryGetValue(
-                        "SourceRetained",
-                        out var retainedValue)
-                    && bool.TryParse(
-                        retainedValue?.ToString(),
-                        out var sourceRetained)
-                    && sourceRetained);
-            }
-
-            if (download.LastImportedAt.HasValue)
-            {
-                return new ImportProof(
-                    ImportProofKind.LastImportedAt,
-                    download.Id.ToUpperInvariant(),
-                    null,
-                    download.LastImportedAt.Value);
+                    completedJob.TryGetJobDataString(
+                            Download.SourceRetainedMetadataKey,
+                            out var retainedValue)
+                        && bool.TryParse(retainedValue, out var sourceRetained)
+                            ? sourceRetained
+                            : persistedSourceRetained);
             }
 
             var importedHistory = await historyRepository.GetSucceededImportedByDownloadIdAsync(
@@ -354,7 +362,18 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     ImportProofKind.ImportedHistory,
                     importedHistory.CorrelationId ?? download.Id.ToUpperInvariant(),
                     null,
-                    importedHistory.Timestamp);
+                    importedHistory.Timestamp,
+                    persistedSourceRetained ?? ReadSourceRetained(importedHistory.Data));
+            }
+
+            if (download.LastImportedAt.HasValue)
+            {
+                return new ImportProof(
+                    ImportProofKind.LastImportedAt,
+                    download.Id.ToUpperInvariant(),
+                    null,
+                    download.LastImportedAt.Value,
+                    persistedSourceRetained);
             }
 
             var legacyDownloadHistory = await downloadHistoryRepository.GetImportedByDownloadIdAsync(
@@ -400,8 +419,13 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                 ["ImportProof"] = proof.Kind.ToString(),
                 ["RemovalPolicy"] = removalPolicy,
                 ["DeleteFiles"] = deleteFiles,
-                ["SourceRetained"] = proof.SourceRetained
+                ["SourceRetentionKnown"] = proof.SourceRetained.HasValue
             };
+
+            if (proof.SourceRetained.HasValue)
+            {
+                details[Download.SourceRetainedMetadataKey] = proof.SourceRetained.Value;
+            }
 
             if (!string.IsNullOrWhiteSpace(proof.ProcessingJobId))
             {
@@ -414,6 +438,34 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             }
 
             return details;
+        }
+
+        private static bool? ReadSourceRetained(string? data)
+        {
+            if (string.IsNullOrWhiteSpace(data)) return null;
+
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                if (!document.RootElement.TryGetProperty(
+                        Download.SourceRetainedMetadataKey,
+                        out var value))
+                {
+                    return null;
+                }
+
+                return value.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+                    _ => null
+                };
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
 
         private static Task AddCleanupHistoryAsync(

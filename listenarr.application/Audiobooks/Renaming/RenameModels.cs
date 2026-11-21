@@ -92,7 +92,9 @@ namespace Listenarr.Application.Audiobooks.Renaming
         public bool Success { get; set; }
         internal Guid? OperationId { get; set; }
         internal Guid? RollbackOperationId { get; set; }
+        internal IVerifiedFileRenameLease? VerifiedRenameLease { get; set; }
         public bool RolledBack { get; set; }
+        public bool SourceRetained { get; set; }
         public string? Error { get; set; }
     }
 }

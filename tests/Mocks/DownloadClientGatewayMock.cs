@@ -26,6 +26,7 @@ namespace Listenarr.Tests.Mocks
     public class DownloadClientGatewayMock : IDownloadClientGateway
     {
         public List<string> SourceFiles { get; set; } = [];
+        public bool? CanMoveFiles { get; set; }
         public bool RemoveResult { get; set; }
         public bool? LastRemoveDeleteFiles { get; private set; }
         public bool MarkImportedResult { get; set; } = true;
@@ -63,6 +64,13 @@ namespace Listenarr.Tests.Mocks
             return [];
         }
 
+        public async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, CancellationToken ct = default)
+        {
+            RegisterMethodCall(nameof(GetQueueSnapshotAsync));
+
+            return DownloadClientQueueSnapshot.Complete([]);
+        }
+
         public async Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
         {
             RegisterMethodCall(nameof(GetRecentHistoryAsync));
@@ -83,6 +91,7 @@ namespace Listenarr.Tests.Mocks
 
             queueItem.SourceFiles = SourceFiles;
             queueItem.LocalPath = download.DownloadPath;
+            queueItem.CanMoveFiles = CanMoveFiles;
 
             return Task.FromResult(queueItem);
         }

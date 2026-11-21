@@ -62,10 +62,6 @@ public sealed record ScanPathAuthorizationResult(
     public bool IsAuthorized =>
         !string.IsNullOrWhiteSpace(Path)
         && Identity.HasValue
-        && PhysicalIdentity.HasValue
-        && (PhysicalIdentity.Value.HasDurableGenerationProof
-            || PhysicalIdentity.Value.ProofKind
-                == ScanPathPhysicalProofKind.PinnedPathOnly)
         && Failure == ScanPathAuthorizationFailure.None
         && string.IsNullOrWhiteSpace(Error);
 

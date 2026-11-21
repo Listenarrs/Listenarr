@@ -328,59 +328,24 @@ namespace Listenarr.Api.Features.Images
                             var metadataEnvelope = await _audiobookMetadataService.GetMetadataAsync(identifier, region, cache: true);
                             if (metadataEnvelope != null)
                             {
-                                try
+                                AddCandidateUrl(
+                                    metadataEnvelope.Metadata.ImageUrl,
+                                    "MetadataEnvelopeAudible");
+                                if (string.IsNullOrWhiteSpace(candidateIsbn)
+                                    && !string.IsNullOrWhiteSpace(
+                                        metadataEnvelope.Metadata.Isbn))
                                 {
-                                    // If the service returned an AudibleBookResponse directly
-                                    if (metadataEnvelope is AudibleBookResponse directMeta)
-                                    {
-                                        AddCandidateUrl(directMeta.ImageUrl, "MetadataEnvelopeDirect");
-                                    }
-                                    else
-                                    {
-                                        // Try dynamic access
-                                        dynamic env = metadataEnvelope;
-                                        object? mdObj = env.metadata;
-
-                                        // If it's already the Audible type, use it
-                                        if (mdObj is AudibleBookResponse mdMeta)
-                                        {
-                                            AddCandidateUrl(mdMeta.ImageUrl, "MetadataEnvelopeAudible");
-                                        }
-                                        else if (mdObj != null)
-                                        {
-                                            // Try reflection for common property names
-                                            var t = mdObj.GetType();
-                                            var prop = t.GetProperty("ImageUrl") ?? t.GetProperty("Image") ?? t.GetProperty("image") ?? t.GetProperty("imageUrl");
-                                            if (prop != null)
-                                            {
-                                                var v = prop.GetValue(mdObj)?.ToString();
-                                                AddCandidateUrl(v, "MetadataEnvelopeReflection");
-                                            }
-
-                                            if (string.IsNullOrWhiteSpace(candidateIsbn))
-                                            {
-                                                var isbnProp = t.GetProperty("Isbn") ?? t.GetProperty("ISBN") ?? t.GetProperty("isbn");
-                                                var isbnVal = isbnProp?.GetValue(mdObj)?.ToString();
-                                                if (!string.IsNullOrWhiteSpace(isbnVal))
-                                                {
-                                                    candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(isbnVal);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (!string.IsNullOrWhiteSpace(candidateUrl))
-                                    {
-                                        _logger.LogInformation("Found image URL in fallback metadata source for identifier {Identifier}: {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(candidateUrl));
-                                    }
-                                    else
-                                    {
-                                        _logger.LogDebug("Fallback metadata returned no image URL for {Identifier}", LogRedaction.SanitizeText(identifier));
-                                    }
+                                    candidateIsbn = ImageIdentifierHelper.NormalizeIsbn(
+                                        metadataEnvelope.Metadata.Isbn);
                                 }
-                                catch (Exception ex) when (ImageIdentifierHelper.IsRecoverableImageLookupException(ex))
+
+                                if (!string.IsNullOrWhiteSpace(candidateUrl))
                                 {
-                                    _logger.LogDebug(ex, "Failed to parse fallback metadata envelope for {Identifier}", LogRedaction.SanitizeText(identifier));
+                                    _logger.LogInformation("Found image URL in fallback metadata source for identifier {Identifier}: {Url}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(candidateUrl));
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("Fallback metadata returned no image URL for {Identifier}", LogRedaction.SanitizeText(identifier));
                                 }
                             }
                             else

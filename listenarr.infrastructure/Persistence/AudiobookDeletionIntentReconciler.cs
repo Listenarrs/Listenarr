@@ -6,7 +6,6 @@ public sealed class AudiobookDeletionIntentReconciler(
     IAudiobookDeletionIntentStore intentStore,
     IAudiobookRepository audiobookRepository,
     IAudiobookDeletionCommitService deletionCommitService,
-    IAudiobookFilesystemDeleteService filesystemDeleteService,
     ILogger<AudiobookDeletionIntentReconciler> logger) : IAudiobookDeletionIntentReconciler
 {
     public async Task ReconcileAsync(CancellationToken cancellationToken = default)
@@ -17,8 +16,11 @@ public sealed class AudiobookDeletionIntentReconciler(
             cancellationToken.ThrowIfCancellationRequested();
             if (intent.State == AudiobookDeletionIntentState.NeedsAttention)
             {
-                throw new InvalidOperationException(
-                    $"Audiobook deletion intent {intent.Id} requires operator attention: {intent.Error}");
+                logger.LogWarning(
+                    "Audiobook deletion intent {IntentId} remains scoped to operator attention: {Reason}",
+                    intent.Id,
+                    intent.Error);
+                continue;
             }
 
             if (intent.State == AudiobookDeletionIntentState.Planned)
@@ -29,72 +31,31 @@ public sealed class AudiobookDeletionIntentReconciler(
                 if (audiobook == null)
                 {
                     var reason =
-                        "The audiobook row disappeared before its durable filesystem cleanup completed.";
+                        "The audiobook row disappeared before explicit filesystem cleanup completed.";
                     await intentStore.MarkNeedsAttentionAsync(
                         intent.Id,
                         reason,
                         CancellationToken.None);
-                    throw new InvalidOperationException(reason);
-                }
-
-                AudiobookFilesystemDeleteResult result;
-                try
-                {
-                    result = await filesystemDeleteService.DeleteAsync(
-                        audiobook,
-                        intent.DeleteFolder,
-                        cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception exception) when (
-                    IsTransientRecoveryFilesystemException(exception))
-                {
-                    await intentStore.RecordErrorAsync(
-                        intent.Id,
-                        "Filesystem cleanup is temporarily unavailable during durable audiobook deletion recovery.",
-                        CancellationToken.None);
                     logger.LogWarning(
-                        exception,
-                        "Audiobook deletion intent {IntentId} remains pending because filesystem cleanup is temporarily unavailable",
-                        intent.Id);
+                        "Audiobook deletion intent {IntentId} requires scoped repair: {Reason}",
+                        intent.Id,
+                        reason);
                     continue;
                 }
-                catch (Exception exception) when (exception is not (
-                    OutOfMemoryException or StackOverflowException))
-                {
-                    await intentStore.RecordErrorAsync(
-                        intent.Id,
-                        "Filesystem cleanup failed during durable audiobook deletion recovery.",
-                        CancellationToken.None);
-                    throw new InvalidOperationException(
-                        "Durable audiobook deletion recovery could not complete filesystem cleanup safely.",
-                        exception);
-                }
 
-                foreach (var warning in result.Warnings)
-                {
-                    logger.LogWarning(
-                        "Recovered audiobook deletion {IntentId} completed with warning: {Warning}",
-                        intent.Id,
-                        warning);
-                }
-                if (!result.TrackedFileCleanupComplete)
-                {
-                    await intentStore.RecordErrorAsync(
-                        intent.Id,
-                        "One or more tracked audiobook file generations remain pending after filesystem cleanup recovery.",
-                        CancellationToken.None);
-                    logger.LogWarning(
-                        "Audiobook deletion intent {IntentId} remains pending because tracked-file cleanup is not yet complete",
-                        intent.Id);
-                    continue;
-                }
-                await intentStore.MarkFilesystemCleanupCompletedAsync(
+                // A Planned intent proves user intent existed, but the pinned
+                // filesystem proof that authorized destructive mutation was
+                // process-local. Startup recovery must not reacquire that proof
+                // and delete on the user's behalf. Preserve the source and let a
+                // new explicit delete request reacquire live proof.
+                await intentStore.RecordErrorAsync(
                     intent.Id,
+                    "Filesystem deletion was not resumed after restart because live delete proof expires at the process boundary. Retry the explicit delete to reacquire live proof.",
                     CancellationToken.None);
+                logger.LogWarning(
+                    "Audiobook deletion intent {IntentId} retained filesystem content after restart; explicit retry is required",
+                    intent.Id);
+                continue;
             }
 
             var commit = await deletionCommitService.DeleteAsync(
@@ -103,8 +64,14 @@ public sealed class AudiobookDeletionIntentReconciler(
                 CancellationToken.None);
             if (commit.Outcome == AudiobookDeletionCommitOutcome.Failed)
             {
-                throw new InvalidOperationException(
-                    "Durable audiobook deletion recovery could not commit the database deletion.");
+                await intentStore.RecordErrorAsync(
+                    intent.Id,
+                    "Filesystem cleanup completed, but the database deletion could not be committed during recovery.",
+                    CancellationToken.None);
+                logger.LogWarning(
+                    "Audiobook deletion intent {IntentId} remains pending because database deletion could not be committed",
+                    intent.Id);
+                continue;
             }
 
             await intentStore.MarkCompletedAsync(
@@ -115,20 +82,5 @@ public sealed class AudiobookDeletionIntentReconciler(
                 intent.Id,
                 intent.AudiobookId);
         }
-    }
-
-    private static bool IsTransientRecoveryFilesystemException(Exception exception)
-    {
-        if (exception is IOException or UnauthorizedAccessException)
-        {
-            return true;
-        }
-        if (exception is System.ComponentModel.Win32Exception native)
-        {
-            return native.NativeErrorCode is 5 or 13 or 16 or 30 or 32 or 33;
-        }
-
-        return exception is InvalidOperationException { InnerException: not null }
-            && IsTransientRecoveryFilesystemException(exception.InnerException);
     }
 }

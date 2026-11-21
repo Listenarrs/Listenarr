@@ -46,6 +46,45 @@
 
             <!-- Book Details -->
             <div class="book-details">
+              <div
+                v-if="metadataLookupFailed"
+                class="metadata-not-found"
+                role="alert"
+                data-testid="metadata-not-found"
+              >
+                <PhWarning :size="16" />
+                <div>
+                  <p>
+                    <strong
+                      >No Audible record for this ASIN in the
+                      {{ regionLabel(metadataLookupRegion) }} catalogue.</strong
+                    >
+                    The book can't be added without it: look it up in another region, or cancel.
+                  </p>
+                  <div class="metadata-not-found-actions">
+                    <label for="metadata-retry-region">Look it up in</label>
+                    <select
+                      id="metadata-retry-region"
+                      v-model="retryRegion"
+                      class="form-select"
+                      data-testid="metadata-retry-region"
+                    >
+                      <option v-for="o in retryRegionOptions" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      data-testid="metadata-retry"
+                      :disabled="metadataLoading || !retryRegion"
+                      @click="retryMetadataLookup"
+                    >
+                      Search again
+                    </button>
+                  </div>
+                </div>
+              </div>
               <div v-if="!showMetadataEditor" class="detail-section detail-header">
                 <div>
                   <h3>{{ currentMetadata.title }}</h3>
@@ -315,6 +354,23 @@
                   <div class="detail-item">
                     <span class="label">ASIN</span>
                     <input v-model="editableMetadata.asin" type="text" class="form-input" />
+                    <div v-if="asinValidationError" class="path-validation-error">
+                      <PhWarning :size="16" />
+                      <span>{{ asinValidationError }}</span>
+                    </div>
+                  </div>
+                  <div class="detail-item">
+                    <span class="label">Region</span>
+                    <select
+                      v-model="editableMetadata.region"
+                      class="form-input"
+                      data-testid="metadata-region"
+                    >
+                      <option v-if="!editableMetadata.region" :value="undefined">Not set</option>
+                      <option v-for="o in metadataRegionOptions" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
                   </div>
                   <div class="detail-item">
                     <span class="label">ISBN</span>
@@ -437,7 +493,13 @@
       <button
         class="btn btn-primary"
         @click="addToLibrary"
-        :disabled="isAdding || metadataLoading || Boolean(destinationPathValidationError)"
+        :disabled="
+          isAdding ||
+          metadataLoading ||
+          Boolean(destinationPathValidationError) ||
+          Boolean(asinValidationError) ||
+          metadataLookupFailed
+        "
       >
         <PhSpinner v-if="isAdding" class="ph-spin" />
         <PhPlus v-else />
@@ -485,6 +547,11 @@ import {
 import { formatDate } from '@/utils/searchResultFormatting'
 import { stripHtmlAndNormalize } from '@/utils/textUtils'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import {
+  normalizeSearchRegion,
+  orderedSearchRegionOptions,
+  searchRegionOptions,
+} from '@/utils/languageMapping'
 
 interface Props {
   visible: boolean
@@ -648,10 +715,14 @@ function cloneMetadata(source: AudibleBookMetadata): AudibleBookMetadata {
   }
 }
 
+// The book's region as loaded (not as edited), so the region list keeps its order while editing
+const bookRegion = ref<string | undefined>()
+
 function replaceEditableMetadata(metadata: AudibleBookMetadata) {
   suppressMetadataEditTracking = true
   try {
     editableMetadata.value = cloneMetadata(metadata)
+    bookRegion.value = trimToUndefined(metadata.region)
   } finally {
     suppressMetadataEditTracking = false
   }
@@ -860,6 +931,43 @@ const imageLoading = ref(false)
 const imageRetryCount = ref(0)
 const metadataLoading = ref(false)
 const metadataSource = ref<string | null>(null)
+// Set when the Audible catalogue has no usable record for the ASIN in the region that was asked
+// (request error such as a 404, or an empty product stub that has an ASIN but no title). There is
+// no automatic switch to another catalogue: the user picks the region to try.
+const metadataLookupFailed = ref(false)
+const metadataLookupRegion = ref('')
+const retryRegion = ref('')
+
+// The region that was tried first, then the configured one and US, then the others alphabetically
+const retryRegionOptions = computed(() =>
+  orderedSearchRegionOptions([
+    metadataLookupRegion.value,
+    normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+    'us',
+  ]),
+)
+
+// The Audible catalogue the ASIN belongs to, saved with it and used by rescans: editable with the
+// ASIN. The book's region first, then the configured one and US, as in Find Match
+const metadataRegionOptions = computed(() =>
+  orderedSearchRegionOptions([
+    bookRegion.value,
+    normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+    'us',
+  ]),
+)
+
+function regionLabel(region: string): string {
+  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
+}
+
+// An ASIN can be corrected by hand (Audible sometimes republishes a book under a new one), but a
+// malformed one could never be looked up again, so it blocks the add; no ASIN is still allowed
+const asinValidationError = computed(() => {
+  const asin = trimToUndefined(editableMetadata.value?.asin)
+  if (!asin || /^[A-Z0-9]{10}$/i.test(asin)) return null
+  return 'An ASIN has 10 letters or digits.'
+})
 
 const imageSrc = computed(() => {
   // prefer resolvedImageUrl passed from parent
@@ -1034,6 +1142,93 @@ async function refreshPreviewFromMetadata(force = false, ownerGeneration = seedG
   }
 }
 
+type MetadataLookup = { found: boolean; enriched: AudibleBookMetadata | null; source?: string }
+
+// Fetch the Audible record for an ASIN in one region. found=false means that catalogue has nothing
+// usable for it; a response without any record keeps the previous behaviour (use the provided book).
+async function lookupMetadata(
+  asin: string,
+  region: string,
+  fallbackBook: AudibleBookMetadata,
+): Promise<MetadataLookup> {
+  let resp: unknown
+  try {
+    resp = await apiService.getAudibleMetadata<AudibleMetadataResponse | Partial<Audible>>(
+      asin,
+      region,
+    )
+  } catch (metaErr) {
+    logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+    return { found: false, enriched: null }
+  }
+  const payload = (resp && typeof resp === 'object' ? resp : {}) as
+    | AudibleMetadataResponse
+    | Partial<Audible>
+  const source =
+    'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
+  const metadata =
+    'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
+      ? payload.metadata
+      : (payload as Partial<Audible>)
+  if (!metadata || typeof metadata !== 'object') return { found: true, enriched: null, source }
+  // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
+  if (metadata.asin && !metadata.title) return { found: false, enriched: null }
+  // The record's region, else the region this request found it in: never the book's own region,
+  // which may be the catalogue that just failed
+  const enrichedMeta = {
+    ...mapAudibleToAudible(metadata, source, fallbackBook),
+    region: metadata.region || region,
+  }
+  // Sanitize seriesNumber to filter out the string "null"
+  if (enrichedMeta.seriesNumber === 'null') {
+    enrichedMeta.seriesNumber = undefined
+  }
+  return { found: true, enriched: enrichedMeta, source }
+}
+
+// Like seedPreview, a late answer never replaces what the user changed while it was pending: the
+// metadata they edited stays (the record's region is still taken, as the ASIN belongs to that
+// catalogue), and so does a destination they typed. ("Search again" is disabled while one runs.)
+const retryMetadataLookup = async () => {
+  const asin = props.book?.asin
+  if (!asin || !retryRegion.value) return
+  const generation = seedGeneration
+  const metadataEditGenerationAtStart = metadataEditGeneration
+  const manualEditGenerationAtStart = manualEditGeneration
+  const region = retryRegion.value
+  metadataLoading.value = true
+  const result = await lookupMetadata(asin, region, cloneMetadata(props.book))
+  if (!isCurrentSeed(generation)) return
+  metadataLoading.value = false
+  metadataLookupRegion.value = region
+  if (!result.found || !result.enriched) {
+    metadataLookupFailed.value = true
+    return
+  }
+  metadataLookupFailed.value = false
+  enriched.value = result.enriched
+  metadataSource.value = result.source || null
+  if (metadataEditGeneration === metadataEditGenerationAtStart) {
+    replaceEditableMetadata(enriched.value)
+  } else {
+    applyFoundRegion(result.enriched.region)
+  }
+  if (manualEditGeneration !== manualEditGenerationAtStart) return
+  await refreshPreviewFromMetadata(true, generation)
+}
+
+// The region the record was found in, set on the edited metadata without counting as a user edit
+function applyFoundRegion(region: string | undefined) {
+  if (!region || !editableMetadata.value) return
+  suppressMetadataEditTracking = true
+  try {
+    editableMetadata.value = { ...editableMetadata.value, region }
+    bookRegion.value = region
+  } finally {
+    suppressMetadataEditTracking = false
+  }
+}
+
 // helper to load profiles/settings and seed preview
 const seedPreview = async () => {
   const generation = ++seedGeneration
@@ -1051,6 +1246,9 @@ const seedPreview = async () => {
   const bookSnapshot = cloneMetadata(props.book)
   enriched.value = null
   metadataSource.value = null
+  metadataLookupFailed.value = false
+  metadataLookupRegion.value = ''
+  retryRegion.value = ''
   replaceEditableMetadata(bookSnapshot)
   showMetadataEditor.value = false
 
@@ -1081,34 +1279,22 @@ const seedPreview = async () => {
     // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
     if (bookSnapshot.asin) {
       metadataLoading.value = true
+      // The result's own region first, then the configured one (the API would default to 'us')
+      const region =
+        bookSnapshot.region ||
+        normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
       try {
-        const resp = await apiService.getAudibleMetadata<
-          AudibleMetadataResponse | Partial<Audible>
-        >(bookSnapshot.asin, bookSnapshot.region)
+        const result = await lookupMetadata(bookSnapshot.asin, region, bookSnapshot)
         if (!isCurrentSeed(generation)) return
-        const payload = (resp && typeof resp === 'object' ? resp : {}) as
-          | AudibleMetadataResponse
-          | Partial<Audible>
-        const source =
-          'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
-        const metadata =
-          'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
-            ? payload.metadata
-            : (payload as Partial<Audible>)
-
-        if (metadata && typeof metadata === 'object') {
-          const enrichedMeta = mapAudibleToAudible(metadata, source, bookSnapshot)
-          // Sanitize seriesNumber to filter out the string "null"
-          if (enrichedMeta.seriesNumber === 'null') {
-            enrichedMeta.seriesNumber = undefined
-          }
-          enriched.value = enrichedMeta
-          metadataSource.value = source || null
+        if (!result.found) {
+          // Don't silently add a book without its Audible record: say so and let the user choose
+          metadataLookupFailed.value = true
+          metadataLookupRegion.value = region
+          retryRegion.value = region
+        } else if (result.enriched) {
+          enriched.value = result.enriched
+          metadataSource.value = result.source || null
         }
-      } catch (metaErr) {
-        if (!isCurrentSeed(generation)) return
-        // ignore metadata fetch errors - we'll fall back to provided book
-        logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
       } finally {
         if (isCurrentSeed(generation)) {
           metadataLoading.value = false
@@ -1390,6 +1576,11 @@ const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
 
 const addToLibrary = async () => {
   if (!props.book) return
+  if (metadataLookupFailed.value) return
+  if (asinValidationError.value) {
+    toast.error('Invalid ASIN', asinValidationError.value)
+    return
+  }
   if (destinationPathValidationError.value) {
     toast.error('Invalid destination', destinationPathValidationError.value)
     return
@@ -1839,6 +2030,37 @@ const capitalizeFirst = (str: string): string => {
   .btn {
     justify-content: center;
   }
+}
+
+.metadata-not-found {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background-color: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  color: #ffb74d;
+}
+
+.metadata-not-found p {
+  margin: 0 0 0.5rem;
+}
+
+.metadata-not-found-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.metadata-not-found svg {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
 }
 
 .path-length-warning,

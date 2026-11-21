@@ -19,23 +19,42 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useAdvancedSearch } from '@/composables/useAdvancedSearch'
 
 describe('useAdvancedSearch', () => {
-  let localStorageMock: Record<string, string> = {}
+  let storageMock: Record<string, string> = {}
+  let legacyLocalStorageMock: Record<string, string> = {}
+
+  const stubStorage = (get: () => Record<string, string>, reset: () => void) => ({
+    getItem: (key: string) => get()[key] || null,
+    setItem: (key: string, value: string) => {
+      get()[key] = value
+    },
+    removeItem: (key: string) => {
+      delete get()[key]
+    },
+    clear: reset,
+  })
 
   beforeEach(() => {
-    // Mock localStorage
-    localStorageMock = {}
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => localStorageMock[key] || null,
-      setItem: (key: string, value: string) => {
-        localStorageMock[key] = value
-      },
-      removeItem: (key: string) => {
-        delete localStorageMock[key]
-      },
-      clear: () => {
-        localStorageMock = {}
-      },
-    })
+    // The form is kept in sessionStorage; localStorage only holds what earlier versions left there
+    storageMock = {}
+    legacyLocalStorageMock = {}
+    vi.stubGlobal(
+      'sessionStorage',
+      stubStorage(
+        () => storageMock,
+        () => {
+          storageMock = {}
+        },
+      ),
+    )
+    vi.stubGlobal(
+      'localStorage',
+      stubStorage(
+        () => legacyLocalStorageMock,
+        () => {
+          legacyLocalStorageMock = {}
+        },
+      ),
+    )
     vi.useFakeTimers()
   })
 
@@ -58,7 +77,7 @@ describe('useAdvancedSearch', () => {
       })
     })
 
-    it('restores persisted state from localStorage', () => {
+    it('restores persisted state from sessionStorage', () => {
       const savedState = {
         showAdvanced: true,
         params: {
@@ -69,7 +88,7 @@ describe('useAdvancedSearch', () => {
           asin: 'B123',
         },
       }
-      localStorageMock['listenarr.addnew.advanced'] = JSON.stringify(savedState)
+      storageMock['listenarr.addnew.advanced'] = JSON.stringify(savedState)
 
       const { advancedSearchParams, showAdvancedSearch } = useAdvancedSearch()
 
@@ -77,8 +96,21 @@ describe('useAdvancedSearch', () => {
       expect(advancedSearchParams.value).toEqual(savedState.params)
     })
 
-    it('handles corrupted localStorage data gracefully', () => {
-      localStorageMock['listenarr.addnew.advanced'] = 'invalid json'
+    it('drops the form an earlier version left in localStorage instead of restoring it', () => {
+      legacyLocalStorageMock['listenarr.addnew.advanced'] = JSON.stringify({
+        showAdvanced: true,
+        params: { title: 'Old search', author: '', isbn: '', series: '', asin: '' },
+      })
+
+      const { advancedSearchParams, showAdvancedSearch } = useAdvancedSearch()
+
+      expect(showAdvancedSearch.value).toBe(false)
+      expect(advancedSearchParams.value.title).toBe('')
+      expect(legacyLocalStorageMock['listenarr.addnew.advanced']).toBeUndefined()
+    })
+
+    it('handles corrupted sessionStorage data gracefully', () => {
+      storageMock['listenarr.addnew.advanced'] = 'invalid json'
 
       const { showAdvancedSearch, advancedSearchParams } = useAdvancedSearch()
 
@@ -96,7 +128,7 @@ describe('useAdvancedSearch', () => {
           asin: '',
         },
       }
-      localStorageMock['listenarr.addnew.advanced'] = JSON.stringify(savedState)
+      storageMock['listenarr.addnew.advanced'] = JSON.stringify(savedState)
 
       const { showAdvancedSearch, advancedSearchParams } = useAdvancedSearch()
 
@@ -190,7 +222,7 @@ describe('useAdvancedSearch', () => {
       toggleAdvancedSearch()
       vi.advanceTimersByTime(300)
 
-      const saved = localStorageMock['listenarr.addnew.advanced']
+      const saved = storageMock['listenarr.addnew.advanced']
       expect(saved).toBeDefined()
       const parsed = JSON.parse(saved)
       expect(parsed.showAdvanced).toBe(true)
@@ -217,7 +249,7 @@ describe('useAdvancedSearch', () => {
       updateSearchParam('title', 'Dune')
       vi.advanceTimersByTime(300)
 
-      const saved = localStorageMock['listenarr.addnew.advanced']
+      const saved = storageMock['listenarr.addnew.advanced']
       expect(saved).toBeDefined()
       const parsed = JSON.parse(saved)
       expect(parsed.params.title).toBe('Dune')
@@ -225,7 +257,7 @@ describe('useAdvancedSearch', () => {
 
     it('debounces multiple updates', () => {
       const { updateSearchParam } = useAdvancedSearch()
-      const setItemSpy = vi.spyOn(localStorage, 'setItem')
+      const setItemSpy = vi.spyOn(sessionStorage, 'setItem')
 
       updateSearchParam('title', 'Dune')
       vi.advanceTimersByTime(100)
@@ -261,14 +293,14 @@ describe('useAdvancedSearch', () => {
       })
     })
 
-    it('persists reset to localStorage', () => {
+    it('persists reset to sessionStorage', () => {
       const { advancedSearchParams, resetAdvancedSearch } = useAdvancedSearch()
 
       advancedSearchParams.value.title = 'Dune'
       resetAdvancedSearch()
       vi.advanceTimersByTime(300)
 
-      const saved = localStorageMock['listenarr.addnew.advanced']
+      const saved = storageMock['listenarr.addnew.advanced']
       expect(saved).toBeDefined()
       const parsed = JSON.parse(saved)
       expect(parsed.params.title).toBe('')
@@ -303,17 +335,17 @@ describe('useAdvancedSearch', () => {
   })
 
   describe('clearPersistedState', () => {
-    it('removes state from localStorage', () => {
+    it('removes state from sessionStorage', () => {
       const { updateSearchParam, clearPersistedState } = useAdvancedSearch()
 
       updateSearchParam('title', 'Dune')
       vi.advanceTimersByTime(300)
 
-      expect(localStorageMock['listenarr.addnew.advanced']).toBeDefined()
+      expect(storageMock['listenarr.addnew.advanced']).toBeDefined()
 
       clearPersistedState()
 
-      expect(localStorageMock['listenarr.addnew.advanced']).toBeUndefined()
+      expect(storageMock['listenarr.addnew.advanced']).toBeUndefined()
     })
 
     it('clears pending save timer', () => {
@@ -329,14 +361,14 @@ describe('useAdvancedSearch', () => {
       vi.advanceTimersByTime(200)
 
       // Should not have saved (timer was cleared)
-      expect(localStorageMock['listenarr.addnew.advanced']).toBeUndefined()
+      expect(storageMock['listenarr.addnew.advanced']).toBeUndefined()
     })
   })
 
-  describe('localStorage debouncing', () => {
+  describe('sessionStorage debouncing', () => {
     it('debounces rapid parameter changes', () => {
       const { updateSearchParam } = useAdvancedSearch()
-      const setItemSpy = vi.spyOn(localStorage, 'setItem')
+      const setItemSpy = vi.spyOn(sessionStorage, 'setItem')
 
       // Simulate rapid user typing
       updateSearchParam('title', 'D')
@@ -355,13 +387,13 @@ describe('useAdvancedSearch', () => {
 
       // Should save only once, with final value
       expect(setItemSpy).toHaveBeenCalledTimes(1)
-      const saved = JSON.parse(localStorageMock['listenarr.addnew.advanced'])
+      const saved = JSON.parse(storageMock['listenarr.addnew.advanced'])
       expect(saved.params.title).toBe('Dune')
     })
 
     it('saves immediately after debounce window expires', () => {
       const { updateSearchParam } = useAdvancedSearch()
-      const setItemSpy = vi.spyOn(localStorage, 'setItem')
+      const setItemSpy = vi.spyOn(sessionStorage, 'setItem')
 
       updateSearchParam('title', 'Dune')
       vi.advanceTimersByTime(300)
@@ -388,7 +420,7 @@ describe('useAdvancedSearch', () => {
       vi.advanceTimersByTime(300)
 
       // Should not have saved because timer was cleared
-      expect(localStorageMock['listenarr.addnew.advanced']).toBeUndefined()
+      expect(storageMock['listenarr.addnew.advanced']).toBeUndefined()
     })
   })
 
@@ -409,7 +441,7 @@ describe('useAdvancedSearch', () => {
 
     it('tracks nested parameter updates', () => {
       const { advancedSearchParams } = useAdvancedSearch()
-      const setItemSpy = vi.spyOn(localStorage, 'setItem')
+      const setItemSpy = vi.spyOn(sessionStorage, 'setItem')
 
       advancedSearchParams.value.author = 'Frank Herbert'
       vi.advanceTimersByTime(300)
@@ -419,11 +451,11 @@ describe('useAdvancedSearch', () => {
   })
 
   describe('error handling', () => {
-    it('handles localStorage quota exceeded gracefully', () => {
+    it('handles sessionStorage quota exceeded gracefully', () => {
       const { updateSearchParam } = useAdvancedSearch()
 
-      // Mock localStorage to throw quota error
-      vi.spyOn(localStorage, 'setItem').mockImplementationOnce(() => {
+      // Mock sessionStorage to throw quota error
+      vi.spyOn(sessionStorage, 'setItem').mockImplementationOnce(() => {
         throw new Error('QuotaExceededError')
       })
 
@@ -435,7 +467,7 @@ describe('useAdvancedSearch', () => {
     })
 
     it('handles null stored state gracefully', () => {
-      localStorageMock['listenarr.addnew.advanced'] = 'null'
+      storageMock['listenarr.addnew.advanced'] = 'null'
 
       const { showAdvancedSearch } = useAdvancedSearch()
 

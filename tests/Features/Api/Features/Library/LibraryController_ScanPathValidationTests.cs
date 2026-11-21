@@ -36,16 +36,12 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 FileSystemCaseSensitivity.Insensitive,
                 FileSystemCaseSensitivityMode.Auto,
                 "C:\\private\\library");
-            var physicalIdentity = new ScanPathPhysicalIdentity(
-                "boundary-secret",
-                "scan-root-secret");
             var job = new ScanJob
             {
                 Id = jobId,
                 AudiobookId = 42,
                 Path = "C:\\private\\library\\book",
                 PathIdentity = pathIdentity,
-                PhysicalIdentity = physicalIdentity,
                 Status = "Failed",
                 Error = "C:\\private\\library\\book could not be opened by worker secret",
                 CorrelationId = "correlation-secret",
@@ -70,13 +66,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             {
                 job.Path,
                 pathIdentity.BoundaryPath,
-                physicalIdentity.BoundaryObjectIdentity,
-                physicalIdentity.ScanRootObjectIdentity,
                 job.CorrelationId,
                 job.DownloadId,
                 "worker secret",
                 nameof(ScanJob.PathIdentity),
-                nameof(ScanJob.PhysicalIdentity),
                 nameof(ScanJob.AuthorizationMode)
             })
             {

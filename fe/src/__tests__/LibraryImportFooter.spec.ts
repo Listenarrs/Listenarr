@@ -197,4 +197,55 @@ describe('LibraryImportFooter', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="move-policy-warning"]').exists()).toBe(false)
   })
+
+  it('disables Import while a matching search or a Find Match search is running', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: true,
+      filesystemStatus: 'Ready',
+      filesystemPhase: null,
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+    store.items = {
+      '/incoming/Book 1.mp3': {
+        id: '/incoming/Book 1.mp3',
+        fullPath: '/incoming/Book 1.mp3',
+        sourceFiles: ['/incoming/Book 1.mp3'],
+        folderPath: '/incoming',
+        relativePath: 'Book 1',
+        folderName: 'Book 1',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: { title: 'Book 1', authors: [] } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    const wrapper = mount(LibraryImportFooter, {
+      props: { folders: [{ id: 1, path: '/library' }] as unknown as RootFolder[] },
+      global: { plugins: [pinia] },
+    })
+    const importButton = () => wrapper.find('button.btn.btn-primary').element as HTMLButtonElement
+    expect(importButton().disabled).toBe(false)
+
+    store.findMatchSearchStarted()
+    await wrapper.vm.$nextTick()
+    expect(importButton().disabled).toBe(true)
+    store.findMatchSearchEnded()
+    await wrapper.vm.$nextTick()
+    expect(importButton().disabled).toBe(false)
+
+    store.isProcessing = true
+    await wrapper.vm.$nextTick()
+    expect(importButton().disabled).toBe(true)
+  })
 })

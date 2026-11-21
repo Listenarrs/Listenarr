@@ -47,20 +47,24 @@ public sealed partial class EfMoveQueuePersistence
 
             if (!db.Database.IsRelational())
             {
-                var tracked = await db.MoveJobs.SingleOrDefaultAsync(
-                    job => job.Id == command.JobId
-                        && job.Status == command.ExpectedStatus,
-                    cancellationToken);
+                var tracked = await db.MoveJobs
+                    .Include(job => job.CreatedDirectories)
+                    .SingleOrDefaultAsync(
+                        job => job.Id == command.JobId
+                            && job.Status == command.ExpectedStatus,
+                        cancellationToken);
                 if (tracked == null)
                 {
                     return new MoveRequeueResult(MoveRequeueOutcome.StaleState);
                 }
 
+                ResetRemovedTargetScaffolding(tracked);
                 ApplyRequeue(tracked, command);
                 await db.SaveChangesAsync(cancellationToken);
             }
             else
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
                 var affected = await db.MoveJobs
                     .Where(job => job.Id == command.JobId
                         && job.Status == command.ExpectedStatus)
@@ -77,6 +81,7 @@ public sealed partial class EfMoveQueuePersistence
                             .SetProperty(job => job.TargetCaseSensitivityMode, command.TargetIdentity.RequestedMode)
                             .SetProperty(job => job.TargetIdentityBoundary, command.TargetIdentity.BoundaryPath)
                             .SetProperty(job => job.IdentityKeyVersion, MoveManifestIdentity.Version)
+                            .SetProperty(job => job.ExecutionProtocolVersion, MoveExecutionProtocol.Current)
                             .SetProperty(job => job.ActiveDeduplicationKey, command.DeduplicationKey)
                             .SetProperty(job => job.Status, MoveJobStatus.Queued)
                             .SetProperty(job => job.FailureKind, MoveFailureKind.None)
@@ -95,6 +100,22 @@ public sealed partial class EfMoveQueuePersistence
                     return new MoveRequeueResult(
                         exists ? MoveRequeueOutcome.StaleState : MoveRequeueOutcome.NotFound);
                 }
+
+                _ = await db.MoveJobCreatedDirectories
+                    .Where(directory => directory.MoveJobId == command.JobId
+                        && directory.State == MoveCreatedDirectoryState.Removed)
+                    .ExecuteUpdateAsync(
+                        updates => updates
+                            .SetProperty(
+                                directory => directory.State,
+                                MoveCreatedDirectoryState.Planned)
+                            .SetProperty(
+                                directory => directory.DirectoryObjectIdentity,
+                                (string?)null),
+                        cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                await transaction.CommitAsync(CancellationToken.None);
             }
 
             var repaired = await db.MoveJobs
@@ -161,6 +182,7 @@ public sealed partial class EfMoveQueuePersistence
         && job.TargetCaseSensitivityMode == command.TargetIdentity.RequestedMode
         && job.TargetIdentityBoundary == command.TargetIdentity.BoundaryPath
         && job.IdentityKeyVersion == MoveManifestIdentity.Version
+        && job.ExecutionProtocolVersion == MoveExecutionProtocol.Current
         && job.ActiveDeduplicationKey == command.DeduplicationKey
         && job.FailureKind == MoveFailureKind.None
         && job.AttemptCount == 0
@@ -169,6 +191,16 @@ public sealed partial class EfMoveQueuePersistence
         && job.LeaseOwner == null
         && job.LeaseExpiresAt == null;
 
+    private static void ResetRemovedTargetScaffolding(MoveJob job)
+    {
+        foreach (var directory in job.CreatedDirectories.Where(directory =>
+                     directory.State == MoveCreatedDirectoryState.Removed))
+        {
+            directory.State = MoveCreatedDirectoryState.Planned;
+            directory.DirectoryObjectIdentity = null;
+        }
+    }
+
     private static void ApplyRequeue(MoveJob job, RequeueMoveCommand command)
     {
         job.SourcePath = command.SourcePath;
@@ -176,6 +208,7 @@ public sealed partial class EfMoveQueuePersistence
         job.SetSourceIdentity(command.SourceIdentity);
         job.SetTargetIdentity(command.TargetIdentity);
         job.IdentityKeyVersion = MoveManifestIdentity.Version;
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.Current;
         job.ActiveDeduplicationKey = command.DeduplicationKey;
         job.Status = MoveJobStatus.Queued;
         job.Error = null;

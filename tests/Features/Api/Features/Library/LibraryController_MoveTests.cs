@@ -839,7 +839,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     command.AudiobookId == audiobook.Id
                     && command.TargetPath == FileUtils.NormalizeStoredPath(target)
                     && command.SourcePath == source
-                    && command.DeleteEmptySource
+                    && !command.DeleteEmptySource
+                    && command.ForceCopyAndRetainSource
+                    && command.SourceCleanupMode == MoveSourceCleanupMode.RetainSource
                     && command.SourceCleanupBoundary == series),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -1484,7 +1486,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "UnconfirmedManagedRootBlocksPhysicalMove")]
-        public async Task MoveAudiobook_UnconfirmedManagedRoot_BlocksPhysicalMove()
+        public async Task MoveAudiobook_ManagedRootWithoutPhysicalIdentity_AllowsPhysicalMove()
         {
             var moveQueue = CreateMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
@@ -1518,14 +1520,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     MoveFiles = true
                 });
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Contains(
-                "physical identity is unavailable",
-                badRequest.Value?.ToString() ?? string.Empty,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.IsType<AcceptedResult>(result);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
                 It.IsAny<MoveEnqueueCommand>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -1582,7 +1580,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             var payload = JsonSerializer.Serialize(badRequest.Value);
             Assert.Contains(
-                "destination_filesystem_mutation_unavailable",
+                "destination_file_publication_unavailable",
                 payload,
                 StringComparison.Ordinal);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
@@ -1593,10 +1591,89 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
-        [Trait("Scenario", "ReadOnlySourceRootRejectsBeforeEnqueue")]
-        public async Task MoveAudiobook_ReadOnlySourceRoot_RejectsBeforeEnqueue()
+        [Trait("Scenario", "WeakWritableDestinationAllowsAdditivePublication")]
+        public async Task MoveAudiobook_WeakWritableDestination_EnqueuesMove()
         {
             var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton(storageHealth.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-weak-target-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-weak-target-root");
+            var sourceRoot = await AddAuthorizedRootAsync(
+                sourceRootPath,
+                "Source Root");
+            var targetRoot = await AddAuthorizedRootAsync(
+                targetRootPath,
+                "Weak Target Root");
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == targetRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.IdentityUnsupported,
+                    "Durable identity is unavailable.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null,
+                    CanPublishNewFiles: true,
+                    CanRetireAfterVerifiedCopy: true));
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == sourceRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Healthy,
+                    RootFolderStorageReason.None,
+                    null,
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: true,
+                    ConfirmationToken: null));
+
+            var sourcePath = Path.Join(sourceRootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Weak destination")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceRoot.Path);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ReadOnlySourceRootCopiesAndRetainsSource")]
+        public async Task MoveAudiobook_ReadOnlySourceRoot_CopiesAndRetainsSource()
+        {
+            var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
             var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
             Init(services => services
                 .WithSingleton(moveQueue.Object)
@@ -1653,16 +1730,61 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     MoveFiles = true
                 });
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            var payload = JsonSerializer.Serialize(badRequest.Value);
-            Assert.Contains(
-                "source_filesystem_mutation_unavailable",
-                payload,
-                StringComparison.Ordinal);
+            Assert.IsType<AcceptedResult>(result);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
-                It.IsAny<MoveEnqueueCommand>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+                It.Is<MoveEnqueueCommand>(command =>
+                    command.SourceCleanupMode == MoveSourceCleanupMode.RetainSource
+                    && command.ForceCopyAndRetainSource
+                    && !command.DeleteEmptySource),
+                It.IsAny<CancellationToken>()), Times.Once);
             storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ManagedRootSourceDisablesRootRetirement")]
+        public async Task MoveAudiobook_ManagedRootSource_DisablesEmptySourceDeletion()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-managed-root-source");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-managed-root-target");
+            await AddAuthorizedRootAsync(sourceRootPath, "Managed Source Root");
+            await AddAuthorizedRootAsync(targetRootPath, "Managed Target Root");
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Root-level source")
+                .WithBasePath(sourceRootPath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourceRootPath,
+                identityBoundary: sourceRootPath);
+            var targetPath = Path.Join(targetRootPath, "Author", "Book");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    SourcePath = sourceRootPath,
+                    MoveFiles = true,
+                    DeleteEmptySource = true
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.Is<MoveEnqueueCommand>(command =>
+                    command.SourcePath == sourceRootPath
+                    && !command.DeleteEmptySource
+                    && command.SourceCleanupBoundary == sourceRootPath),
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -1706,10 +1828,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 It.Is<MoveEnqueueCommand>(command =>
                     command.SourcePath == sourcePath
                     && command.SourceIdentity.BoundaryPath == sourcePath
-                    && command.SourceCleanupBoundary == rootPath
-                    && command.SourceBoundaryDirectoryObjectIdentityVersion > 0
-                    && !string.IsNullOrWhiteSpace(
-                        command.SourceBoundaryDirectoryObjectIdentity)),
+                    && command.DeleteEmptySource
+                    && command.SourceCleanupBoundary == rootPath),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -1755,10 +1875,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     command.SourcePath == sourcePath
                     && command.SourceIdentity.BoundaryPath == sourcePath
                     && !command.DeleteEmptySource
-                    && command.SourceCleanupBoundary == rootPath
-                    && command.SourceBoundaryDirectoryObjectIdentityVersion > 0
-                    && !string.IsNullOrWhiteSpace(
-                        command.SourceBoundaryDirectoryObjectIdentity)),
+                    && command.SourceCleanupBoundary == rootPath),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -1795,7 +1912,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             Assert.Contains(
-                "source_physical_identity_unavailable",
+                "source_filesystem_authority_unavailable",
                 badRequest.Value?.ToString() ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
@@ -1889,7 +2006,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             Assert.Contains(
-                "source_physical_identity_unavailable",
+                "source_filesystem_authority_unavailable",
                 badRequest.Value?.ToString() ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
@@ -1900,7 +2017,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "UnconfirmedManagedSourceRootBlocksPhysicalMove")]
-        public async Task MoveAudiobook_UnconfirmedManagedSourceRoot_BlocksMoveToHealthyRoot()
+        public async Task MoveAudiobook_ManagedSourceWithoutPhysicalIdentity_AllowsMoveToHealthyRoot()
         {
             var moveQueue = CreateMoveQueueMock();
             Init(services => services.WithSingleton(moveQueue.Object));
@@ -1956,14 +2073,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     MoveFiles = true
                 });
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Contains(
-                "source_physical_identity_unavailable",
-                badRequest.Value?.ToString() ?? string.Empty,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.IsType<AcceptedResult>(result);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
                 It.IsAny<MoveEnqueueCommand>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -2327,7 +2440,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     command.AudiobookId == audiobook.Id
                     && command.TargetPath == FileUtils.NormalizeStoredPath(targetPath)
                     && command.SourcePath == sourcePath
-                    && command.DeleteEmptySource
+                    && !command.DeleteEmptySource
+                    && command.ForceCopyAndRetainSource
+                    && command.SourceCleanupMode == MoveSourceCleanupMode.RetainSource
                     && command.SourceCleanupBoundary == outputPath),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -2476,7 +2591,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             var payload = System.Text.Json.JsonSerializer.Serialize(badRequest.Value);
             Assert.Contains(
-                "source_physical_identity_unavailable",
+                "source_filesystem_authority_unavailable",
                 payload,
                 StringComparison.Ordinal);
             mockMoveQueue.Verify(service => service.EnqueueMoveAsync(

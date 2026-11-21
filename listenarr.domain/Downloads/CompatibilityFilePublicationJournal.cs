@@ -4,38 +4,69 @@ namespace Listenarr.Domain.Downloads;
 
 public static class CompatibilityFilePublicationProtocol
 {
-    public const int Current = 1;
+    public const int RetainOnly = 1;
+    public const int Current = 2;
 }
 
 public enum CompatibilityFilePublicationState
 {
-    Planned,
-    TargetVerified,
-    RegistrationCommitted,
-    Completed,
-    NeedsAttention
+    Planned = 0,
+    TargetVerified = 1,
+    RegistrationCommitted = 2,
+    Completed = 3,
+    NeedsAttention = 4,
+    SourceDeleteAuthorized = 5,
+    SourceQuarantinePlanned = 6,
+    SourceQuarantined = 7,
+    SourceDeleted = 8
 }
 
 public enum CompatibilitySourceDisposition
 {
     Retained = 0,
-    Unchanged = 1
+    Unchanged = 1,
+    RetiredByListenarr = 2,
+    DeferredToDownloadClient = 3,
+    PartialNeedsAttention = 4
+}
+
+public enum CompatibilityCleanupOwner
+{
+    None = 0,
+    Listenarr = 1,
+    DownloadClient = 2
 }
 
 /// <summary>
-/// Non-destructive recovery state for publication on storage that cannot expose
-/// durable object generations. This journal never authorizes deletion or overwrite.
+/// Recovery state for publication on storage that cannot expose durable object
+/// generations. Protocol v1 is retain-only. Protocol v2 also records historical
+/// verified-cleanup transitions; those facts cannot recreate source-delete authority.
+/// Current batch completion retains sources without their original live proof.
 /// </summary>
 public sealed class CompatibilityFilePublicationJournal
 {
     [Key]
     public Guid OperationId { get; set; }
+    public Guid? BatchId { get; set; }
     public int ProtocolVersion { get; set; } =
         CompatibilityFilePublicationProtocol.Current;
     public FileAction RequestedAction { get; set; }
     public FileAction EffectiveAction { get; set; } = FileAction.Copy;
     public CompatibilitySourceDisposition SourceDisposition { get; set; } =
         CompatibilitySourceDisposition.Retained;
+    public CompatibilityCleanupOwner CleanupOwner { get; set; } =
+        CompatibilityCleanupOwner.None;
+    public int? SourceRootFolderId { get; set; }
+    // Legacy revisions remain part of persisted claim matching, not cleanup authority.
+    public int? SourcePolicyRevision { get; set; }
+    public int? SourceStorageContractRevision { get; set; }
+    public int? DestinationRootFolderId { get; set; }
+    // Current cleanup authority uses storage-contract revisions and live evidence.
+    public int? DestinationPolicyRevision { get; set; }
+    public int? DestinationStorageContractRevision { get; set; }
+    public int? ExpectedBatchMemberCount { get; set; }
+    [MaxLength(64)]
+    public string? ExpectedBatchSourceManifestSha256 { get; set; }
     [Required, MaxLength(4096)]
     public string SourcePath { get; set; } = string.Empty;
     [Required, MaxLength(4096)]
@@ -50,6 +81,8 @@ public sealed class CompatibilityFilePublicationJournal
         CompatibilityFilePublicationState.Planned;
     public int? AudiobookId { get; set; }
     public bool IsCompanionFile { get; set; }
+    [MaxLength(4096)]
+    public string? QuarantinePath { get; set; }
     [MaxLength(2048)]
     public string? Error { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

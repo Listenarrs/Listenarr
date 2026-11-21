@@ -22,6 +22,125 @@ public sealed class LinuxFactAttribute : FactAttribute
     }
 }
 
+public sealed class UnixFactAttribute : FactAttribute
+{
+    public UnixFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            Skip = "This test requires native Unix behavior.";
+        }
+    }
+}
+
+public sealed class NativeStorageIdentityFactAttribute : FactAttribute
+{
+    public const string PathEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_TEST_PATH";
+    public const string ExpectationEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_EXPECTATION";
+
+    public NativeStorageIdentityFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                ExpectationEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a storage mount and identity expectation.";
+        }
+    }
+}
+
+public sealed class NativeWeakStorageFactAttribute : FactAttribute
+{
+    public NativeWeakStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux weak-storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageIdentityFactAttribute.PathEnvironmentVariable))
+            || !string.Equals(
+                Environment.GetEnvironmentVariable(
+                    NativeStorageIdentityFactAttribute.ExpectationEnvironmentVariable),
+                "generic-fid",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The native test runner did not provide a generic-FID weak-storage mount.";
+        }
+    }
+}
+
+public sealed class NativeStorageRemountFactAttribute : FactAttribute
+{
+    public const string PathEnvironmentVariable =
+        NativeStorageIdentityFactAttribute.PathEnvironmentVariable;
+    public const string StatePathEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_STATE_PATH";
+    public const string PhaseEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_PHASE";
+    public const string ExpectationEnvironmentVariable =
+        NativeStorageIdentityFactAttribute.ExpectationEnvironmentVariable;
+
+    public NativeStorageRemountFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                StatePathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PhaseEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                ExpectationEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide the storage remount fixture state and identity expectation.";
+        }
+    }
+}
+
+public sealed class NativeWeakStorageRemountFactAttribute : FactAttribute
+{
+    public NativeWeakStorageRemountFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux weak-storage remount fixture.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.StatePathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.PhaseEnvironmentVariable))
+            || !string.Equals(
+                Environment.GetEnvironmentVariable(
+                    NativeStorageRemountFactAttribute.ExpectationEnvironmentVariable),
+                "generic-fid",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The native test runner did not provide a generic-FID weak-storage remount fixture.";
+        }
+    }
+}
+
 public sealed class WindowsTheoryAttribute : TheoryAttribute
 {
     public WindowsTheoryAttribute()
@@ -72,16 +191,10 @@ public sealed class CrossVolumeFactAttribute : FactAttribute
 
     public CrossVolumeFactAttribute()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            Skip = "This test requires native Linux cross-volume storage.";
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
                 DestinationPathEnvironmentVariable)))
         {
-            Skip = "The native test runner did not provide a destination on another filesystem.";
+            Skip = "The native test runner did not provide a destination on another filesystem or volume.";
         }
     }
 }
@@ -103,6 +216,47 @@ public sealed class NetworkStorageTheoryAttribute : TheoryAttribute
                 PathEnvironmentVariable)))
         {
             Skip = "The native test runner did not provide a network filesystem mount.";
+        }
+    }
+}
+
+public sealed class WindowsNetworkStorageFactAttribute : FactAttribute
+{
+    public WindowsNetworkStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip = "This test requires a native Windows SMB network mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network filesystem mount.";
+        }
+    }
+}
+
+public sealed class ForeignOwnedNetworkStorageFactAttribute : FactAttribute
+{
+    public const string SourcePathEnvironmentVariable =
+        "LISTENARR_NETWORK_FOREIGN_SOURCE_PATH";
+
+    public ForeignOwnedNetworkStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux network filesystem mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                SourcePathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network mount and foreign-owned source.";
         }
     }
 }

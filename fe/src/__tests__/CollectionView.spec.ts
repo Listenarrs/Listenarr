@@ -38,6 +38,7 @@ const {
   mockToastSuccess,
   mockToastWarning,
   mockToastError,
+  mockGetAudiobookDeleteCapabilities,
 } = vi.hoisted(() => ({
   mockGetLibrary: vi.fn(async () => []),
   mockGetAuthorCatalog: vi.fn(async () => null),
@@ -86,6 +87,13 @@ const {
   mockToastSuccess: vi.fn(),
   mockToastWarning: vi.fn(),
   mockToastError: vi.fn(),
+  mockGetAudiobookDeleteCapabilities: vi.fn(async () => ({
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: true,
+    canDeleteFolder: true,
+    reason: null,
+    fallbackAction: 'RemoveFromLibraryOnly' as const,
+  })),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -105,6 +113,7 @@ vi.mock('@/services/api', () => ({
     monitorSeries: mockMonitorSeries,
     unmonitorAuthor: mockUnmonitorAuthor,
     unmonitorSeries: mockUnmonitorSeries,
+    getAudiobookDeleteCapabilities: mockGetAudiobookDeleteCapabilities,
   },
 }))
 
@@ -180,6 +189,14 @@ describe('CollectionView', () => {
     mockToastSuccess.mockReset()
     mockToastWarning.mockReset()
     mockToastError.mockReset()
+    mockGetAudiobookDeleteCapabilities.mockReset()
+    mockGetAudiobookDeleteCapabilities.mockResolvedValue({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: true,
+      canDeleteFolder: true,
+      reason: null,
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
   })
 
   it('shows collection content details', async () => {
@@ -250,6 +267,81 @@ describe('CollectionView', () => {
     const firstCard = collectionCards[0]
     expect(firstCard.find('.collection-title').text()).toBe('Book A')
     expect(firstCard.find('.collection-author').text()).toBe('Author A')
+  })
+
+  it('ignores stale delete capabilities when a newer collection item becomes the target', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/series/Series%201')
+    await router.isReady().catch(() => {})
+
+    const books = [
+      { id: 1, title: 'First', authors: ['Author'], series: 'Series 1', files: [] },
+      { id: 2, title: 'Second', authors: ['Author'], series: 'Series 1', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+    const store = useLibraryStore()
+    store.audiobooks = books
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    let resolveFirst!: (value: import('@/types').AudiobookDeleteCapabilities) => void
+    let resolveSecond!: (value: import('@/types').AudiobookDeleteCapabilities) => void
+    mockGetAudiobookDeleteCapabilities
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      deleteAudiobook?: (audiobook: Record<string, unknown>) => Promise<void>
+      deleteTarget?: { id: number } | null
+      deleteCapabilities?: import('@/types').AudiobookDeleteCapabilities | null
+      showDeleteDialog?: boolean
+    }
+
+    const firstRequest = vm.deleteAudiobook?.({ ...books[0]!, inLibrary: true })
+    const secondRequest = vm.deleteAudiobook?.({ ...books[1]!, inLibrary: true })
+    resolveSecond({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: false,
+      canDeleteFolder: false,
+      reason: 'Second target is protected.',
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
+    await secondRequest
+    resolveFirst({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: true,
+      canDeleteFolder: true,
+      reason: 'Stale first target.',
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
+    await firstRequest
+
+    expect(vm.deleteTarget?.id).toBe(2)
+    expect(vm.deleteCapabilities?.reason).toBe('Second target is protected.')
+    expect(vm.showDeleteDialog).toBe(true)
   })
 
   it('shows other audiobooks in a genre collection', async () => {

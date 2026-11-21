@@ -103,6 +103,7 @@
         :disabled="
           store.selectedCount === 0 ||
           store.isProcessing ||
+          store.findMatchSearching ||
           isImporting ||
           !filesystemReadinessStore.filesystemReady
         "

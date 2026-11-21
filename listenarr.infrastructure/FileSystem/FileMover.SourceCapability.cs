@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -23,9 +24,7 @@ public partial class FileMover : IFilePublicationSourceCapability
                     "The source path does not identify a file beneath a directory.");
             }
 
-            using var anchor = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                parent,
-                createMissing: false);
+            using var anchor = await OpenSourceProofParentAsync(parent, cancellationToken);
             var openOutcome = anchor.TryOpenExistingFileWithOutcome(
                 fileName,
                 requireDeleteAccess: false,
@@ -55,35 +54,17 @@ public partial class FileMover : IFilePublicationSourceCapability
                     FilePublicationSourceCapabilityFailureKind.Unavailable);
             }
 
-            FilePublicationSourceProof sourceProof;
-            try
-            {
-                if (ForceContentOnlySourceProofForTest)
-                {
-                    throw new PlatformNotSupportedException(
-                        "Durable source identity was disabled for this test.");
-                }
-                var proof = await CaptureMarkerlessSourceProofAsync(
-                    entry,
-                    cancellationToken,
-                    includeSha256: true);
-                sourceProof = new FilePublicationSourceProof(
-                    proof.PhysicalObjectIdentity,
-                    proof.Length,
-                    proof.Sha256!);
-            }
-            catch (Exception exception) when (exception is
-                PlatformNotSupportedException or NotSupportedException)
-            {
-                sourceProof = await CaptureContentOnlySourceProofAsync(
-                    entry,
-                    cancellationToken);
-            }
+            // Source capability exposes durable content evidence only. The pinned
+            // entry here prevents path substitution while the proof is captured, but
+            // its kernel identity is deliberately not exported as restart authority.
+            var sourceProof = await CaptureContentOnlySourceProofAsync(
+                entry,
+                cancellationToken);
             if (!anchor.VisiblePathMatches()
                 || !entry.VisiblePathMatches())
             {
                 return FilePublicationSourceCapabilityResult.Unsupported(
-                    "The source file changed while its durable identity was being verified.",
+                    "The source file changed while its content proof was being captured.",
                     FilePublicationSourceCapabilityFailureKind.Unavailable);
             }
 
@@ -107,8 +88,46 @@ public partial class FileMover : IFilePublicationSourceCapability
                 or PathTooLongException or System.Security.SecurityException)
         {
             return FilePublicationSourceCapabilityResult.Unsupported(
-                "The source file cannot be pinned to a durable physical generation and content proof.",
+                "The source file cannot be pinned long enough to capture a stable content proof.",
                 FilePublicationSourceCapabilityFailureKind.Unavailable);
+        }
+    }
+
+    private async Task<PinnedDirectoryCreation.PinnedDirectoryAnchor> OpenSourceProofParentAsync(
+        string parent, CancellationToken cancellationToken)
+    {
+        var managed = await ResolveManagedRootPathAsync(parent);
+        if (managed.HasUnavailableOverlap)
+            throw new InvalidOperationException("The source overlaps an unresolved managed boundary.");
+        if (managed.Root == null || managed.Semantics == null)
+            return PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(parent, createMissing: false);
+        if (_directoryBoundaryAuthorizer == null)
+            throw new InvalidOperationException("The configured source boundary cannot be authorized.");
+        using var authorization = await _directoryBoundaryAuthorizer.AuthorizeAsync(
+            managed.Root.Path, managed.Semantics.Value, cancellationToken);
+        var current = authorization.BoundaryAnchor.Duplicate();
+        try
+        {
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                    managed.Root.Path, parent, managed.Semantics.Value, out var relative))
+                throw new InvalidOperationException("The source parent escaped its configured boundary.");
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+            if (!authorization.BoundaryAnchor.VisiblePathMatches() || !current.VisiblePathMatches())
+                throw new IOException("The configured source boundary changed during content capture.");
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
         }
     }
 }

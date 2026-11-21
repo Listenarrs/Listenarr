@@ -101,8 +101,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             var primaryLabel = ExtractLabels(torrent).FirstOrDefault() ?? string.Empty;
             TimeSpan? remainingTime = eta >= 0 ? TimeSpan.FromSeconds(eta) : null;
             var downloadId = !string.IsNullOrEmpty(hash) ? hash.ToUpperInvariant() : numericId.ToString(CultureInfo.InvariantCulture);
-            var removeCompletedDownloads = client.Settings?.TryGetValue("removeCompletedDownloads", out var removeVal) is true &&
-                removeVal is bool boolVal && boolVal;
+            var removeCompletedDownloads = client.RemoveCompletedDownloads is "remove" or "remove_and_delete";
             var isStopped = statusCode == 0;
             var isSeeding = statusCode == 6;
             var seedLimitReached = TransmissionSeedLimitEvaluator.HasReachedSeedLimit(

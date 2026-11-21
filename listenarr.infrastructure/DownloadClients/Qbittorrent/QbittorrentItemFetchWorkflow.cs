@@ -48,6 +48,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 float globalMaxRatio = -1f;
                 bool globalMaxSeedingTimeEnabled = false;
                 long globalMaxSeedingTime = -1;
+                var seedPolicyKnown = false;
                 try
                 {
                     using var prefsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/preferences", ct);
@@ -57,12 +58,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         if (!string.IsNullOrWhiteSpace(prefsJson))
                         {
                             var prefs = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(prefsJson);
-                            if (prefs != null)
+                            if (prefs != null
+                                && prefs.ContainsKey("max_ratio_enabled")
+                                && prefs.ContainsKey("max_ratio")
+                                && prefs.ContainsKey("max_seeding_time_enabled")
+                                && prefs.ContainsKey("max_seeding_time"))
                             {
                                 globalMaxRatioEnabled = prefs.TryGetValue("max_ratio_enabled", out var mre) && mre.GetBoolean();
                                 globalMaxRatio = prefs.TryGetValue("max_ratio", out var mr) ? (float)mr.GetDouble() : -1f;
                                 globalMaxSeedingTimeEnabled = prefs.TryGetValue("max_seeding_time_enabled", out var mste) && mste.GetBoolean();
                                 globalMaxSeedingTime = prefs.TryGetValue("max_seeding_time", out var mst) ? mst.GetInt64() : -1;
+                                seedPolicyKnown = true;
                             }
                         }
                     }
@@ -87,14 +93,39 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    items.Add(QbittorrentResponseMapper.MapDownloadClientItem(
-                        torrent,
-                        client,
-                        removeCompletedDownloads,
-                        globalMaxRatioEnabled,
-                        globalMaxRatio,
-                        globalMaxSeedingTimeEnabled,
-                        globalMaxSeedingTime));
+                    // Same per-item isolation as the queue fetch. This list is what completion and
+                    // import decisions are made from, so a torrent lost here is not just a missing
+                    // row in a view: everything after it stops being considered for import at all.
+                    try
+                    {
+                        var item = QbittorrentResponseMapper.MapDownloadClientItem(
+                            torrent,
+                            client,
+                            removeCompletedDownloads,
+                            globalMaxRatioEnabled,
+                            globalMaxRatio,
+                            globalMaxSeedingTimeEnabled,
+                            globalMaxSeedingTime);
+                        if (!seedPolicyKnown)
+                        {
+                            item.CanMoveFiles = false;
+                            item.CanBeRemoved = false;
+                        }
+                        items.Add(item);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
+                            ? hashEl.GetString() ?? string.Empty
+                            : string.Empty;
+                        // Debug for the same reason as the queue fetch: the condition recurs on
+                        // every poll and there is no operator action it calls for.
+                        logger.LogDebug(
+                            ex,
+                            "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the item list is unaffected",
+                            LogRedaction.SanitizeText(hash),
+                            LogRedaction.SanitizeText(client.Id));
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

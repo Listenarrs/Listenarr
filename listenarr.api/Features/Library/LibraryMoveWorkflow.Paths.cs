@@ -34,9 +34,6 @@ public sealed partial class LibraryMoveWorkflow
         FileSystemCaseSensitivityMode caseSensitivityMode,
         IDirectoryObjectIdentityResolver directoryIdentityResolver,
         CancellationToken cancellationToken,
-        int? expectedDirectoryIdentityVersion = null,
-        string? expectedDirectoryIdentity = null,
-        string? directoryIdentityUnavailableReason = null,
         PersistedRootFolderPathSemantics? persistedSemantics = null,
         bool isManagedRoot = false,
         int? managedRootFolderId = null)
@@ -78,48 +75,18 @@ public sealed partial class LibraryMoveWorkflow
                 _logger.LogWarning(
                     "Skipping move boundary {Root}: {Reason}",
                     LogRedaction.SanitizeFilePath(normalizedRoot),
-                    resolution.Reason ?? "filesystem identity unavailable");
+                    resolution.Reason
+                        ?? "filesystem path/case semantics unavailable");
                 return false;
             }
         }
 
-        var hasPersistedDirectoryIdentity =
-            expectedDirectoryIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(expectedDirectoryIdentity);
-        DirectoryObjectIdentityResolution directoryIdentity;
-        if (isManagedRoot && hasPersistedDirectoryIdentity)
-        {
-            // The authorized generation plus a live pinned comparison is the authority.
-            // A persisted unavailable reason is only an observation from an earlier point
-            // in time and must not keep blocking a root after the same generation returns.
-            var current = await directoryIdentityResolver.ResolveExistingAsync(
-                normalizedRoot,
-                expectedDirectoryIdentityVersion!.Value,
-                expectedDirectoryIdentity!,
-                cancellationToken);
-            directoryIdentity = current.IsAvailable
-                && current.Version == expectedDirectoryIdentityVersion
-                && string.Equals(
-                    current.Value,
-                    expectedDirectoryIdentity,
-                    StringComparison.Ordinal)
-                    ? current
-                    : DirectoryObjectIdentityResolution.Unavailable(
-                        current.UnavailableReason
-                            ?? "The configured root no longer identifies its authorized physical generation.");
-        }
-        else if (isManagedRoot)
-        {
-            directoryIdentity = DirectoryObjectIdentityResolution.Unavailable(
-                directoryIdentityUnavailableReason
-                    ?? "The configured root has not confirmed its physical storage folder.");
-        }
-        else
-        {
-            directoryIdentity = await directoryIdentityResolver.ResolveAsync(
-                normalizedRoot,
-                cancellationToken);
-        }
+        // Directory object identity is an operation-local observation only.
+        // It may help diagnose the current mount, but it is never compared with a
+        // persisted value to grant or deny move authority.
+        var directoryIdentity = await directoryIdentityResolver.ResolveAsync(
+            normalizedRoot,
+            cancellationToken);
 
         var existingIndex = allowedRoots.FindIndex(root => FileSystemPathIdentity.AreEquivalent(
             root.Path,
@@ -247,8 +214,8 @@ public sealed partial class LibraryMoveWorkflow
             .OrderByDescending(root => FileSystemPathIdentity.Canonicalize(
                 root.Path,
                 root.Semantics.Syntax).Length)
-            // If OutputPath aliases a configured RootFolder, the persisted managed-root
-            // generation is the stronger authority and must win an equal-depth tie.
+            // If OutputPath aliases a configured RootFolder, the managed-root
+            // configuration is authoritative and wins an equal-depth tie.
             .ThenByDescending(root => root.IsManagedRoot)
             .FirstOrDefault();
 

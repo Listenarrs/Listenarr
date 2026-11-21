@@ -17,7 +17,10 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveResult result,
         CancellationToken cancellationToken)
     {
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
         request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
@@ -31,12 +34,6 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics,
             request.LeaseToken,
             cancellationToken);
-        if (!result.SourceCleanupCompleted)
-        {
-            throw new InvalidOperationException(
-                "Target verification before metadata rewrite requires completed source cleanup.");
-        }
-
         var manifest = await LoadManifestAsync(request.JobId, cancellationToken);
         if (manifest.Count == 0)
         {
@@ -54,11 +51,23 @@ internal sealed partial class AudiobookContentMoveService
             manifest,
             cancellationToken,
             targetVerificationLease: result.TargetVerificationLease);
-        VerifySourceCleanupState(
-            request,
-            result.Source,
-            result.Target,
-            manifest);
+        var publicationMatch = result.TargetVerificationLease == null
+            ? RegistrationPublicationMatchOutcome.Mismatch
+            : await result.TargetVerificationLease.ProbeCurrentPublicationsAsync(cancellationToken);
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The live target publication is temporarily unavailable before owner metadata commit.");
+        }
+        if (publicationMatch != RegistrationPublicationMatchOutcome.Match)
+        {
+            throw new MoveNeedsAttentionException(
+                "The live target publication changed before owner metadata could be committed.");
+        }
+        if (result.SourceCleanupCompleted)
+        {
+            VerifySourceCleanupState(request, result.Source, result.Target, manifest);
+        }
     }
 
     public async Task FinalizeMoveAsync(
@@ -66,7 +75,11 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveResult result,
         CancellationToken cancellationToken)
     {
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        using var liveAncestors = result.SourceAncestorRetirementLease;
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
         request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
@@ -102,6 +115,7 @@ internal sealed partial class AudiobookContentMoveService
                 result.Target,
                 request.SourceCleanupBoundary,
                 request.SourceSemantics,
+                liveAncestors,
                 cancellationToken);
         }
 
@@ -120,7 +134,10 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveResult result,
         CancellationToken cancellationToken)
     {
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
         request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
@@ -190,7 +207,10 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveRequest request,
         CancellationToken cancellationToken)
     {
-        await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        await EnsureCurrentExecutionProtocolAsync(
+            request.JobId,
+            request.LeaseToken,
+            cancellationToken);
         await EnsureLeaseOwnedAsync(request.JobId, request.LeaseToken, cancellationToken);
         await UpdateJobPhaseAsync(
             request.JobId,

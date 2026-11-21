@@ -69,3 +69,11 @@ function onCancel() {
   white-space: pre-wrap;
 }
 </style>
+
+<style>
+/* A confirmation asked from inside another dialog shows on top of it: both overlays are on body at
+   the same level, and this one is mounted first (App.vue), so it would come under the other */
+.modal-overlay:has(> .confirm-dialog) {
+  z-index: 3001;
+}
+</style>

@@ -35,34 +35,13 @@ internal sealed partial class AudiobookContentMoveService
             IEnumerable<MoveJobEntry> manifest,
             FileSystemPathSemantics targetSemantics)
     {
-        var identities = new Dictionary<string, string>(targetSemantics.Comparer);
-        foreach (var entry in manifest
-            .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
-            .Where(IsPhysicalManifestEntry))
-        {
-            if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A markerless target file lacks persisted physical identity: {entry.RelativePath}");
-            }
-            if (!FileSystemPathIdentity.TryResolveRelativePathWithinBase(
-                    target,
-                    entry.RelativePath,
-                    targetSemantics,
-                    out var targetFilePath))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"The persisted markerless target identity escaped its root: {entry.RelativePath}");
-            }
-
-            identities.Add(
-                FileSystemPathIdentity.Canonicalize(
-                    targetFilePath,
-                    targetSemantics.Syntax),
-                entry.TargetPhysicalObjectIdentity);
-        }
-
-        return identities;
+        // Kept as a compatibility-shaped result for the existing path-rewrite
+        // API. Path rewrite deliberately ignores physical identities and clears
+        // any prior persisted observation. Durable target evidence lives in the
+        // manifest's path/length/SHA-256 fields.
+        _ = target;
+        _ = manifest;
+        return new Dictionary<string, string>(targetSemantics.Comparer);
     }
 
     private static async Task<IReadOnlyDictionary<string, string>>
@@ -85,8 +64,6 @@ internal sealed partial class AudiobookContentMoveService
                 authorization.TargetBoundaryPath,
                 target,
                 targetSemantics,
-                authorization.TargetDirectoryObjectIdentityVersion,
-                authorization.TargetDirectoryObjectIdentity,
                 directorySegments);
             using var targetEntry = targetPath.Current.OpenExistingFile(
                 fileName,
@@ -104,7 +81,7 @@ internal sealed partial class AudiobookContentMoveService
                     $"The published target generation changed before identity capture: {entry.RelativePath}");
             }
 
-            var objectIdentity = targetEntry.GetObjectIdentity();
+            var objectIdentity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(targetEntry.GetObjectIdentity);
             targetPath.EnsureVisibleHierarchy();
             if (!PinnedFileVisibleOrThrowUnavailable(
                     targetEntry,
@@ -124,6 +101,7 @@ internal sealed partial class AudiobookContentMoveService
                     $"The published target identity escaped its root: {entry.RelativePath}");
             }
 
+            if (string.IsNullOrWhiteSpace(objectIdentity)) continue;
             identities.Add(
                 FileSystemPathIdentity.Canonicalize(
                     targetFilePath,

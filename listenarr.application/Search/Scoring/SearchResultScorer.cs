@@ -107,7 +107,8 @@ namespace Listenarr.Application.Search.Scoring
             }
 
             // Seeders requirement (treat null as 0)
-            if (searchResult.DownloadType == "torrent" && (searchResult.Seeders ?? 0) < profile.MinimumSeeders)
+            if (string.Equals(searchResult.DownloadType, "torrent", StringComparison.OrdinalIgnoreCase)
+                && (searchResult.Seeders ?? 0) < profile.MinimumSeeders)
             {
                 var seedersValue = (searchResult.Seeders.HasValue) ? searchResult.Seeders.Value.ToString() : "(none)";
                 score.RejectionReasons.Add($"Not enough seeders ({seedersValue} < {profile.MinimumSeeders})");

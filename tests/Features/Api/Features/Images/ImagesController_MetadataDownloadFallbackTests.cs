@@ -43,9 +43,12 @@ namespace Listenarr.Tests.Features.Api.Features.Images
             var mockMetadata = new Mock<IAudiobookMetadataService>();
             // Fallback GetMetadataAsync returns envelope with metadata.ImageUrl
             var meta = new AudibleBookResponse { ImageUrl = imageUrl };
-            // Return the AudibleBookResponse directly so the controller can handle it without anonymous envelope issues
             mockMetadata.Setup(m => m.GetAudibleMetadataAsync(identifier, It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync((AudibleBookResponse?)null);
-            mockMetadata.Setup(m => m.GetMetadataAsync(identifier, It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync((object)meta);
+            mockMetadata.Setup(m => m.GetMetadataAsync(identifier, It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    meta,
+                    "Audnexus",
+                    "https://api.audnex.us"));
 
             // Create temporary content root and the cached image file
             var tempRoot = Path.Join(Path.GetTempPath(), "listenarr_test_contentroot_fallback");

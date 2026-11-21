@@ -6,39 +6,6 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
-    private async Task<DirectoryObjectIdentityResolution?>
-        ResolveRelocationSourceObjectIdentityAsync(
-            RootFolder root,
-            RootFolderPathChangeCommand command,
-            CancellationToken cancellationToken)
-    {
-        if (command.Mode != RootFolderRelocationMode.Relocate)
-        {
-            return null;
-        }
-
-        var identity = root.DirectoryObjectIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity)
-            ? await ResolveExistingDirectoryObjectIdentityAsync(
-                root.Path,
-                root.DirectoryObjectIdentityVersion.Value,
-                root.DirectoryObjectIdentity,
-                cancellationToken)
-            : await ResolveOrEnrollDirectoryObjectIdentityAsync(
-                root.Path,
-                cancellationToken);
-        if (!identity.IsAvailable)
-        {
-            throw new RootFolderPathChangeRejectedException(
-                "root_folder_source_physical_identity_unavailable",
-                "Listenarr cannot verify the current root folder's physical identity, so its files cannot be moved safely.",
-                identity.UnavailableReason
-                    ?? "The current root folder physical identity is unavailable.");
-        }
-
-        return identity;
-    }
-
     private async Task EnsureNoTargetBoundaryConflictAsync(
         ListenArrDbContext db,
         int rootFolderId,

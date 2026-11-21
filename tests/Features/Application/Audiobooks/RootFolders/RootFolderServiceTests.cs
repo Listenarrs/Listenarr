@@ -57,7 +57,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
         }
 
         [Fact]
-        public async Task Create_TargetReplacedAfterIdentityCapture_PersistsOriginalAuthorityAndMarksStorageUnsafe()
+        public async Task Create_TargetReplacedAfterDiagnosticIdentityCapture_RemainsCapabilityDriven()
         {
             var parent = Path.Join(
                 Path.GetTempPath(),
@@ -94,8 +94,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             Assert.False(string.IsNullOrWhiteSpace(created.DirectoryObjectIdentityUnavailableReason));
             var health = await new RootFolderStorageHealthResolver(
                 new DirectoryObjectIdentityResolver()).ResolveAsync(created);
-            Assert.Equal(RootFolderStorageState.Changed, health.State);
-            Assert.False(health.CanMutateFilesystem);
+            Assert.Equal(RootFolderStorageState.Healthy, health.State);
+            Assert.True(health.CanMutateFilesystem);
         }
 
         [Fact]
@@ -137,9 +137,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
 
             Directory.CreateDirectory(missingPath);
             var appeared = await healthResolver.ResolveAsync(created);
-            Assert.Equal(RootFolderStorageState.Unconfirmed, appeared.State);
-            Assert.True(appeared.CanConfirmCurrentFolder);
-            Assert.False(string.IsNullOrWhiteSpace(appeared.ConfirmationToken));
+            Assert.Equal(RootFolderStorageState.Healthy, appeared.State);
+            Assert.False(appeared.CanConfirmCurrentFolder);
+            Assert.True(appeared.CanMutateFilesystem);
         }
 
         [Fact]
@@ -1302,12 +1302,24 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
             var registrationRecovery = new Mock<IFileRegistrationRecoveryProbe>();
+            var blockerOperationId = Guid.NewGuid();
             registrationRecovery
-                .Setup(probe => probe.HasBlockingBoundaryAsync(
+                .Setup(probe => probe.GetBlockingBoundaryAsync(
                     It.IsAny<string>(),
                     It.IsAny<FileSystemPathSemantics>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+                .ReturnsAsync([
+                    new FileRegistrationRecoveryBlocker(
+                        blockerOperationId,
+                        FileMutationJournalState.TargetVerified,
+                        FileAction.Copy,
+                        AudiobookId: null,
+                        OwnerKind: "anonymous",
+                        SourceTouchesBoundary: false,
+                        DestinationTouchesBoundary: true,
+                        FileRegistrationRecoveryDisposition.AutomaticRecovery,
+                        "This file publication is waiting for restart recovery.")
+                ]);
             var service = new RootFolderService(
                 repo,
                 null!,
@@ -1317,7 +1329,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.DeleteAsync(root.Id));
 
-            Assert.Contains("file-registration recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(blockerOperationId.ToString(), exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("TargetVerified", exception.Message, StringComparison.Ordinal);
             await using var verification = new ListenArrDbContext(options);
             Assert.Single(verification.RootFolders);
         }

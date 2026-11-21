@@ -49,7 +49,6 @@ public sealed class ReadOnlyLibraryBindMountTests : BaseTests
                 audiobook.Id,
                 scanRoot,
                 pathIdentity,
-                physicalIdentity,
                 IsAuthoritativeScope: true));
 
         Assert.Contains(expectedFile, result.AttributedFiles);

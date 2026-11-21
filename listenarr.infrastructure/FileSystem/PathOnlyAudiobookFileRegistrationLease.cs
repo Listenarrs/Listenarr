@@ -44,6 +44,7 @@ internal sealed class PathOnlyAudiobookFileRegistrationLease :
     public string MetadataPath { get; }
     public string PhysicalObjectIdentity { get; }
     public bool HasDurablePhysicalObjectIdentity => false;
+    public bool SupportsMetadataWrite => false;
     public string? SourcePhysicalObjectIdentity => null;
 
     internal static PathOnlyAudiobookFileRegistrationLease Open(

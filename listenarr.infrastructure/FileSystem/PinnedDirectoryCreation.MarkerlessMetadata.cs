@@ -84,7 +84,7 @@ internal sealed partial class PinnedDirectoryCreation
                 bufferSize: 1,
                 asynchronous: false);
             return stream.Length == expectedLength
-                && File.GetLastWriteTimeUtc(_fileHandle) == expectedLastWriteTimeUtc;
+                && GetLastWriteTimeUtc() == expectedLastWriteTimeUtc;
         }
 
         internal void PreserveMetadataTo(PinnedFileEntry destination)
@@ -97,13 +97,25 @@ internal sealed partial class PinnedDirectoryCreation
                 File.SetUnixFileMode(
                     destination._fileHandle,
                     File.GetUnixFileMode(_fileHandle));
+
+                // UnixFileMode is the authoritative permission contract on Unix.
+                // FileAttributes.ReadOnly reflects the current caller's effective
+                // access, so copying it from a differently owned source can remove
+                // the destination owner's write bit after the mode was preserved.
+                File.SetLastWriteTimeUtc(
+                    destination._fileHandle,
+                    GetLastWriteTimeUtc());
+                File.SetCreationTimeUtc(
+                    destination._fileHandle,
+                    File.GetCreationTimeUtc(_fileHandle));
+                return;
             }
             File.SetAttributes(
                 destination._fileHandle,
                 File.GetAttributes(_fileHandle));
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
-                File.GetLastWriteTimeUtc(_fileHandle));
+                GetLastWriteTimeUtc());
             File.SetCreationTimeUtc(
                 destination._fileHandle,
                 File.GetCreationTimeUtc(_fileHandle));
@@ -120,15 +132,14 @@ internal sealed partial class PinnedDirectoryCreation
                 return;
             }
 
-            File.SetUnixFileMode(
-                destination._fileHandle,
-                File.GetUnixFileMode(_fileHandle));
-            File.SetAttributes(
-                destination._fileHandle,
-                File.GetAttributes(_fileHandle));
+            var sourceMode = File.GetUnixFileMode(_fileHandle);
+            if (File.GetUnixFileMode(destination._fileHandle) != sourceMode)
+            {
+                File.SetUnixFileMode(destination._fileHandle, sourceMode);
+            }
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
-                File.GetLastWriteTimeUtc(_fileHandle));
+                GetLastWriteTimeUtc());
         }
 
         private void PreserveMarkerlessMetadataWindows(

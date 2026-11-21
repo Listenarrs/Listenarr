@@ -18,6 +18,7 @@
 
 using Listenarr.Api.Startup;
 using Listenarr.Tests.Common;
+using Serilog.Events;
 
 namespace Listenarr.Tests.Features.Api.Startup;
 
@@ -148,6 +149,124 @@ public sealed class ListenarrBuilderFactoryTests
             DeleteDirectory(contentRoot);
             DeleteDirectory(outsideRoot);
         }
+    }
+
+    [Theory]
+    [InlineData("Trace", LogEventLevel.Verbose)]
+    [InlineData("trace", LogEventLevel.Verbose)]
+    [InlineData("TRACE", LogEventLevel.Verbose)]
+    [InlineData("  Trace  ", LogEventLevel.Verbose)]
+    [InlineData("Critical", LogEventLevel.Fatal)]
+    [InlineData("critical", LogEventLevel.Fatal)]
+    [InlineData("CRITICAL", LogEventLevel.Fatal)]
+    [InlineData("  Critical  ", LogEventLevel.Fatal)]
+    [InlineData("Verbose", LogEventLevel.Verbose)]
+    [InlineData("Debug", LogEventLevel.Debug)]
+    [InlineData("Information", LogEventLevel.Information)]
+    [InlineData("Warning", LogEventLevel.Warning)]
+    [InlineData("Error", LogEventLevel.Error)]
+    [InlineData("Fatal", LogEventLevel.Fatal)]
+    public void TryParseLogLevel_ValidInputsAndAliases_ReturnsTrueAndExpectedLevel(string input, LogEventLevel expected)
+    {
+        var success = ListenarrBuilderFactory.TryParseLogLevel(input, out var level);
+
+        Assert.True(success);
+        Assert.Equal(expected, level);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("bogus")]
+    [InlineData("Warn")]
+    [InlineData("Info")]
+    [InlineData("None")]
+    public void TryParseLogLevel_InvalidOrEmptyInputs_ReturnsFalse(string? input)
+    {
+        var success = ListenarrBuilderFactory.TryParseLogLevel(input, out var level);
+
+        Assert.False(success);
+    }
+
+    [Fact]
+    public void ResolveMinimumLevel_ValidEnvVar_UsesEnvVarWithoutWarnings()
+    {
+        var warnings = new List<string>();
+
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel("Trace", "Information", warnings.Add);
+
+        Assert.Equal(LogEventLevel.Verbose, level);
+        Assert.Empty(warnings);
+    }
+
+    [Theory]
+    [InlineData(null, "Debug", LogEventLevel.Debug)]
+    [InlineData("", "Trace", LogEventLevel.Verbose)]
+    [InlineData("   ", "Warning", LogEventLevel.Warning)]
+    public void ResolveMinimumLevel_EnvUnset_FallsBackToConfigWithoutWarnings(string? env, string? config, LogEventLevel expected)
+    {
+        var warnings = new List<string>();
+
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel(env, config, warnings.Add);
+
+        Assert.Equal(expected, level);
+        Assert.Empty(warnings);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, "")]
+    [InlineData(null, "   ")]
+    [InlineData("   ", "   ")]
+    public void ResolveMinimumLevel_EnvAndConfigUnset_DefaultsToInformationWithoutWarnings(string? env, string? config)
+    {
+        var warnings = new List<string>();
+
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel(env, config, warnings.Add);
+
+        Assert.Equal(LogEventLevel.Information, level);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public void ResolveMinimumLevel_InvalidEnvAndValidConfig_WarnsAndFallsBackToConfig()
+    {
+        var warnings = new List<string>();
+
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel("bogus", "Debug", warnings.Add);
+
+        Assert.Equal(LogEventLevel.Debug, level);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("bogus", warning);
+        Assert.Contains("LISTENARR_LOG_LEVEL", warning);
+        Assert.Contains("Verbose (or Trace)", warning);
+    }
+
+    [Fact]
+    public void ResolveMinimumLevel_InvalidEnvAndInvalidConfig_WarnsAndDefaultsToInformation()
+    {
+        var warnings = new List<string>();
+
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel("invalid-env", "invalid-cfg", warnings.Add);
+
+        Assert.Equal(LogEventLevel.Information, level);
+        Assert.Equal(2, warnings.Count);
+        Assert.Contains("invalid-env", warnings[0]);
+        Assert.Contains("LISTENARR_LOG_LEVEL", warnings[0]);
+        Assert.Contains("Verbose (or Trace)", warnings[0]);
+        Assert.Contains("invalid-cfg", warnings[1]);
+        Assert.Contains("Verbose (or Trace)", warnings[1]);
+    }
+
+    [Fact]
+    public void ResolveMinimumLevel_DefaultWarningLogger_SucceedsWithoutExplicitLogger()
+    {
+        var level = ListenarrBuilderFactory.ResolveMinimumLevel("Trace", "Information");
+
+        Assert.Equal(LogEventLevel.Verbose, level);
     }
 
     private static string CreateTemporaryDirectory()

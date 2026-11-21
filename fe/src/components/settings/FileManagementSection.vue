@@ -109,6 +109,33 @@
         </select>
       </FormRow>
 
+      <div class="enrichment-group" role="group" aria-labelledby="file-metadata-enrichment-label">
+        <span id="file-metadata-enrichment-label" class="form-row-label">
+          File Metadata Enrichment
+        </span>
+        <CheckboxCard
+          :modelValue="false"
+          disabled
+          title="Enable metadata enrichment"
+          description="Tags independent files, including copy fallbacks, and skips actual hardlinks. Not available yet."
+        />
+        <div class="enrichment-nested">
+          <CheckboxCard
+            :modelValue="false"
+            disabled
+            title="Include hardlinked files"
+            description="Requires metadata enrichment. Not available yet."
+          />
+          <p class="enrichment-warning">
+            <PhWarning :size="16" />
+            <span>
+              A hardlinked library entry and its download source share the same bytes, so tagging
+              changes both. That may disrupt torrent verification or seeding.
+            </span>
+          </p>
+        </div>
+      </div>
+
       <FormRow
         label="Import Blacklist Extensions"
         help="Extensions to skip during library import and completed-download import. Separate values with commas or new lines, for example: .nfo, .sfv, .jpg"
@@ -208,6 +235,7 @@ import type { ApplicationSettings } from '@/types'
 import { ref, computed } from 'vue'
 import { PhFolder, PhQuestion, PhX, PhWarning } from '@phosphor-icons/vue'
 import FormRow from '@/components/settings/FormRow.vue'
+import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 
 const props = defineProps<{ settings: Partial<ApplicationSettings> }>()
 const emit = defineEmits<{
@@ -402,6 +430,36 @@ h3 svg {
   outline: none;
   border-color: var(--brand-500);
   box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.08);
+}
+
+.enrichment-group {
+  margin-bottom: 1.25rem;
+}
+
+.enrichment-group .form-row-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.enrichment-nested {
+  margin-left: 1.75rem;
+}
+
+.enrichment-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #ffb74d;
+}
+
+.enrichment-warning svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
 }
 
 .form-group {

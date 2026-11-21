@@ -145,7 +145,7 @@ chmod +x Listenarr.Api
 ```
 
 **Prerequisites:**
-- **Node.js 24.x or later** (required for Discord bot functionality)
+- **Node.js 26.x (26.12.1 or later)** (required for Discord bot functionality)
 - Set environment variable: `LISTENARR_PUBLIC_URL=https://your-domain.com`
 
 **Service will be available at:**
@@ -162,7 +162,7 @@ For custom deployments or when you need to build from source:
 
 **Prerequisites:**
 - .NET 10.0 Runtime or later (for framework-dependent deployments)
-- Node.js 24.x or later (for Discord bot)
+- Node.js 26.x (26.12.1 or later) (for Discord bot)
 - Set `LISTENARR_PUBLIC_URL` environment variable to your production domain
 
 **Option 1: Use Self-Contained Executables (Recommended)**
@@ -196,7 +196,7 @@ If you prefer to run the services separately:
 
 **Prerequisites:**
 - .NET 10.0 SDK or later
-- Node.js 24.x or later
+- Node.js 26.x (26.12.1 or later)
 
 **Install dependencies:**
 ```bash
@@ -221,7 +221,7 @@ Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that r
 
 Prerequisites:
 - A running Listenarr instance (see steps above)
-- Node.js 24+ and npm
+- Node.js 26.x (26.12.1 or later) and npm
 - A Discord application with a bot token and application ID
 
 Quick start (development):
@@ -373,7 +373,7 @@ Configure your search APIs in the Settings page:
 
 You can control the application logging level in three ways:
 
-- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose, Debug, Information, Warning, Error, Fatal (e.g., `LISTENARR_LOG_LEVEL=Debug`).
+- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose (or Trace), Debug, Information, Warning, Error, Fatal (or Critical) (e.g., `LISTENARR_LOG_LEVEL=Debug`).
 - Configuration file: create or edit `config/appsettings/appsettings.json` under the active content root. In local development this is `.env/development/config/appsettings/appsettings.json`; in Docker this is `/app/config/appsettings/appsettings.json`. Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
 - Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
 
@@ -420,7 +420,7 @@ For complete API documentation, see our [API Reference](https://github.com/Liste
 ### Prerequisites
 
 - .NET 10.0 SDK or later
-- Node.js 24.x or later
+- Node.js 26.x (26.12.1 or later)
 - npm (comes with Node.js)
 
 ### Available Commands

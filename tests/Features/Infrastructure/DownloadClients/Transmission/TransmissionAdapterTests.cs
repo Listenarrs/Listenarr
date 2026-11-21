@@ -220,6 +220,37 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Transmission
             Assert.Equal(expected, result);
         }
 
+        [Theory]
+        [InlineData("missing")]
+        [InlineData("failed")]
+        [InlineData("known")]
+        public async Task GetItemsAsync_UnknownSessionPolicyCannotAuthorizeMovement(string policy)
+        {
+            using var http = new HttpClient(new DelegatingHandlerMock(async (request, ct) =>
+                {
+                    using var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+                    if (body.RootElement.GetProperty("method").GetString() == "session-get")
+                    {
+                        if (policy == "failed") throw new IOException("session unavailable");
+                        return MockUtils.GetCannedResponse(policy == "missing"
+                            ? """{"result":"success","arguments":{}}"""
+                            : """{"result":"success","arguments":{"seedRatioLimited":true,"seedRatioLimit":2,"idle-seeding-limit-enabled":false,"idle-seeding-limit":30}}""");
+                    }
+                    return MockUtils.GetCannedResponse("""
+                        {"result":"success","arguments":{"torrents":[{"id":1,"hashString":"EXACT","name":"Book","status":0,"percentDone":1,"seedRatioMode":0,"seedIdleMode":0,"uploadRatio":3}]}}
+                        """);
+                }));
+            var factory = new Mock<IHttpClientFactory>();
+            factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(http);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<TransmissionAdapter>.Instance;
+            var workflow = new TransmissionItemFetchWorkflow(new TransmissionRpcClient(factory.Object, "transmission", logger), logger);
+            _client!.RemoveCompletedDownloads = "remove_and_delete";
+            var items = await workflow.GetItemsAsync(_client);
+            var item = Assert.Single(items);
+            Assert.Equal(policy == "known", item.CanMoveFiles);
+            Assert.Equal(policy == "known", item.CanBeRemoved);
+        }
+
         [LinuxFact]
         [Trait("Method", "AddAsync")]
         public async Task GetImportItemAsync_WithSpaceInRemoteDirectory()

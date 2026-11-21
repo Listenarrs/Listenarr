@@ -18,20 +18,37 @@ internal sealed partial class PinnedDirectoryCreation
     private const int LinuxFileHandleHeaderBytes = 8;
     private const int LinuxInitialFileHandleBytes = 128;
     private const int LinuxMaximumFileHandleBytes = 4096;
+    private const int LinuxGenericFileIdentifierType = 0x81;
     private const ulong LinuxFsIocGetVersion64 = 0x80087601;
     private const ulong LinuxFsIocGetVersion32 = 0x80047601;
 
     private static IReadOnlyList<string> GetLinuxGenerationIdentityCandidates(
         SafeFileHandle handle)
     {
-        var candidates = new List<string>(2);
-        var fileHandle = TryGetLinuxFileHandleIdentity(
+        var candidates = new List<string>(3);
+        var fileHandleEvidence = TryGetLinuxFileHandleEvidence(
             handle,
             LinuxAtEmptyPath | LinuxAtHandleFid,
             retryWithoutHandleFid: true);
-        if (!string.IsNullOrWhiteSpace(fileHandle))
+        if (fileHandleEvidence != null)
         {
-            candidates.Add($"fh:{fileHandle}");
+            candidates.Add(fileHandleEvidence.ToGenerationIdentity());
+            if (!fileHandleEvidence.IsDurableGenerationEvidence)
+            {
+                // AT_HANDLE_FID may deliberately return the generic exportfs
+                // FILEID_INO64_GEN representation even when the filesystem can
+                // provide a stronger ordinary handle. Probe without FID before
+                // concluding that only weak evidence is available.
+                var ordinaryFileHandleEvidence = TryGetLinuxFileHandleEvidence(
+                    handle,
+                    LinuxAtEmptyPath,
+                    retryWithoutHandleFid: false);
+                if (ordinaryFileHandleEvidence != null
+                    && !ordinaryFileHandleEvidence.HasSameHandle(fileHandleEvidence))
+                {
+                    candidates.Add(ordinaryFileHandleEvidence.ToGenerationIdentity());
+                }
+            }
         }
 
         try
@@ -41,18 +58,18 @@ internal sealed partial class PinnedDirectoryCreation
                 candidates.Add(FormattableString.Invariant($"gen:{generation:x8}"));
             }
         }
-        catch (Win32Exception) when (candidates.Count > 0)
+        catch (Win32Exception) when (candidates.Any(IsDurableLinuxGenerationIdentity))
         {
             // A second, supplementary capability failing unexpectedly must not
             // invalidate a strong identity already obtained from this pinned
-            // object. Persisted identities that require the failed scheme will
-            // still fail closed because their candidate will be absent.
+            // object. A generic FILEID_INO64_GEN FID is deliberately excluded
+            // here because it is compatibility evidence, not durable authority.
         }
 
         return candidates;
     }
 
-    private static string? TryGetLinuxFileHandleIdentity(
+    private static LinuxFileHandleEvidence? TryGetLinuxFileHandleEvidence(
         SafeFileHandle handle,
         int flags,
         bool retryWithoutHandleFid)
@@ -87,8 +104,12 @@ internal sealed partial class PinnedDirectoryCreation
                         bytes,
                         0,
                         handleBytes);
-                    return FormattableString.Invariant(
-                        $"{handleType:x8}:{Convert.ToHexString(bytes).ToLowerInvariant()}");
+                    return new LinuxFileHandleEvidence(
+                        handleType,
+                        bytes,
+                        (flags & LinuxAtHandleFid) != 0
+                            ? LinuxFileHandleProbeKind.FileIdentifier
+                            : LinuxFileHandleProbeKind.FileHandle);
                 }
 
                 var error = Marshal.GetLastWin32Error();
@@ -102,10 +123,11 @@ internal sealed partial class PinnedDirectoryCreation
                 }
 
                 if (retryWithoutHandleFid
-                    && error == LinuxInvalidArgument
-                    && (flags & LinuxAtHandleFid) != 0)
+                    && (flags & LinuxAtHandleFid) != 0
+                    && (IsUnavailableLinuxGenerationProbeError(error)
+                        || error == LinuxOverflow))
                 {
-                    return TryGetLinuxFileHandleIdentity(
+                    return TryGetLinuxFileHandleEvidence(
                         handle,
                         LinuxAtEmptyPath,
                         retryWithoutHandleFid: false);
@@ -126,6 +148,29 @@ internal sealed partial class PinnedDirectoryCreation
         }
 
         return null;
+    }
+
+    private enum LinuxFileHandleProbeKind
+    {
+        FileHandle,
+        FileIdentifier
+    }
+
+    private sealed record LinuxFileHandleEvidence(
+        int HandleType,
+        byte[] Bytes,
+        LinuxFileHandleProbeKind ProbeKind)
+    {
+        internal bool IsDurableGenerationEvidence =>
+            HandleType != LinuxGenericFileIdentifierType;
+
+        internal string ToGenerationIdentity() =>
+            FormattableString.Invariant(
+                $"fh:{HandleType:x8}:{Convert.ToHexString(Bytes).ToLowerInvariant()}");
+
+        internal bool HasSameHandle(LinuxFileHandleEvidence other) =>
+            HandleType == other.HandleType
+            && Bytes.AsSpan().SequenceEqual(other.Bytes);
     }
 
     private static bool TryGetLinuxInodeGeneration(

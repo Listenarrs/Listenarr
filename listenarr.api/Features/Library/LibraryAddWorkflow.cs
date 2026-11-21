@@ -60,12 +60,25 @@ namespace Listenarr.Api.Features.Library
 
         public Task<IActionResult> AddAsync(
             LibraryController.AddToLibraryRequest request,
-            CancellationToken cancellationToken = default) =>
-            _libraryAddService != null
+            CancellationToken cancellationToken = default)
+        {
+            // A book is only added with no ASIN or a well-formed one: an ASIN typed by hand that isn't
+            // one can never be looked up again, so Rescan metadata could never repair the book
+            var asin = request.Metadata?.Asin;
+            if (!string.IsNullOrWhiteSpace(asin) && !ImageIdentifierHelper.LooksLikeAsin(asin))
+            {
+                return Task.FromResult<IActionResult>(DestinationValidationResult(
+                    "asin_invalid",
+                    "An ASIN has 10 letters or digits.",
+                    field: "metadata.asin"));
+            }
+
+            return _libraryAddService != null
                 ? AddWithServiceAsync(request, cancellationToken)
                 : _mutationCoordinator.ExecuteExclusiveAsync(
                     _ => AddCoreAsync(request),
                     cancellationToken);
+        }
 
         private async Task<IActionResult> AddWithServiceAsync(
             LibraryController.AddToLibraryRequest request,
@@ -97,6 +110,7 @@ namespace Listenarr.Api.Features.Library
                 return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
             }
 
+            StartAutoSearchAfterAdd(result.Audiobook, request.AutoSearch);
             return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
         }
 
@@ -138,7 +152,8 @@ namespace Listenarr.Api.Features.Library
                 audiobook,
                 metadata.SeriesMemberships,
                 metadata.Series,
-                AudibleBookMetadata.ToStringOrFirst(metadata.SeriesNumber));
+                AudibleBookMetadata.ToStringOrFirst(metadata.SeriesNumber),
+                metadata.SeriesAsin);
 
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
 
@@ -235,6 +250,7 @@ namespace Listenarr.Api.Features.Library
             _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with Monitored={Monitored}, QualityProfileId={QualityProfileId}, AutoSearch={AutoSearch}",
                 audiobook.Title, audiobook.Asin, request.Monitored, audiobook.QualityProfileId, request.AutoSearch);
 
+            StartAutoSearchAfterAdd(audiobook, request.AutoSearch);
             return new OkObjectResult(new { message = "Audiobook added to library successfully", audiobook });
         }
 

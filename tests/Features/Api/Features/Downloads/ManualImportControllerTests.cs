@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Api.Features.Downloads
@@ -414,8 +415,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             );
         }
 
-        [Fact]
-        public async Task Start_MoveRecoveryCompletedBeforeItemLoop_ReturnsRecoveredSuccessWithoutRepublishing()
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Start_MoveRecoveryCompletedBeforeItemLoop_ReturnsRecoveredSuccessWithoutRepublishing(bool sourceRetained)
         {
             var basePath = CreateTempDirectory(
                 "listenarr-manual-recovery-destination");
@@ -439,14 +442,18 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     It.IsAny<CancellationToken>()))
                 .Returns<int, IReadOnlyCollection<string>, CancellationToken>((_, _, _) =>
                 {
-                    File.Delete(sourceFile);
+                    if (!sourceRetained) File.Delete(sourceFile);
                     return Task.FromResult<IReadOnlyList<FileRegistrationRecoveryReceipt>>(
                     [
                         new FileRegistrationRecoveryReceipt(
                             Guid.NewGuid(),
                             book.Id,
                             sourceFile,
-                            destination)
+                            destination,
+                            SourceRetained: sourceRetained,
+                            SourceLength: 5,
+                            SourceSha256: Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                                System.Text.Encoding.UTF8.GetBytes("audio"))))
                     ]);
                 });
             var capability = new Mock<IFilePublicationSourceCapability>(
@@ -454,9 +461,13 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             capability.Setup(service => service.CheckAsync(
                     sourceFile,
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(FilePublicationSourceCapabilityResult.Unsupported(
-                    "The source file does not exist.",
-                    FilePublicationSourceCapabilityFailureKind.Missing));
+                .ReturnsAsync(sourceRetained
+                    ? FilePublicationSourceCapabilityResult.SupportedForProof(new FilePublicationSourceProof(
+                        new FileContentProof(5, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                            System.Text.Encoding.UTF8.GetBytes("audio"))))))
+                    : FilePublicationSourceCapabilityResult.Unsupported(
+                        "The source file does not exist.",
+                        FilePublicationSourceCapabilityFailureKind.Missing));
             var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
             var controller = GetController(
                 book,
@@ -503,11 +514,63 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 Assert.IsType<int>(ok.Value!.GetType()
                     .GetProperty("importedCount")!
                     .GetValue(ok.Value)));
-            Assert.False(File.Exists(sourceFile));
+            Assert.Equal(sourceRetained, File.Exists(sourceFile));
             Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+            var payload = System.Text.Json.JsonSerializer.SerializeToElement(ok.Value);
+            Assert.Equal(sourceRetained ? "Retained" : "Retired",
+                payload.GetProperty("results")[0].GetProperty("SourceDisposition").GetString());
             recovery.VerifyAll();
             capability.VerifyAll();
             fileMover.VerifyNoOtherCalls();
+        }
+
+        [Theory]
+        [InlineData("ambiguous")]
+        [InlineData("alternate-spelling")]
+        [InlineData("unrelated-source")]
+        public async Task Start_MissingSourceWithUnusableReceipts_DoesNotGuessRecoveredSuccess(string scenario)
+        {
+            var destinationRoot = CreateTempDirectory("manual-invalid-receipt-destination");
+            var sourceDirectory = CreateTempDirectory("manual-invalid-receipt-source");
+            var source = Path.Join(sourceDirectory, "chapter.mp3");
+            Directory.Delete(sourceDirectory);
+            var destination = Path.Join(destinationRoot, "published.mp3");
+            await File.WriteAllTextAsync(destination, "published-audio");
+            var book = new AudiobookBuilder().WithId(51).WithTitle("Receipt Controls")
+                .WithBasePath(destinationRoot).Build();
+            var receipt = new FileRegistrationRecoveryReceipt(Guid.NewGuid(), book.Id,
+                source, destination, SourceRetained: false);
+            IReadOnlyList<FileRegistrationRecoveryReceipt> receipts = scenario switch
+            {
+                "ambiguous" => [receipt, receipt with { OperationId = Guid.NewGuid() }],
+                "alternate-spelling" => [receipt with { SourcePath = source.Replace("chapter.mp3", "CHAPTER.mp3", StringComparison.Ordinal) }],
+                "unrelated-source" => [receipt with { SourcePath = Path.Join(sourceDirectory, "other.mp3") }],
+                _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+            };
+            var recovery = new Mock<IFileRegistrationRecoveryService>(MockBehavior.Strict);
+            recovery.Setup(service => service.ReconcileAudiobookWithReceiptsAsync(book.Id,
+                    It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receipts);
+            var mover = new Mock<IFileMover>(MockBehavior.Strict);
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            var controller = GetController(book, new ApplicationSettings { OutputPath = destinationRoot },
+                fileMover: mover.Object, filePublicationSourceCapability: capability.Object,
+                registrationRecoveryServiceOverride: recovery.Object);
+
+            var result = await controller.Start(new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Move,
+                Items = [new ManualImportItemDto { FullPath = source, MatchedAudiobookId = book.Id }]
+            });
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundObjectResult>(result.Result);
+            Assert.Equal("published-audio", await File.ReadAllTextAsync(destination));
+            Assert.False(Directory.Exists(sourceDirectory));
+            mover.VerifyNoOtherCalls();
+            capability.VerifyNoOtherCalls();
+            recovery.VerifyAll();
         }
 
         [Fact]
@@ -1684,7 +1747,6 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     command.Audiobook.Id == book.Id
                     && command.Path == expectedScanPath
                     && command.PathIdentity.HasValue
-                    && command.PhysicalIdentity.HasValue
                     && !command.IsAuthoritativeScope)), Times.Once);
             repoMock.Verify(
                 repository => repository.UpdateAsync(It.IsAny<Audiobook>()),
@@ -2227,7 +2289,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
-        public async Task InteractiveManualImport_AsinTagFailureAfterMove_RemainsSuccessful()
+        public async Task InteractiveManualImport_AsinTagDeferredAfterJournalMove_RemainsSuccessful()
         {
             var destinationRoot = CreateTempDirectory(
                 "listenarr-manual-asin-tag-dest");
@@ -2291,7 +2353,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     .GetValue(payload)));
             var results = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
                 payload.GetType().GetProperty("results")!.GetValue(payload));
-            Assert.True(Assert.Single(results).Success);
+            var imported = Assert.Single(results);
+            Assert.True(imported.Success);
+            Assert.Contains("ASIN tagging was deferred", imported.Warning);
             Assert.False(File.Exists(source));
             Assert.Equal(
                 "audio",
@@ -2299,7 +2363,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     Path.Join(destinationRoot, "Tagged Book.mp3")));
             metadata.Verify(service => service.WriteAsinTagAsync(
                 It.IsAny<IAudiobookFileRegistrationLease>(),
-                book.Asin), Times.Once);
+                book.Asin), Times.Never);
             metadata.Verify(service => service.WriteAsinTagAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>()), Times.Never);
@@ -2511,7 +2575,6 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     command.Audiobook.Id == book.Id
                     && command.Path == basePath
                     && command.PathIdentity.HasValue
-                    && command.PhysicalIdentity.HasValue
                     && !command.IsAuthoritativeScope)), Times.Once);
         }
 

@@ -9,6 +9,7 @@
  */
 using System.Reflection;
 using Listenarr.Infrastructure.Persistence.Migrations;
+using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -16,8 +17,44 @@ using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace Listenarr.Tests.Features.Infrastructure.Migrations;
 
-public class MigrationMetadataTests
+[Trait("Name", "MigrationMetadataTests")]
+[Trait("Category", "Infrastructure")]
+public class MigrationMetadataTests : BaseTests
 {
+    [Fact]
+    public void AddWeakStorageVerifiedCleanupMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddWeakStorageVerifiedCleanup>(
+            "20260825021432_AddWeakStorageVerifiedCleanup");
+    }
+
+    [Fact]
+    public void AddOperationEvidencePublications_IsDiscoverableAndConsolidated()
+    {
+        AssertMigrationId<AddOperationEvidencePublications>(
+            "20261002210137_AddOperationEvidencePublications");
+        var migration = new AddOperationEvidencePublications();
+        var up = BuildOperations(migration, "Up");
+        var down = BuildOperations(migration, "Down");
+        Assert.Equal(6, up.Operations.Count);
+        Assert.Equal(3, down.Operations.Count);
+        Assert.Empty(up.Operations.OfType<SqlOperation>());
+        Assert.DoesNotContain(up.Operations, operation =>
+            operation is DropTableOperation or DropColumnOperation);
+        var columns = up.Operations.OfType<AddColumnOperation>().ToList();
+        Assert.Equal(2, columns.Count);
+        Assert.All(columns, column =>
+        {
+            Assert.Equal("CompatibilityFilePublicationJournals", column.Table);
+            Assert.True(column.IsNullable);
+        });
+        var table = Assert.Single(up.Operations.OfType<CreateTableOperation>());
+        Assert.Equal("VerifiedFileRenameJournals", table.Name);
+        Assert.Contains(table.Columns, column => column.Name == "SourceSha256");
+        Assert.Contains(table.Columns, column => column.Name == "RetirementPath");
+        Assert.Equal(3, up.Operations.OfType<CreateIndexOperation>().Count());
+    }
+
     [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
@@ -209,6 +246,38 @@ public class MigrationMetadataTests
 
         Assert.Null(model.FindEntityType(
             "Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker"));
+    }
+
+    [Fact]
+    public void AddAutomaticSearchTiming_IsDiscoverableAndAddsSettingsColumnsWithDefaults()
+    {
+        AssertMigrationId<AddAutomaticSearchTiming>(
+            "20261021212418_AddAutomaticSearchTiming");
+
+        var migration = new AddAutomaticSearchTiming();
+        var up = BuildOperations(migration, "Up");
+        var down = BuildOperations(migration, "Down");
+
+        var columns = up.Operations.OfType<AddColumnOperation>().ToList();
+        Assert.Equal(3, up.Operations.Count);
+        Assert.Equal(3, columns.Count);
+        Assert.All(columns, column =>
+        {
+            Assert.Equal("ApplicationSettings", column.Table);
+            Assert.False(column.IsNullable);
+        });
+        Assert.Equal(1, columns.Single(column => column.Name == "AutomaticSearchIntervalHours").DefaultValue);
+        Assert.Equal(24, columns.Single(column => column.Name == "AutomaticSearchCooldownHours").DefaultValue);
+        Assert.Equal(5, columns.Single(column => column.Name == "AutomaticSearchBookDelaySeconds").DefaultValue);
+        Assert.Equal(3, down.Operations.OfType<DropColumnOperation>().Count());
+        Assert.Equal(3, down.Operations.Count);
+
+        var applicationSettings = AssertEntity(
+            migration.TargetModel,
+            "Listenarr.Domain.Configuration.ApplicationSettings");
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchIntervalHours"));
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchCooldownHours"));
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchBookDelaySeconds"));
     }
 
     private static MigrationBuilder BuildOperations(Migration migration, string methodName)

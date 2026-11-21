@@ -353,9 +353,7 @@ public partial class FileMover
         if (journal.AudiobookId.HasValue
             || journal.State == FileMutationJournalState.NeedsAttention
             || journal.State < FileMutationJournalState.TargetVerified
-            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
-            || !lease.MatchesPhysicalObjectIdentity(
-                journal.TargetPhysicalObjectIdentity))
+            || !lease.MatchesCurrentPublication())
         {
             return false;
         }

@@ -1,7 +1,5 @@
 using System.Security.Cryptography;
 
-using Listenarr.Domain.Audiobooks.Enumerations;
-
 namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
@@ -19,10 +17,7 @@ public partial class FileMover
         var sha256 = Convert.ToHexString(
             await SHA256.HashDataAsync(stream, cancellationToken));
         return new FilePublicationSourceProof(
-            $"content-only:{sha256}",
-            length,
-            sha256,
-            FilePublicationSourceAuthority.ContentOnly);
+            new FileContentProof(length, sha256));
     }
 
     private static async Task<MarkerlessSourceProof>
@@ -31,7 +26,8 @@ public partial class FileMover
             CancellationToken cancellationToken,
             bool includeSha256 = true)
     {
-        var physicalObjectIdentity = source.GetObjectIdentity();
+        // v3 persists content proof only. Kernel object identity is deliberately
+        // not captured here because it is not restart-stable authority.
         await using var stream = source.OpenReadStream(
             bufferSize: 128 * 1024,
             asynchronous: false);
@@ -39,7 +35,7 @@ public partial class FileMover
         if (!includeSha256)
         {
             return new MarkerlessSourceProof(
-                physicalObjectIdentity,
+                PhysicalObjectIdentity: null,
                 length,
                 Sha256: null);
         }
@@ -47,72 +43,44 @@ public partial class FileMover
         stream.Position = 0;
         var hash = await SHA256.HashDataAsync(stream, cancellationToken);
         return new MarkerlessSourceProof(
-            physicalObjectIdentity,
+            PhysicalObjectIdentity: null,
             length,
             Convert.ToHexString(hash));
     }
 
-    private async Task<FileMutationJournal> EnsureMarkerlessSourceHashAsync(
+    private static Task<FileMutationJournal> EnsureMarkerlessSourceHashAsync(
         PinnedDirectoryCreation.PinnedFileEntry source,
         FileMutationJournal journal,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = source;
         if (!string.IsNullOrWhiteSpace(journal.SourceSha256))
         {
-            return journal;
-        }
-        if (!VisiblePathMatchesOrThrowUnavailable(
-                source,
-                "The markerless move source is temporarily unavailable before content hashing.")
-            || !source.MatchesObjectIdentity(
-                journal.SourcePhysicalObjectIdentity))
-        {
-            throw new IOException(
-                "The markerless move source changed before content hashing.");
+            return Task.FromResult(journal);
         }
 
-        await using var stream = source.OpenReadStream(
-            bufferSize: 128 * 1024,
-            asynchronous: false);
-        if (stream.Length != journal.SourceLength)
-        {
-            throw new IOException(
-                "The markerless move source length changed before content hashing.");
-        }
-
-        stream.Position = 0;
-        var hash = Convert.ToHexString(
-            await SHA256.HashDataAsync(stream, cancellationToken));
-        return await _fileMutationJournalStore!.SetSourceSha256Async(
-            journal.OperationId,
-            journal.SourcePhysicalObjectIdentity,
-            journal.SourceLength,
-            hash,
-            cancellationToken);
+        throw new InvalidOperationException(
+            "The v3 file-mutation journal has no source content proof. Persisted physical identity cannot recreate restart authority.");
     }
 
     private static bool MatchesExpectedSourceProof(
         MarkerlessSourceProof actual,
         FilePublicationSourceProof expected) =>
-        expected.HasDurablePhysicalObjectIdentity
-        &&
-        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-            actual.PhysicalObjectIdentity,
-            expected.PhysicalObjectIdentity)
-        && actual.Length == expected.Length
-        && string.Equals(actual.Sha256, expected.Sha256, StringComparison.Ordinal);
+        actual.Length == expected.Length
+        && string.Equals(
+            actual.Sha256,
+            expected.Sha256,
+            StringComparison.OrdinalIgnoreCase);
 
     private static bool JournalMatchesExpectedSourceProof(
         FileMutationJournal journal,
         FilePublicationSourceProof expected) =>
-        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-            journal.SourcePhysicalObjectIdentity,
-            expected.PhysicalObjectIdentity)
-        && journal.SourceLength == expected.Length
+        journal.SourceLength == expected.Length
         && string.Equals(
             journal.SourceSha256,
             expected.Sha256,
-            StringComparison.Ordinal);
+            StringComparison.OrdinalIgnoreCase);
 
     private static async Task<bool> MatchesMarkerlessSourceProofAsync(
         PinnedDirectoryCreation.PinnedFileEntry source,
@@ -121,13 +89,8 @@ public partial class FileMover
     {
         if (!VisiblePathMatchesOrThrowUnavailable(
                 source,
-                "The markerless source is temporarily unavailable while its physical generation is being verified.")
-            || (journal.Action == FileAction.HardlinkCopy
-                ? !MatchesHardlinkSourceIdentity(
-                    source,
-                    journal.SourcePhysicalObjectIdentity)
-                : !source.MatchesObjectIdentity(
-                    journal.SourcePhysicalObjectIdentity)))
+                "The markerless source is temporarily unavailable while its content proof is being verified.")
+            || string.IsNullOrWhiteSpace(journal.SourceSha256))
         {
             return false;
         }
@@ -144,13 +107,7 @@ public partial class FileMover
         FileMutationJournal journal,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(journal.SourceSha256)
-            && (journal.Action == FileAction.HardlinkCopy
-                ? !MatchesHardlinkSourceIdentity(
-                    target,
-                    journal.SourcePhysicalObjectIdentity)
-                : !target.MatchesObjectIdentity(
-                    journal.SourcePhysicalObjectIdentity)))
+        if (string.IsNullOrWhiteSpace(journal.SourceSha256))
         {
             return false;
         }
@@ -184,18 +141,21 @@ public partial class FileMover
 
     private static bool TargetMatchesMarkerlessJournal(
         PinnedDirectoryCreation.PinnedFileEntry target,
-        FileMutationJournal journal) =>
+        FileMutationJournal journal,
+        bool requirePhysicalIdentity = true) =>
         VisiblePathMatchesOrThrowUnavailable(
             target,
-            "The markerless target is temporarily unavailable while its physical generation is being verified.")
-        && !string.IsNullOrWhiteSpace(
-            journal.TargetPhysicalObjectIdentity)
-        && target.MatchesObjectIdentity(
-            journal.TargetPhysicalObjectIdentity);
+            "The markerless target is temporarily unavailable while its current publication is being verified.")
+        && (!requirePhysicalIdentity
+            || (!string.IsNullOrWhiteSpace(
+                    journal.TargetPhysicalObjectIdentity)
+                && target.MatchesObjectIdentity(
+                    journal.TargetPhysicalObjectIdentity)));
 
-    private static bool OwnerMetadataReconciledTargetMatches(
+    private static async Task<bool> OwnerMetadataReconciledTargetMatchesAsync(
         FileMoveGateLease gate,
-        FileMutationJournal journal)
+        FileMutationJournal journal,
+        CancellationToken cancellationToken)
     {
         if (journal.State != FileMutationJournalState.OwnerMetadataReconciled
             || !gate.DestinationParent.VisiblePathMatches())
@@ -206,7 +166,11 @@ public partial class FileMover
         using var target = gate.DestinationParent.TryOpenExistingFile(
             gate.DestinationName,
             requireDeleteAccess: false);
-        return target != null && TargetMatchesMarkerlessJournal(target, journal);
+        return target != null
+            && TargetMatchesMarkerlessJournal(target, journal, requirePhysicalIdentity: false)
+            && await MatchesMarkerlessTargetContentAsync(target, journal, cancellationToken)
+            && target.VisiblePathMatches()
+            && gate.DestinationParent.VisiblePathMatches();
     }
 
     private static async Task CopyMarkerlessFileAsync(
@@ -229,8 +193,14 @@ public partial class FileMover
         targetStream.Flush(flushToDisk: true);
     }
 
+    private sealed class MarkerlessCreatedTargetLease : IDisposable
+    {
+        public PinnedDirectoryCreation.PinnedFileEntry? Entry { get; set; }
+        public void Dispose() => Entry?.Dispose();
+    }
+
     private sealed record MarkerlessSourceProof(
-        string PhysicalObjectIdentity,
+        string? PhysicalObjectIdentity,
         long Length,
         string? Sha256);
 }

@@ -10,8 +10,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Category", "Infrastructure")]
 public sealed class EfMoveExecutionStoreTests : BaseTests
 {
-    [Fact]
-    public async Task SourceManifestOperations_ExcludeTargetBoundaryAuthorization()
+    [Theory]
+    [InlineData("source-endpoint")]
+    [InlineData("target-endpoint")]
+    [InlineData("source-file")]
+    [InlineData("target-file")]
+    public async Task SourceManifestOperations_ExcludeTargetBoundaryAuthorization_AndLatchUnsupportedDiagnosticsRetention(string unsupported)
     {
         var jobId = Guid.NewGuid();
         var lease = new MoveLeaseToken("worker", 1);
@@ -24,6 +28,7 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
                 AudiobookId = 1,
                 RequestedPath = Path.Join(FileService.GetTempPath(), "target"),
                 SourcePath = Path.Join(FileService.GetTempPath(), "source"),
+                SourceCleanupMode = MoveSourceCleanupMode.DeleteAfterVerifiedCopy,
                 Status = MoveJobStatus.Running,
                 LeaseOwner = lease.Owner,
                 LeaseGeneration = lease.Generation,
@@ -52,9 +57,34 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
         var sourceEntry = Assert.Single(manifest);
         Assert.Equal("book.m4b", sourceEntry.RelativePath);
 
+        if (unsupported.EndsWith("endpoint", StringComparison.Ordinal))
+        {
+            await store.UpdateEndpointObjectIdentitiesAsync(jobId, lease,
+                unsupported == "source-endpoint" ? string.Empty : "observed-source",
+                unsupported == "target-endpoint" ? string.Empty : "observed-target", CancellationToken.None);
+            await store.UpdateEndpointObjectIdentitiesAsync(jobId, lease,
+                "observed-source", "observed-target", CancellationToken.None);
+        }
+        else if (unsupported == "source-file")
+        {
+            await store.UpdateSourceEntryProofAsync(jobId, lease, "book.m4b", string.Empty,
+                new string('A', 64), DateTime.UtcNow, CancellationToken.None);
+            await store.UpdateSourceEntryProofAsync(jobId, lease, "book.m4b", "observed-source-file",
+                new string('A', 64), DateTime.UtcNow, CancellationToken.None);
+        }
+        else
+        {
+            await store.UpdateTargetEntryStateAsync(jobId, lease, "book.m4b",
+                MoveJobEntryCopyState.Staged, string.Empty, CancellationToken.None);
+            await store.UpdateTargetEntryStateAsync(jobId, lease, "book.m4b",
+                MoveJobEntryCopyState.Verified, "observed-target-file", CancellationToken.None);
+        }
         await store.UpdateCopyStateAsync(jobId, lease, CancellationToken.None);
 
         await using var verification = await factory.CreateDbContextAsync();
+        var job = await verification.MoveJobs.SingleAsync(job => job.Id == jobId);
+        Assert.True(job.ForceCopyAndRetainSource);
+        Assert.Equal(MoveSourceCleanupMode.RetainSource, job.SourceCleanupMode);
         var entries = await verification.MoveJobEntries
             .AsNoTracking()
             .Where(entry => entry.MoveJobId == jobId)
@@ -506,8 +536,10 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
             CancellationToken.None);
     }
 
-    [Fact]
-    public async Task CleanupStateTransitions_AreMonotonicAndTerminal()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupStateTransitions_AreMonotonicAndTerminal(bool sourceAlreadyAbsent)
     {
         var jobId = Guid.NewGuid();
         var lease = new MoveLeaseToken("worker", 1);
@@ -540,12 +572,15 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
         }
 
         var store = new EfMoveExecutionStore(factory, TimeProvider.System);
-        await store.UpdateCleanupStateAsync(
-            jobId,
-            lease,
-            "book.m4b",
-            MoveJobEntryCleanupState.DeleteAuthorized,
-            CancellationToken.None);
+        if (!sourceAlreadyAbsent)
+        {
+            await store.UpdateCleanupStateAsync(
+                jobId,
+                lease,
+                "book.m4b",
+                MoveJobEntryCleanupState.DeleteAuthorized,
+                CancellationToken.None);
+        }
         await store.UpdateCleanupStateAsync(
             jobId,
             lease,

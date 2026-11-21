@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Listenarr.Domain.Common;
 using Microsoft.Win32.SafeHandles;
 
 namespace Listenarr.Infrastructure.FileSystem;
@@ -88,6 +89,50 @@ internal sealed partial class PinnedDirectoryCreation
         }
     }
 
+    internal static PinnedDirectoryAnchor OpenPinnedConfiguredHierarchy(
+        RootFolder? configuredRoot, string path, bool createMissing)
+    {
+        if (configuredRoot == null) return OpenPinnedHierarchyNoFollow(path, createMissing);
+        var persisted = RootFolderPathSemantics.ResolvePersisted(configuredRoot)
+            ?? throw new InvalidOperationException("The configured boundary has no path semantics.");
+        if (persisted.DetectAmbiguousCaseMatches
+            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                configuredRoot.Path, out var boundaryPath, out _)
+            || !FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                boundaryPath, path, persisted.Semantics, out var relative))
+            throw new InvalidOperationException("The path is outside its current configured boundary.");
+        // Only the explicitly configured boundary may follow links. All descendant
+        // names are opened relative to the original handles with no-follow semantics.
+        using var boundary = OpenPinnedBoundary(boundaryPath);
+        var current = boundary.Duplicate();
+        try
+        {
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
+            {
+                PinnedDirectoryAnchor next;
+                try { next = current.OpenExistingChild(segment); }
+                catch (Win32Exception exception) when (createMissing && exception.NativeErrorCode is 2 or 3)
+                {
+                    using var creation = current.TryCreateChild(segment);
+                    next = creation.Created ? creation.OpenCreatedDirectoryAnchor()
+                        : current.OpenExistingChild(segment);
+                }
+                current.Dispose();
+                current = next;
+            }
+            if (!boundary.VisiblePathMatches() || !current.VisiblePathMatches())
+                throw new IOException("The configured boundary changed during its hierarchy walk.");
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
     private static void RequireFullyQualifiedPath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -153,6 +198,14 @@ internal sealed partial class PinnedDirectoryCreation
             return OperatingSystem.IsLinux()
                 ? PinnedDirectoryCreation.GetLinuxObjectIdentityCandidates(_handle)
                 : [PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle)];
+        }
+
+        internal IReadOnlyList<string> GetLegacyWeakDirectoryObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? PinnedDirectoryCreation.GetLinuxLegacyWeakObjectIdentityCandidates(_handle)
+                : Array.Empty<string>();
         }
 
         internal bool MatchesManagedDirectoryIdentity(

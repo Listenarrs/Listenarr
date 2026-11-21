@@ -327,10 +327,9 @@ namespace Listenarr.Application.Audiobooks.Files
                     cacheIdentity,
                     filePath);
 
-                var fi = new FileInfo(metadataPath);
                 var fileRecord = AudiobookFile.CreateUnresolved(filePath);
                 fileRecord.AudiobookId = audiobook.Id;
-                fileRecord.Size = fi.Exists ? fi.Length : null;
+                fileRecord.Size = TryGetRegisteredFileLength(metadataPath);
                 fileRecord.Source = source;
                 fileRecord.CreatedAt = DateTime.UtcNow;
                 fileRecord.DurationSeconds = meta?.Duration.TotalSeconds;
@@ -340,7 +339,8 @@ namespace Listenarr.Application.Audiobooks.Files
                 fileRecord.Bitrate = meta?.BitRate;
                 fileRecord.SampleRate = meta?.SampleRate;
                 fileRecord.Channels = meta?.Channels;
-                if (registrationLease?.HasDurablePhysicalObjectIdentity == true)
+                if (registrationLease?.HasDurablePhysicalObjectIdentity == true
+                    && !IsScanOrMetadataSource(source))
                 {
                     fileRecord.ApplyPhysicalObjectIdentity(
                         registrationLease.PhysicalObjectIdentity,
@@ -437,10 +437,41 @@ namespace Listenarr.Application.Audiobooks.Files
             }
         }
 
+        private static bool IsScanOrMetadataSource(string? source) =>
+            !string.IsNullOrWhiteSpace(source)
+            && (source.Contains("scan", StringComparison.OrdinalIgnoreCase)
+                || source.Contains("metadata", StringComparison.OrdinalIgnoreCase));
+
         private static string ResolveAbsolutePath(string? path) =>
             string.IsNullOrWhiteSpace(path)
                 ? string.Empty
                 : FileSystemPathIdentity.ResolveNativeAbsolutePath(path);
+
+        /// <summary>
+        /// Read the byte length of the file behind a registration metadata path.
+        /// The pinned lease's metadata path is a /proc/self/fd magic link on
+        /// Linux, and FileSystemInfo reads the link inode itself, whose reported
+        /// size is a constant 64 — not the file's length. Opening the path
+        /// follows the link to the pinned file, so the stream length is the real
+        /// size of the exact object the lease holds open.
+        /// </summary>
+        private static long? TryGetRegisteredFileLength(string metadataPath)
+        {
+            try
+            {
+                using var stream = new FileStream(
+                    metadataPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                return stream.Length;
+            }
+            catch (Exception exception) when (exception is IOException
+                or UnauthorizedAccessException or NotSupportedException)
+            {
+                return null;
+            }
+        }
 
         private void LogClaimRejection(
             int audiobookId,

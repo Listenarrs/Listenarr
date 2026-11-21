@@ -101,3 +101,6 @@ Example `config/appsettings/appsettings.json`:
 ## Logging Configuration
 
 Set `LISTENARR_LOG_LEVEL` for runtime overrides, or edit `config/appsettings/appsettings.json` under the active content root and set `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default`.
+
+Accepted log levels are: `Verbose` (or `Trace`), `Debug`, `Information`, `Warning`, `Error`, `Fatal` (or `Critical`).
+Log level parsing is case-insensitive. If an unrecognized log level is specified, a startup warning is logged to the console and the level falls back to the underlying configuration or `Information`.

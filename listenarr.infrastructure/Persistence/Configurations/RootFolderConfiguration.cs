@@ -57,6 +57,14 @@ namespace Listenarr.Infrastructure.Persistence.Configurations
                 .HasFilter("\"PathIdentityKey\" IS NOT NULL");
 
             builder.Property(r => r.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            builder.Property(r => r.WeakStorageSourceCleanupPolicy)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .HasDefaultValue(WeakStorageSourceCleanupPolicy.RetainSource);
+            builder.Property(r => r.WeakStoragePolicyRevision)
+                .HasDefaultValue(0);
+            builder.Property(r => r.StorageContractRevision)
+                .HasDefaultValue(0);
         }
     }
 }

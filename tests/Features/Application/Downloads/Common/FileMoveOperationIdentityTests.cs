@@ -103,7 +103,7 @@ public sealed class FileMoveOperationIdentityTests : BaseTests
     }
 
     [Fact]
-    public void CreateForPaths_SourcePhysicalGenerationRemainsPartOfIdentity()
+    public void CreateForPaths_SourcePhysicalGenerationIsNotPersistedAuthority()
     {
         var semantics = new FileSystemPathSemantics(
             FileSystemPathSyntax.Unix,
@@ -128,7 +128,7 @@ public sealed class FileMoveOperationIdentityTests : BaseTests
             "/library/book.m4b",
             semantics);
 
-        Assert.NotEqual(first, replacement);
+        Assert.Equal(first, replacement);
     }
 
     [Fact]

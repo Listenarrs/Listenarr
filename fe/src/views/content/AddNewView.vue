@@ -91,6 +91,7 @@
                   id="language-select"
                   class="language-select form-select"
                   aria-label="Filter results by language"
+                  @change="rememberLanguageChoice"
                 >
                   <option
                     v-for="option in preferredSearchLanguageOptions"
@@ -236,6 +237,7 @@
                     aria-label="Filter results by language"
                     v-model="preferredSearchLanguage"
                     class="form-input"
+                    @change="rememberLanguageChoice"
                   >
                     <option
                       v-for="option in preferredSearchLanguageOptions"
@@ -311,8 +313,8 @@
               Use prefixes for precise searches: <strong>ASIN:</strong>, <strong>AUTHOR:</strong>,
               <strong>TITLE:</strong>, <strong>ISBN:</strong>, or <strong>SERIES:</strong>
             </span>
-            <span v-else-if="searchType === 'asin'">Searching by ASIN</span>
-            <span v-else-if="searchType === 'title'">
+            <span v-else-if="inputType === 'asin'">Searching by ASIN</span>
+            <span v-else-if="inputType === 'title'">
               <span v-if="searchQuery.toUpperCase().startsWith('TITLE:')">Searching by title</span>
               <span v-else-if="searchQuery.toUpperCase().startsWith('AUTHOR:')"
                 >Searching by author</span
@@ -322,7 +324,7 @@
               >
               <span v-else>Searching by title</span>
             </span>
-            <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
+            <span v-else-if="inputType === 'isbn'">Searching by ISBN</span>
           </div>
 
           <div
@@ -342,6 +344,9 @@
       <div class="loading-spinner">
         <PhSpinner class="ph-spin" />
         <p>Searching for audiobooks...</p>
+        <p v-if="runningSearchDescription" class="search-status" data-testid="running-search-for">
+          {{ runningSearchDescription }}
+        </p>
         <p v-if="searchStatus" class="search-status">{{ searchStatus }}</p>
       </div>
     </div>
@@ -350,7 +355,11 @@
     <div v-if="hasResults" class="search-results">
       <!-- ASIN Results -->
       <div v-if="searchType === 'asin' && audibleResult">
-        <h2>Audiobook Found</h2>
+        <SearchResultsHeading
+          heading="Audiobook Found"
+          :context="searchStore.context"
+          @restore="restoreSearchInputs"
+        />
         <div class="title-results">
           <div class="title-result-card">
             <div class="result-poster">
@@ -613,9 +622,11 @@
 
       <!-- Title Search Results -->
       <div v-if="searchType === 'title' && titleResults.length > 0">
-        <h2>
-          Found {{ totalTitleResultsCount }} Book{{ totalTitleResultsCount === 1 ? '' : 's' }}
-        </h2>
+        <SearchResultsHeading
+          :heading="`Found ${totalTitleResultsCount} Book${totalTitleResultsCount === 1 ? '' : 's'}`"
+          :context="searchStore.context"
+          @restore="restoreSearchInputs"
+        />
         <div v-if="hasTitleResultControls" class="results-controls">
           <div
             v-if="isAudiblePaged && Math.ceil(audibleTotal / audibleLimit) > 1"
@@ -997,11 +1008,20 @@ declare global {
     addnew_rawDebugResults?: unknown
   }
 }
-import { isbnService, type ISBNBook } from '@/services/isbn'
+import { isbnService } from '@/services/isbn'
 import { signalRService } from '@/services/signalr'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useLibraryStore } from '@/stores/library'
+import { storeToRefs } from 'pinia'
+import {
+  useAddNewSearchStore,
+  type AdvancedSearchFields,
+  type SearchContext,
+  type TitleSearchResult,
+} from '@/stores/addNewSearch'
+import SearchResultsHeading from '@/components/domain/search/SearchResultsHeading.vue'
+import { describeSearchContext } from '@/utils/searchContext'
 import AddLibraryModal from '@/components/domain/audiobook/AddLibraryModal.vue'
 import { useToast } from '@/services/toastService'
 import { safeText } from '@/utils/textUtils'
@@ -1051,15 +1071,6 @@ function normalizeIsbn(input: unknown): string | undefined {
     return base + String(check)
   }
   return undefined
-}
-
-// Extended type for title search results that includes search metadata
-type TitleSearchResult = Omit<OpenLibraryBook, 'isbn'> & {
-  searchResult?: Partial<SearchResult> // Store the enriched SearchResult from intelligent search
-  imageUrl?: string // For results that have direct image URLs
-  metadataSource?: string // Store which metadata source was used
-  isbn?: string | string[] // Normalized ISBN (string or array for OpenLibrary compatibility)
-  region?: string // Audible/Amazon market region from the search result
 }
 
 // Loose result type used for normalization of diverse backend shapes
@@ -1121,20 +1132,43 @@ const libraryStore = useLibraryStore()
 const toast = useToast()
 const { getProtectedImageSrc } = useProtectedImages()
 
+// The search (results, context, running state) is owned by a store, so it keeps running while the
+// page is away and the page finds it again when it comes back
+const searchStore = useAddNewSearchStore()
+const {
+  audibleResult,
+  titleResults,
+  allAudibleResults,
+  totalTitleResultsCount,
+  resolvedAsins,
+  asinFilteringApplied,
+  searchType,
+} = storeToRefs(searchStore)
+
 // Initialize composables
 const {
   searchQuery,
   searchLanguage,
   preferredSearchLanguage,
-  searchType,
-  isSearching,
   searchError,
   searchStatus,
   searchPlaceholder,
+  inputType,
   handleSearchInput,
   performSearch: runSearch,
-  cancelSearch,
-} = useSearch()
+  cancelSearch: cancelRequest,
+  // This page's own request (the store's search may have been started by a page that was left)
+  isSearching: requestRunning,
+} = useSearch({ searchType })
+
+// A search runs while the store says so, including one started before the page was left
+const isSearching = computed(() => searchStore.running)
+
+// Cancel: stop this page's request, and ignore the answer of whichever search was running
+const cancelSearch = () => {
+  cancelRequest()
+  searchStore.supersede()
+}
 
 const { addedAsins, addedOpenLibraryIds, checkExistingInLibrary } = useLibraryCheck()
 
@@ -1163,7 +1197,6 @@ const audiblePage = ref(1)
 const audibleLimit = ref(50)
 const audibleTotal = ref(0)
 const isAudiblePaged = ref(false)
-const allAudibleResults = ref<AudibleSearchResult[]>([])
 
 logger.debug('AddNewView component loaded')
 logger.debug('libraryStore:', libraryStore)
@@ -1184,15 +1217,9 @@ const isCancelled = ref(false)
 let unsubscribeSearchProgress: (() => void) | null = null
 let stopWatchingLibrary: (() => void) | null = null
 
-// Results
-const audibleResult = ref<AudibleBookMetadata | null>(null)
-const titleResults = ref<TitleSearchResult[]>([])
-const resolvedAsins = ref<Record<string, string>>({})
-const asinFilteringApplied = ref(false)
-const isbnResult = ref<ISBNBook | null>(null) // retained for potential enrichment but not directly rendered
+// The message of an ISBN lookup (the results themselves are in the search store)
 const isbnLookupMessage = ref('')
 const isbnLookupWarning = ref(false)
-const totalTitleResultsCount = ref<number>(0)
 
 const selectedSearchRegion = computed({
   get: () => normalizeSearchRegion(searchLanguage.value),
@@ -1200,6 +1227,8 @@ const selectedSearchRegion = computed({
     const normalizedRegion = normalizeSearchRegion(value)
     searchLanguage.value = normalizedRegion
     preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(normalizedRegion)
+    searchStore.draft.region = normalizedRegion
+    searchStore.draft.language = preferredSearchLanguage.value
   },
 })
 
@@ -1329,104 +1358,35 @@ const errorMessage = ref('')
 const showAddLibraryModal = ref(false)
 const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 
-// Local storage keys for persisting search results
-const RESULTS_KEY = 'listenarr.addNewResults'
-const SEARCH_TYPE_KEY = 'listenarr.addNewSearchType'
-const TITLE_RESULTS_COUNT_KEY = 'listenarr.addNewTitleResultsCount'
-const ASIN_FILTERING_KEY = 'listenarr.addNewAsinFiltering'
-const RESOLVED_ASINS_KEY = 'listenarr.addNewResolvedAsins'
+// The books added from this page, kept for the tab session (the search itself is kept by its store)
 const ADDED_ASINS_KEY = 'listenarr.addNewAddedAsins'
 const ADDED_OLIDS_KEY = 'listenarr.addNewAddedOLIDs'
-
-// Initialize search results from localStorage
 try {
-  const storedResults = localStorage.getItem(RESULTS_KEY)
-  if (storedResults) {
-    const parsed = JSON.parse(storedResults)
-    if (parsed.audibleResult) audibleResult.value = parsed.audibleResult
-    if (parsed.titleResults) titleResults.value = parsed.titleResults
-    if (parsed.isbnResult) isbnResult.value = parsed.isbnResult
-  }
-
-  const storedSearchType = localStorage.getItem(SEARCH_TYPE_KEY)
-  if (storedSearchType) {
-    searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
-  }
-
-  const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
-  if (storedCount) {
-    totalTitleResultsCount.value = parseInt(storedCount, 10)
-  }
-
-  const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
-  if (storedFiltering) {
-    asinFilteringApplied.value = storedFiltering === 'true'
-  }
-
-  const storedResolved = localStorage.getItem(RESOLVED_ASINS_KEY)
-  if (storedResolved) {
-    resolvedAsins.value = JSON.parse(storedResolved)
-  }
-
-  const storedAdded = localStorage.getItem(ADDED_ASINS_KEY)
-  if (storedAdded) {
-    addedAsins.value = new Set(JSON.parse(storedAdded))
-  }
-  const storedAddedOl = localStorage.getItem(ADDED_OLIDS_KEY)
-  if (storedAddedOl) {
-    try {
-      addedOpenLibraryIds.value = new Set(JSON.parse(storedAddedOl))
-    } catch {}
-  }
+  const storedAdded = sessionStorage.getItem(ADDED_ASINS_KEY)
+  if (storedAdded) addedAsins.value = new Set(JSON.parse(storedAdded))
+  const storedAddedOl = sessionStorage.getItem(ADDED_OLIDS_KEY)
+  if (storedAddedOl) addedOpenLibraryIds.value = new Set(JSON.parse(storedAddedOl))
 } catch (error) {
   logger.warn('Failed to restore persisted state:', error)
 }
 
-// Watch search results changes and persist to localStorage
-watch([audibleResult, titleResults, isbnResult], () => {
-  try {
-    const results = {
-      audibleResult: audibleResult.value,
-      titleResults: titleResults.value,
-      isbnResult: isbnResult.value,
-    }
-    localStorage.setItem(RESULTS_KEY, JSON.stringify(results))
-  } catch {}
+// The form is the user's: coming back shows it as they left it, never a search's parameters
+// (those are shown with the results, and loaded into the form only on "Restore search inputs")
+searchQuery.value = searchStore.draft.query ?? ''
+watch(searchQuery, (query) => {
+  searchStore.draft.query = query
 })
 
-watch(searchType, (v) => {
-  try {
-    localStorage.setItem(SEARCH_TYPE_KEY, v || '')
-  } catch {}
-})
-
-watch(totalTitleResultsCount, (v) => {
-  try {
-    localStorage.setItem(TITLE_RESULTS_COUNT_KEY, v.toString())
-  } catch {}
-})
-
-watch(asinFilteringApplied, (v) => {
-  try {
-    localStorage.setItem(ASIN_FILTERING_KEY, v.toString())
-  } catch {}
-})
-
-watch(
-  resolvedAsins,
-  (v) => {
-    try {
-      localStorage.setItem(RESOLVED_ASINS_KEY, JSON.stringify(v))
-    } catch {}
-  },
-  { deep: true },
-)
+// Only the user's own choices are kept: an untouched region or language follows Settings
+const rememberLanguageChoice = () => {
+  searchStore.draft.language = preferredSearchLanguage.value
+}
 
 watch(
   addedAsins,
   (v) => {
     try {
-      localStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v)))
+      sessionStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v)))
     } catch {}
   },
   { deep: true },
@@ -1436,7 +1396,7 @@ watch(
   addedOpenLibraryIds,
   (v) => {
     try {
-      localStorage.setItem(ADDED_OLIDS_KEY, JSON.stringify(Array.from(v)))
+      sessionStorage.setItem(ADDED_OLIDS_KEY, JSON.stringify(Array.from(v)))
     } catch {}
   },
   { deep: true },
@@ -1452,6 +1412,40 @@ watch(currentAdvancedPage, () => {
     }
   })
 })
+
+// A new search: what it searches for, at the time it starts
+const newSearch = (query?: string, advanced?: AdvancedSearchFields): number =>
+  searchStore.begin({
+    query,
+    advanced,
+    region: searchLanguage.value,
+    language: preferredSearchLanguage.value,
+  })
+
+// "Restore search inputs": load the parameters of the results into the form, to change them or
+// search again from them
+const restoreSearchInputs = (context: SearchContext) => {
+  if (context.advanced) {
+    showAdvancedSearch.value = true
+    advancedSearchParams.value = { ...context.advanced }
+  } else {
+    showAdvancedSearch.value = false
+    searchQuery.value = context.query ?? ''
+  }
+  if (context.region) {
+    searchLanguage.value = normalizeSearchRegion(context.region)
+    searchStore.draft.region = searchLanguage.value
+  }
+  if (context.language) {
+    preferredSearchLanguage.value = normalizePreferredSearchLanguage(context.language)
+    searchStore.draft.language = preferredSearchLanguage.value
+  }
+}
+
+// What the running search looks for, shown while it runs (also after leaving and coming back)
+const runningSearchDescription = computed(() =>
+  searchStore.runningContext ? describeSearchContext(searchStore.runningContext) : '',
+)
 
 // Computed properties
 const hasResults = computed(() => {
@@ -1822,8 +1816,8 @@ const performAdvancedSearch = async () => {
       return
     }
 
+    const searchRequestId = newSearch(undefined, { ...p })
     advancedSearchError.value = ''
-    isSearching.value = true
     searchError.value = ''
 
     try {
@@ -1854,7 +1848,9 @@ const performAdvancedSearch = async () => {
           if (languageFilter) seriesSearchParams.language = languageFilter
           const resp = await apiService.advancedSearch(seriesSearchParams)
           // backend returns enriched SearchResult objects
+          if (!searchStore.isCurrent(searchRequestId)) return
           await handleAdvancedSearchResults(resp as Partial<SearchResult>[])
+          searchStore.complete(searchRequestId)
         } catch (e) {
           throw e
         }
@@ -1922,7 +1918,9 @@ const performAdvancedSearch = async () => {
         })
 
         // If filtering produced no matches, fall back to returning the unfiltered author results
+        if (!searchStore.isCurrent(searchRequestId)) return
         await handleAdvancedSearchResults(filtered.length ? filtered : results)
+        searchStore.complete(searchRequestId)
 
         // done: scroll into view
         nextTick(() => {
@@ -1936,7 +1934,9 @@ const performAdvancedSearch = async () => {
       }
 
       const results = await apiService.advancedSearch(params)
+      if (!searchStore.isCurrent(searchRequestId)) return
       await handleAdvancedSearchResults(results)
+      searchStore.complete(searchRequestId)
 
       // Scroll to top of results after search
       nextTick(() => {
@@ -1947,10 +1947,12 @@ const performAdvancedSearch = async () => {
         }
       })
     } catch (err) {
+      if (!searchStore.isCurrent(searchRequestId)) return
       advancedSearchError.value = err instanceof Error ? err.message : 'Search failed'
       errorMessage.value = advancedSearchError.value
     } finally {
-      isSearching.value = false
+      // Ended without results to keep (failed, or stopped early): nothing saved
+      searchStore.settle(searchRequestId)
     }
 
     return
@@ -1963,8 +1965,8 @@ const performAdvancedSearch = async () => {
     return
   }
 
+  const searchRequestId = newSearch(searchQuery.value)
   advancedSearchError.value = ''
-  isSearching.value = true
   searchError.value = ''
 
   try {
@@ -1999,12 +2001,15 @@ const performAdvancedSearch = async () => {
     params.pagination = { page: 1, limit: resultsPerPage.value }
     currentAdvancedPage.value = 1
     const results = await apiService.advancedSearch(params)
+    if (!searchStore.isCurrent(searchRequestId)) return
     await handleAdvancedSearchResults(results)
+    searchStore.complete(searchRequestId)
   } catch (err) {
+    if (!searchStore.isCurrent(searchRequestId)) return
     advancedSearchError.value = err instanceof Error ? err.message : 'Search failed'
     errorMessage.value = advancedSearchError.value
   } finally {
-    isSearching.value = false
+    searchStore.settle(searchRequestId)
   }
 }
 
@@ -2018,6 +2023,7 @@ const clearAdvancedSearch = () => {
     typeof savedLanguage === 'string' && savedLanguage.trim()
       ? normalizePreferredSearchLanguage(savedLanguage)
       : getPrimaryPreferredSearchLanguageForRegion(searchLanguage.value)
+  searchStore.draft.language = undefined
   advancedSearchError.value = ''
   // Reset audible paging state
   audiblePage.value = 1
@@ -2115,6 +2121,11 @@ const handleUnifiedSearchResults = async (results: SearchResult[] | null | undef
       return
     }
 
+    // Drop the previous search's results, or they stay on screen under the new query
+    titleResults.value = []
+    audibleResult.value = null
+    allAudibleResults.value = []
+    totalTitleResultsCount.value = 0
     searchStatus.value = ''
     searchError.value = ''
     toast.info('No results found', 'Search')
@@ -2125,8 +2136,25 @@ const handleUnifiedSearchResults = async (results: SearchResult[] | null | undef
 }
 
 const performSearch = async () => {
-  const results = await runSearch()
+  // A new query replaces any search still running, even one started before the page was left.
+  // runSearch refuses a second request of this page (the submit button cancels it instead), and an
+  // empty box searches nothing.
+  const searchRequestId =
+    !requestRunning.value && searchQuery.value.trim() ? newSearch(searchQuery.value) : null
+  let results: Awaited<ReturnType<typeof runSearch>>
+  try {
+    results = await runSearch()
+  } catch (error) {
+    if (searchRequestId !== null) searchStore.settle(searchRequestId)
+    throw error
+  }
+  // A late answer of a replaced search (from this page or one that was left) changes nothing
+  if (searchRequestId !== null && !searchStore.isCurrent(searchRequestId)) return results
   await handleUnifiedSearchResults(results)
+  if (searchRequestId !== null) {
+    if (Array.isArray(results)) searchStore.complete(searchRequestId)
+    else searchStore.settle(searchRequestId)
+  }
   return results
 }
 
@@ -3315,11 +3343,18 @@ onMounted(async () => {
 
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   const defaultLanguage = configStore.applicationSettings?.defaultSearchLanguage
+  // Coming back to a search of this session: show it with the region and language it was made in
   searchLanguage.value = defaultRegion
   preferredSearchLanguage.value =
     typeof defaultLanguage === 'string' && defaultLanguage.trim()
       ? normalizePreferredSearchLanguage(defaultLanguage)
       : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  // What the user chose in this session wins over the defaults
+  if (searchStore.draft.region)
+    searchLanguage.value = normalizeSearchRegion(searchStore.draft.region)
+  if (searchStore.draft.language) {
+    preferredSearchLanguage.value = normalizePreferredSearchLanguage(searchStore.draft.language)
+  }
 
   // Audible integration removed: no auth status to check
 

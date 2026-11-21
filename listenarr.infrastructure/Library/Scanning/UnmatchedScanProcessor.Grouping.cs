@@ -188,17 +188,21 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 var canonicalFile = FileSystemPathIdentity.Canonicalize(
                     file,
                     semantics.Syntax);
-                if (!fileObjectIdentities.TryGetValue(
-                        canonicalFile,
-                        out var expectedPhysicalObjectIdentity))
+                fileObjectIdentities.TryGetValue(
+                    canonicalFile,
+                    out var expectedPhysicalObjectIdentity);
+                if (string.Equals(
+                        expectedPhysicalObjectIdentity,
+                        ScanFileDiscovery.PinnedPathOnlyIdentity,
+                        StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException(
-                        "The unmatched metadata candidate lacks its enumerated physical generation.");
+                    expectedPhysicalObjectIdentity = null;
                 }
 
-                using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                    file,
-                    expectedPhysicalObjectIdentity);
+                using var lease =
+                    PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+                        file,
+                        expectedPhysicalObjectIdentity);
                 result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(
                     lease.MetadataPath,
                     ffprobePath,
@@ -229,23 +233,29 @@ namespace Listenarr.Infrastructure.Library.Scanning
             var canonicalFolder = FileSystemPathIdentity.Canonicalize(
                 bookFolder,
                 semantics.Syntax);
-            if (!enumeration.DirectoryObjectIdentities.TryGetValue(
-                    canonicalFolder,
-                    out var expectedDirectoryIdentity))
+            enumeration.DirectoryObjectIdentities.TryGetValue(
+                canonicalFolder,
+                out var expectedDirectoryIdentity);
+            if (string.Equals(
+                    expectedDirectoryIdentity,
+                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                    StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    "The unmatched metadata folder lacks its authoritative enumeration proof.");
+                expectedDirectoryIdentity = null;
             }
 
             using var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 bookFolder,
                 createMissing: false);
-            if (!folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity))
+            if (!string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
+                && !folder.MatchesDirectoryObjectIdentity(
+                    expectedDirectoryIdentity))
             {
                 throw new InvalidOperationException(
                     "The unmatched metadata folder changed after filesystem enumeration.");
             }
-            var expectedNamespaceChangeToken = folder.GetNamespaceChangeToken();
+            var expectedNamespaceChangeToken =
+                TryCapturePinnedFolderChangeToken(folder);
             EnsurePinnedFolderMatches(
                 folder,
                 expectedDirectoryIdentity,
@@ -372,23 +382,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
 
             return new string(buffer, 0, Math.Min(totalRead, maxCharacters));
-        }
-
-        private static void EnsurePinnedFolderMatches(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor folder,
-            string expectedDirectoryIdentity,
-            string expectedNamespaceChangeToken)
-        {
-            if (!folder.VisiblePathMatches()
-                || !folder.MatchesDirectoryObjectIdentity(expectedDirectoryIdentity)
-                || !string.Equals(
-                    folder.GetNamespaceChangeToken(),
-                    expectedNamespaceChangeToken,
-                    StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "The unmatched metadata folder changed after filesystem enumeration.");
-            }
         }
 
         private static void ApplyEmbeddedTags(PathParsedMetadata target, PathParsedMetadata tags)

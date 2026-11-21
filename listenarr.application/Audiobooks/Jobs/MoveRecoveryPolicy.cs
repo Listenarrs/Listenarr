@@ -55,9 +55,8 @@ public static class MoveRecoveryPolicy
             return true;
         }
 
-        return job.CreatedDirectories.Any(directory => directory.State is
-            MoveCreatedDirectoryState.Created or
-            MoveCreatedDirectoryState.Retained);
+        return job.CreatedDirectories.Any(directory =>
+            directory.State != MoveCreatedDirectoryState.Planned);
     }
 
     public static bool BlocksFilesystemMutation(MoveJob job)
@@ -135,9 +134,11 @@ public static class MoveRecoveryPolicy
 
     private static bool HasCompletedMarkerlessRecoveryEvidence(MoveJob job)
     {
+        var completedCleanupState = job.SourceDirectoryCleanupState;
         if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion)
-            || job.SourceDirectoryCleanupState != MoveJobEntryCleanupState.Deleted
-            || string.IsNullOrWhiteSpace(job.TargetDirectoryObjectIdentity)
+            || completedCleanupState is not (
+                MoveJobEntryCleanupState.Deleted
+                or MoveJobEntryCleanupState.Retained)
             || string.IsNullOrWhiteSpace(job.RequestedPath))
         {
             return false;
@@ -149,7 +150,7 @@ public static class MoveRecoveryPolicy
         if (fileEntries.Count == 0
             || fileEntries.Any(entry =>
                 entry.CopyState != MoveJobEntryCopyState.Verified
-                || entry.CleanupState != MoveJobEntryCleanupState.Deleted))
+                || entry.CleanupState != completedCleanupState))
         {
             return false;
         }
@@ -159,40 +160,16 @@ public static class MoveRecoveryPolicy
                 .TryCanonicalizeStoredPathWithIdentityForHost(
                     job.RequestedPath,
                     targetIdentity,
-                    out var requestedPath,
+                    out _,
                     out _))
         {
             return false;
         }
 
-        foreach (var directory in job.CreatedDirectories)
-        {
-            if (directory.State != MoveCreatedDirectoryState.Created
-                || string.IsNullOrWhiteSpace(directory.DirectoryObjectIdentity)
-                || !string.Equals(
-                    directory.DirectoryObjectIdentity,
-                    job.TargetDirectoryObjectIdentity,
-                    StringComparison.Ordinal)
-                || !Listenarr.Domain.Common.FileSystemPathIdentity
-                    .TryCanonicalizeStoredPathWithIdentityForHost(
-                        directory.Path,
-                        targetIdentity,
-                        out var directoryPath,
-                        out _))
-            {
-                continue;
-            }
-
-            if (Listenarr.Domain.Common.FileSystemPathIdentity.AreEquivalent(
-                    directoryPath,
-                    requestedPath,
-                    targetIdentity.Semantics))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // Recovery classification uses durable path/content state only.
+        // Created-directory physical identities are legacy diagnostics and cannot
+        // be required to resume non-destructive reconciliation.
+        return true;
     }
 
     public static MoveRecoveryState ClassifyAudiobookJobs(IEnumerable<MoveJob> jobs)

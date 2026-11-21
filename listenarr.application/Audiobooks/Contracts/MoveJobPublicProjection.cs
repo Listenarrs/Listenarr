@@ -8,7 +8,8 @@ public sealed record MoveJobPublicUpdate(
     string? Target,
     double Progress,
     string Phase,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    bool SourceRetained);
 
 public static class MoveJobPublicProjection
 {
@@ -69,8 +70,20 @@ public static class MoveJobPublicProjection
                 0,
                 100),
             phaseOverride ?? persistedJob?.Phase.ToString() ?? MoveJobPhase.None.ToString(),
-            persistedJob?.UpdatedAt ?? fallbackUpdatedAt);
+            persistedJob?.UpdatedAt ?? fallbackUpdatedAt,
+            IsSourceRetained(persistedJob));
     }
+
+    public static bool IsSourceRetained(MoveJob? job) =>
+        job?.SourceDirectoryCleanupState == MoveJobEntryCleanupState.Retained
+        && job.Entries
+            .Where(entry => entry.EntryType == MoveJobEntryType.File
+                && !MoveManifestIdentity.IsBoundaryAuthorization(entry))
+            .Any()
+        && job.Entries
+            .Where(entry => entry.EntryType == MoveJobEntryType.File
+                && !MoveManifestIdentity.IsBoundaryAuthorization(entry))
+            .All(entry => entry.CleanupState == MoveJobEntryCleanupState.Retained);
 
     public static double CalculateProgress(MoveJob? job, MoveJobStatus fallbackStatus)
     {

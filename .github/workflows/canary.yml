@@ -48,7 +48,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: '.node-version'
 
       - name: Extract Pull Request info
         id: find_triggering_pr

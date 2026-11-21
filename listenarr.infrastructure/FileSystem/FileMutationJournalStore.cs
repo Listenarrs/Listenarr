@@ -9,9 +9,9 @@ internal sealed record FileMutationJournalClaim(
     FileAction Action,
     string SourcePath,
     string DestinationPath,
-    string SourceParentDirectoryObjectIdentity,
-    string DestinationParentDirectoryObjectIdentity,
-    string SourcePhysicalObjectIdentity,
+    string? SourceParentDirectoryObjectIdentity,
+    string? DestinationParentDirectoryObjectIdentity,
+    string? SourcePhysicalObjectIdentity,
     long SourceLength,
     string? SourceSha256,
     int? AudiobookId = null,
@@ -111,11 +111,15 @@ internal sealed partial class EfFileMutationJournalStore(
             Action = claim.Action,
             SourcePath = canonicalSource,
             DestinationPath = canonicalDestination,
+            // v3 does not derive authority from these legacy diagnostic
+            // columns. The released schema keeps them required, so an absent
+            // observation is persisted as an empty diagnostic sentinel.
             SourceParentDirectoryObjectIdentity =
-                claim.SourceParentDirectoryObjectIdentity,
+                claim.SourceParentDirectoryObjectIdentity ?? string.Empty,
             DestinationParentDirectoryObjectIdentity =
-                claim.DestinationParentDirectoryObjectIdentity,
-            SourcePhysicalObjectIdentity = claim.SourcePhysicalObjectIdentity,
+                claim.DestinationParentDirectoryObjectIdentity ?? string.Empty,
+            SourcePhysicalObjectIdentity =
+                claim.SourcePhysicalObjectIdentity ?? string.Empty,
             SourceLength = claim.SourceLength,
             SourceSha256 = claim.SourceSha256,
             AudiobookId = claim.AudiobookId,

@@ -151,9 +151,7 @@ namespace Listenarr.Application.Search.Audible
 
             if (!string.IsNullOrEmpty(title))
             {
-                authorFiltered = authorFiltered.Where(b =>
-                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0));
+                authorFiltered = authorFiltered.Where(b => AudibleTitleMatcher.Matches(b, title));
             }
 
             var detailedMetaByAsin = new Dictionary<string, AudibleBookResponse>(StringComparer.OrdinalIgnoreCase);

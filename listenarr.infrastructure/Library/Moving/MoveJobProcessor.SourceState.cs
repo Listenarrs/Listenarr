@@ -117,21 +117,19 @@ internal partial class MoveJobProcessor
         var matchesTarget = !string.IsNullOrWhiteSpace(currentPath)
             && PathsMatch(currentPath, target, targetIdentity.Semantics);
         var hasVerifiedRecovery = recoveredMove != null;
-        var hasRecoveryEvidence = hasVerifiedRecovery || hasFilesystemExecutionEvidence;
+        var hasDurableExecutionEvidence = hasFilesystemExecutionEvidence
+            || MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job);
+        var hasRecoveryEvidence = hasVerifiedRecovery || hasDurableExecutionEvidence;
         var hasAdvancedDurablePhase = job.Phase > MoveJobPhase.Planned;
 
         if (matchesSource)
         {
-            if ((hasAdvancedDurablePhase || hasFilesystemExecutionEvidence)
-                && !hasVerifiedRecovery)
-            {
-                await MarkSourceStateNeedsAttentionAsync(
-                    job,
-                    "The move has durable execution evidence but recovery could not be verified.",
-                    cancellationToken);
-                return null;
-            }
-
+            // Once this job has durable filesystem execution evidence, its persisted
+            // markerless journal is the authoritative description of expected source
+            // drift. Rebuilding the pre-move source plan here would reject legitimate
+            // partial copies, native renames, and source-cleanup recovery. The content
+            // mover revalidates that journal, endpoint generations, and target proof
+            // before performing or resuming any mutation.
             if (!hasRecoveryEvidence)
             {
                 bool currentManifestMatches;

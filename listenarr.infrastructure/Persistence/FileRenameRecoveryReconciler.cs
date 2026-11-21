@@ -12,7 +12,6 @@ namespace Listenarr.Infrastructure.Persistence;
 /// </summary>
 public sealed partial class FileRenameRecoveryReconciler(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
-    IFileMover fileMover,
     IAudiobookFilePathIdentityResolver identityResolver,
     IFileSystemSemanticsResolver semanticsResolver,
     TimeProvider timeProvider,
@@ -25,23 +24,6 @@ public sealed partial class FileRenameRecoveryReconciler(
     {
         await EnsureCurrentOwnerRecoveryProtocolAsync(cancellationToken);
         await using var readContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var attentionOperationId = await readContext.FileMutationJournals
-            .AsNoTracking()
-            .Where(journal =>
-                journal.Action == FileAction.Move
-                && journal.AudiobookId != null
-                && journal.AudiobookFileId != null
-                && journal.State == FileMutationJournalState.NeedsAttention)
-            .OrderBy(journal => journal.CreatedAt)
-            .ThenBy(journal => journal.OperationId)
-            .Select(journal => (Guid?)journal.OperationId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (attentionOperationId.HasValue)
-        {
-            throw new InvalidOperationException(
-                $"Owner-bound file organize journal {attentionOperationId.Value} requires operator repair before filesystem mutations can resume.");
-        }
-
         var operationIds = await readContext.FileMutationJournals
             .AsNoTracking()
             .Where(journal =>
@@ -52,7 +34,13 @@ public sealed partial class FileRenameRecoveryReconciler(
                     || journal.AudiobookFileId
                         == FileMutationOwner.RegistrationCompanionFile
                     ? journal.State != FileMutationJournalState.Completed
-                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
+                        && journal.State
+                            != FileMutationJournalState.CompletedSourceRetained
+                        && journal.State != FileMutationJournalState.RolledBack
+                        && journal.State != FileMutationJournalState.NeedsAttention
+                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled
+                        && journal.State != FileMutationJournalState.RolledBack
+                        && journal.State != FileMutationJournalState.NeedsAttention))
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .Select(journal => journal.OperationId)
@@ -70,17 +58,19 @@ public sealed partial class FileRenameRecoveryReconciler(
         CancellationToken cancellationToken)
     {
         FileMutationJournal journal;
-        Audiobook audiobook;
+        Audiobook? audiobook;
         AudiobookFile? audiobookFile;
         int ownerAudiobookId;
         int ownerAudiobookFileId;
+        bool isCompanionFile;
         await using (var context = await dbContextFactory.CreateDbContextAsync(cancellationToken))
         {
             journal = await context.FileMutationJournals
                 .AsNoTracking()
                 .SingleAsync(candidate => candidate.OperationId == operationId, cancellationToken);
             if (journal.State is FileMutationJournalState.OwnerMetadataReconciled
-                or FileMutationJournalState.NeedsAttention)
+                or FileMutationJournalState.NeedsAttention
+                or FileMutationJournalState.RolledBack)
             {
                 return;
             }
@@ -92,20 +82,37 @@ public sealed partial class FileRenameRecoveryReconciler(
 
             ownerAudiobookId = journal.AudiobookId.Value;
             ownerAudiobookFileId = journal.AudiobookFileId.Value;
-            var isCompanionFile = FileMutationOwner.IsCompanionFile(ownerAudiobookFileId);
+            isCompanionFile = FileMutationOwner.IsCompanionFile(
+                ownerAudiobookFileId);
             audiobook = await context.Audiobooks
                 .AsNoTracking()
                 .Include(candidate => candidate.Files)
                 .SingleOrDefaultAsync(
                     candidate => candidate.Id == journal.AudiobookId.Value,
-                    cancellationToken)
-                ?? throw new InvalidOperationException(
-                    "An owned file-mutation journal references a missing audiobook before metadata reconciliation.");
+                    cancellationToken);
+            if (audiobook == null)
+            {
+                await MarkNeedsAttentionAsync(
+                    operationId,
+                    "The interrupted owner-bound publication references an audiobook that no longer exists. Filesystem artifacts were preserved.",
+                    cancellationToken);
+                return;
+            }
+
             audiobookFile = ownerAudiobookFileId == 0 || isCompanionFile
                 ? null
-                : audiobook.Files?.SingleOrDefault(file => file.Id == ownerAudiobookFileId)
-                    ?? throw new InvalidOperationException(
-                        "An owned file-mutation journal references a missing audiobook file before metadata reconciliation.");
+                : audiobook.Files?.SingleOrDefault(
+                    file => file.Id == ownerAudiobookFileId);
+            if (!isCompanionFile
+                && ownerAudiobookFileId != 0
+                && audiobookFile == null)
+            {
+                await MarkNeedsAttentionAsync(
+                    operationId,
+                    "The interrupted owner-bound publication references an audiobook file row that no longer exists. Filesystem artifacts were preserved.",
+                    cancellationToken);
+                return;
+            }
         }
 
         if (AfterInitialOwnerBindingLoadedForTestAsync != null)
@@ -115,43 +122,66 @@ public sealed partial class FileRenameRecoveryReconciler(
 
         if (journal.State < FileMutationJournalState.Completed)
         {
-            bool resumed;
-            try
-            {
-                resumed = FileMutationOwner.IsCompanionFile(ownerAudiobookFileId)
-                    ? await ResumeCompanionMoveAsync(
-                        journal,
-                        ownerAudiobookId)
-                    : audiobookFile == null
-                        ? await fileMover.PerformActionOn(
-                            FileAction.Move,
-                            journal.SourcePath,
-                            journal.DestinationPath,
-                            journal.OperationId,
-                            ownerAudiobookId,
-                            audiobookFileId: 0)
-                        : await fileMover.MoveFilePreservingPhysicalIdentityAsync(
-                            journal.SourcePath,
-                            journal.DestinationPath,
-                            journal.SourcePhysicalObjectIdentity,
-                            journal.OperationId,
-                            ownerAudiobookId,
-                            audiobookFile.Id);
-            }
-            catch (Exception exception) when (IsTransientRecoveryFilesystemException(exception))
+            var precommitTargetContent = await ProbeTargetContentAsync(
+                journal,
+                cancellationToken);
+            if (precommitTargetContent == GenerationMatchOutcome.Unavailable)
             {
                 logger.LogWarning(
-                    exception,
-                    "Owner-bound file recovery {OperationId} remains pending because its filesystem source or target is temporarily unavailable",
+                    "Owner-bound file recovery {OperationId} remains pending because its destination content is temporarily unavailable",
                     operationId);
                 return;
             }
 
-            if (!resumed)
+            var sourceContent = await ProbeSourceContentAsync(
+                journal,
+                cancellationToken);
+            if (precommitTargetContent == GenerationMatchOutcome.Match)
+            {
+                var completedState =
+                    sourceContent == GenerationMatchOutcome.Missing
+                        ? FileMutationJournalState.Completed
+                        : FileMutationJournalState.CompletedSourceRetained;
+                await SetRecoveryStateAsync(
+                    operationId,
+                    completedState,
+                    completedState
+                        == FileMutationJournalState.CompletedSourceRetained
+                        ? "The published target was recovered after restart; any surviving source was retained because restart cannot recreate deletion authority."
+                        : null,
+                    cancellationToken);
+                journal.State = completedState;
+                if (isCompanionFile)
+                {
+                    logger.LogInformation(
+                        "Recovered interrupted companion publication {OperationId} without replaying source cleanup",
+                        operationId);
+                    return;
+                }
+            }
+            else if (precommitTargetContent == GenerationMatchOutcome.Missing
+                && sourceContent == GenerationMatchOutcome.Match)
+            {
+                await SetRecoveryStateAsync(
+                    operationId,
+                    FileMutationJournalState.RolledBack,
+                    "The destination was never durably published; the original source remained authoritative.",
+                    cancellationToken);
+                return;
+            }
+            else if (precommitTargetContent == GenerationMatchOutcome.Missing
+                && sourceContent == GenerationMatchOutcome.Unavailable)
+            {
+                logger.LogWarning(
+                    "Owner-bound file recovery {OperationId} remains pending because its source content is temporarily unavailable",
+                    operationId);
+                return;
+            }
+            else
             {
                 await MarkNeedsAttentionAsync(
                     operationId,
-                    "The interrupted organize file mutation could not be resumed safely.",
+                    "The interrupted owner-bound publication is ambiguous. Source and destination artifacts were preserved and no restart mutation was authorized.",
                     cancellationToken);
                 return;
             }
@@ -164,12 +194,14 @@ public sealed partial class FileRenameRecoveryReconciler(
         {
             return;
         }
-        if (journal.State != FileMutationJournalState.Completed
-            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity))
+        if (journal.State is not (
+                FileMutationJournalState.Completed
+                or FileMutationJournalState.CompletedSourceRetained)
+            || string.IsNullOrWhiteSpace(journal.SourceSha256))
         {
             await MarkNeedsAttentionAsync(
                 operationId,
-                "The interrupted organize journal did not reach a verified completed target.",
+                "The interrupted organize journal has no verified operation content proof.",
                 cancellationToken);
             return;
         }
@@ -182,7 +214,7 @@ public sealed partial class FileRenameRecoveryReconciler(
                 cancellationToken);
             return;
         }
-        if (FileMutationOwner.IsCompanionFile(ownerAudiobookFileId))
+        if (isCompanionFile)
         {
             logger.LogInformation(
                 "Recovered interrupted companion-file move journal {OperationId} for audiobook {AudiobookId}",
@@ -195,101 +227,147 @@ public sealed partial class FileRenameRecoveryReconciler(
             .Include(candidate => candidate.Files)
             .SingleOrDefaultAsync(
                 candidate => candidate.Id == ownerAudiobookId,
-                cancellationToken)
-            ?? throw new InvalidOperationException(
-                "The audiobook disappeared before its completed organize journal could be reconciled.");
+                cancellationToken);
+        if (trackedAudiobook == null)
+        {
+            await MarkNeedsAttentionAsync(
+                operationId,
+                "The completed organize publication references an audiobook that no longer exists. Filesystem artifacts were preserved.",
+                cancellationToken);
+            return;
+        }
+
         var trackedFile = ownerAudiobookFileId == 0
             ? null
-            : trackedAudiobook.Files?.SingleOrDefault(file => file.Id == ownerAudiobookFileId)
-                ?? throw new InvalidOperationException(
-                    "The audiobook file disappeared before its completed organize journal could be reconciled.");
+            : trackedAudiobook.Files?.SingleOrDefault(
+                file => file.Id == ownerAudiobookFileId);
+        if (ownerAudiobookFileId != 0 && trackedFile == null)
+        {
+            await MarkNeedsAttentionAsync(
+                operationId,
+                "The completed organize publication references an audiobook file row that no longer exists. Filesystem artifacts were preserved.",
+                cancellationToken);
+            return;
+        }
 
-        var targetGeneration = ProbeTargetGeneration(journal);
-        if (targetGeneration == GenerationMatchOutcome.Unavailable)
+        var targetContent = await ProbeTargetContentAsync(
+            journal,
+            cancellationToken);
+        if (targetContent == GenerationMatchOutcome.Unavailable)
         {
             logger.LogWarning(
-                "Completed organize journal {OperationId} remains pending because its destination generation is temporarily unavailable",
+                "Completed organize journal {OperationId} remains pending because its destination content is temporarily unavailable",
                 operationId);
             return;
         }
-        if (targetGeneration == GenerationMatchOutcome.Mismatch)
+        if (targetContent != GenerationMatchOutcome.Match)
         {
-            var sourceGeneration = ProbeSourceGeneration(journal);
-            if (sourceGeneration == GenerationMatchOutcome.Unavailable)
+            var compensationSource = await ProbeSourceContentAsync(
+                journal,
+                cancellationToken);
+            if (compensationSource == GenerationMatchOutcome.Unavailable)
             {
                 logger.LogWarning(
-                    "Completed organize journal {OperationId} remains pending because its compensation source generation is temporarily unavailable",
+                    "Completed organize journal {OperationId} remains pending because its compensation source content is temporarily unavailable",
                     operationId);
                 return;
             }
 
-            var ownerPointsToSource = sourceGeneration == GenerationMatchOutcome.Match
-                ? await OwnerMetadataPointsToSourceAsync(
+            if (compensationSource == GenerationMatchOutcome.Match)
+            {
+                var ownerAtSource = await OwnerMetadataPointsToPathAsync(
                     trackedAudiobook,
                     trackedFile,
-                    journal,
-                    cancellationToken)
-                : false;
-            if (ownerPointsToSource == null)
-            {
-                logger.LogWarning(
-                    "Completed organize journal {OperationId} remains pending because owner path identity is temporarily unavailable",
-                    operationId);
-                return;
-            }
-            if (ownerPointsToSource == true)
-            {
-                if (BeforeOwnerMetadataCommitForTestAsync != null)
-                {
-                    await BeforeOwnerMetadataCommitForTestAsync(operationId);
-                }
-
-                var compensationCommit = await CommitRecoveredOwnerMetadataAsync(
-                    db,
-                    journal,
                     journal.SourcePath,
-                    journal.SourcePhysicalObjectIdentity,
                     cancellationToken);
-                if (compensationCommit == GenerationMatchOutcome.Unavailable)
+                if (ownerAtSource == null)
                 {
                     logger.LogWarning(
-                        "Completed organize journal {OperationId} remains pending because its compensation source generation became temporarily unavailable before owner-metadata reconciliation",
+                        "Completed organize journal {OperationId} remains pending because compensation owner path identity is temporarily unavailable",
                         operationId);
                     return;
                 }
-                if (compensationCommit == GenerationMatchOutcome.Mismatch)
+
+                if (ownerAtSource == true)
                 {
-                    await MarkNeedsAttentionAsync(
-                        operationId,
-                        "The compensation source generation changed before owner metadata could be reconciled.",
-                        cancellationToken);
+                    if (BeforeOwnerMetadataCommitForTestAsync != null)
+                    {
+                        await BeforeOwnerMetadataCommitForTestAsync(operationId);
+                    }
+
+                    var compensationCommit =
+                        await CommitRecoveredOwnerMetadataAsync(
+                            db,
+                            journal,
+                            journal.SourcePath,
+                            cancellationToken);
+                    if (compensationCommit
+                        == GenerationMatchOutcome.Unavailable)
+                    {
+                        logger.LogWarning(
+                            "Completed organize journal {OperationId} remains pending because its compensation source changed availability before reconciliation",
+                            operationId);
+                        return;
+                    }
+
+                    if (compensationCommit
+                        != GenerationMatchOutcome.Match)
+                    {
+                        await MarkNeedsAttentionAsync(
+                            operationId,
+                            "The compensation source content changed before owner metadata could be reconciled.",
+                            cancellationToken);
+                        return;
+                    }
+
+                    logger.LogInformation(
+                        "Reconciled compensated organize journal {OperationId}; owner metadata already points to the retained source",
+                        operationId);
                     return;
                 }
-
-                logger.LogInformation(
-                    "Reconciled compensated organize journal {OperationId}; the original source generation and owner metadata were already restored",
-                    operationId);
-                return;
             }
 
             await MarkNeedsAttentionAsync(
                 operationId,
-                "The completed organize destination no longer identifies the journaled physical file generation.",
+                "The completed organize destination no longer matches the journaled content proof and no authoritative compensation source could be established.",
                 cancellationToken);
             return;
         }
 
-        if (trackedFile != null
-            && (string.IsNullOrWhiteSpace(trackedFile.PhysicalObjectIdentity)
-                || !PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-                    trackedFile.PhysicalObjectIdentity,
-                    journal.SourcePhysicalObjectIdentity)))
+        var ownerPointsToSource = await OwnerMetadataPointsToPathAsync(
+            trackedAudiobook,
+            trackedFile,
+            journal.SourcePath,
+            cancellationToken);
+        if (ownerPointsToSource == null)
         {
-            await MarkNeedsAttentionAsync(
-                operationId,
-                "The tracked audiobook file no longer identifies the source generation owned by the organize journal.",
-                cancellationToken);
+            logger.LogWarning(
+                "Completed organize journal {OperationId} remains pending because owner path identity is temporarily unavailable",
+                operationId);
             return;
+        }
+        if (ownerPointsToSource == false)
+        {
+            var ownerPointsToDestination = await OwnerMetadataPointsToPathAsync(
+                trackedAudiobook,
+                trackedFile,
+                journal.DestinationPath,
+                cancellationToken);
+            if (ownerPointsToDestination == null)
+            {
+                logger.LogWarning(
+                    "Completed organize journal {OperationId} remains pending because destination owner path identity is temporarily unavailable",
+                    operationId);
+                return;
+            }
+            if (ownerPointsToDestination == false)
+            {
+                await MarkNeedsAttentionAsync(
+                    operationId,
+                    "The completed organize owner metadata points to neither the source nor destination path.",
+                    cancellationToken);
+                return;
+            }
         }
 
         if (trackedFile == null)
@@ -320,9 +398,7 @@ public sealed partial class FileRenameRecoveryReconciler(
             }
 
             trackedFile.ApplyPathIdentity(journal.DestinationPath, destinationIdentity);
-            trackedFile.ApplyPhysicalObjectIdentity(
-                journal.TargetPhysicalObjectIdentity,
-                timeProvider.GetUtcNow().UtcDateTime);
+            trackedFile.ClearPhysicalObjectIdentity();
         }
 
         PathNormalizationOutcome normalization;
@@ -365,20 +441,19 @@ public sealed partial class FileRenameRecoveryReconciler(
             db,
             journal,
             journal.DestinationPath,
-            journal.TargetPhysicalObjectIdentity,
             cancellationToken);
         if (ownerMetadataCommit == GenerationMatchOutcome.Unavailable)
         {
             logger.LogWarning(
-                "Completed organize journal {OperationId} remains pending because its destination generation became temporarily unavailable before owner-metadata reconciliation",
+                "Completed organize journal {OperationId} remains pending because its destination content became temporarily unavailable before owner-metadata reconciliation",
                 operationId);
             return;
         }
-        if (ownerMetadataCommit == GenerationMatchOutcome.Mismatch)
+        if (ownerMetadataCommit != GenerationMatchOutcome.Match)
         {
             await MarkNeedsAttentionAsync(
                 operationId,
-                "The completed organize destination changed before owner metadata could be reconciled.",
+                "The completed organize destination content or path changed before owner metadata could be reconciled.",
                 cancellationToken);
             return;
         }
@@ -389,64 +464,4 @@ public sealed partial class FileRenameRecoveryReconciler(
             trackedAudiobook.Id);
     }
 
-    private async Task<bool> ResumeCompanionMoveAsync(
-        FileMutationJournal journal,
-        int audiobookId)
-    {
-        if (!FileMutationOwner.IsRegistrationCompanionFile(
-                journal.AudiobookFileId)
-            || string.IsNullOrWhiteSpace(journal.SourceSha256)
-            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity))
-        {
-            return await fileMover.PerformActionOn(
-                FileAction.Move,
-                journal.SourcePath,
-                journal.DestinationPath,
-                journal.OperationId,
-                audiobookId,
-                FileMutationOwner.CompanionFile);
-        }
-
-        var preparation = await fileMover
-            .PrepareActionForRegistrationDetailedAsync(
-                FilePublicationPlan.Durable(FileAction.Move),
-                journal.SourcePath,
-                journal.DestinationPath,
-                journal.OperationId,
-                journal.TargetPhysicalObjectIdentity,
-                new FilePublicationSourceProof(
-                    journal.SourcePhysicalObjectIdentity,
-                    journal.SourceLength,
-                    journal.SourceSha256),
-                isCompanionFile: true,
-                companionAudiobookId: audiobookId);
-        using var lease = preparation.RegistrationLease;
-        return lease != null
-            && lease.PrepareCleanupRecovery(audiobookId)
-            && lease.CompletePublication()
-                == RegistrationPublicationCompletion.Completed
-            && await fileMover.CompletePreparedMoveAsync(
-                journal.SourcePath,
-                journal.DestinationPath,
-                lease,
-                journal.OperationId);
-    }
-
-    private async Task MarkNeedsAttentionAsync(
-        Guid operationId,
-        string error,
-        CancellationToken cancellationToken)
-    {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var journal = await db.FileMutationJournals
-            .SingleAsync(candidate => candidate.OperationId == operationId, cancellationToken);
-        journal.State = FileMutationJournalState.NeedsAttention;
-        journal.Error = error;
-        journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(cancellationToken);
-        logger.LogWarning(
-            "Organize journal {OperationId} requires attention: {Reason}",
-            operationId,
-            error);
-    }
 }

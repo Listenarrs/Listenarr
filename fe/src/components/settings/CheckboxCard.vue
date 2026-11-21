@@ -17,7 +17,11 @@
 -->
 <template>
   <div class="form-group checkbox-group">
-    <Checkbox :modelValue="modelValue" @update:modelValue="$emit('update:modelValue', $event)">
+    <Checkbox
+      :modelValue="modelValue"
+      :disabled="disabled"
+      @update:modelValue="$emit('update:modelValue', $event)"
+    >
       <span>
         <slot />
         <span class="checkbox-text">
@@ -32,7 +36,7 @@
 <script setup lang="ts">
 import Checkbox from '@/components/form/Checkbox.vue'
 
-defineProps<{ modelValue?: boolean; title: string; description?: string }>()
+defineProps<{ modelValue?: boolean; title: string; description?: string; disabled?: boolean }>()
 </script>
 
 <style scoped>

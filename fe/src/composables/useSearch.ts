@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { ref, computed } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
@@ -47,6 +47,10 @@ type AudibleMetadataRecord = Record<string, unknown> & {
   Description?: string
   narrators?: SearchResult['narrators']
   Narrators?: SearchResult['narrators']
+  // As the metadata endpoint gives them: Audible's series (name, ASIN, position) and genres
+  series?: { name?: string; asin?: string; position?: string }[]
+  genres?: ({ name?: string } | string)[]
+  publishDate?: string
   authors?: SearchResult['authors']
   Authors?: SearchResult['authors']
 }
@@ -56,12 +60,25 @@ type AudibleMetadataResponse = {
   source?: string
 } & AudibleMetadataRecord
 
-export function useSearch() {
+type SearchType = 'asin' | 'title' | 'isbn' | null
+
+// options.searchType: shared state to keep the detected search type in (Add New keeps it in its
+// search store, with the results it belongs to)
+// The first of a record's series, as a search result holds it: its name, number and ASIN
+function asinResultSeries(
+  series: AudibleMetadataRecord['series'],
+): Pick<SearchResult, 'series' | 'seriesNumber' | 'seriesAsin'> {
+  const first = Array.isArray(series) ? series.find((item) => item?.name) : undefined
+  if (!first) return {}
+  return { series: first.name, seriesNumber: first.position, seriesAsin: first.asin }
+}
+
+export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
   // Reactive state
   const searchQuery = ref('')
   const searchLanguage = ref('us')
   const preferredSearchLanguage = ref('english')
-  const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
+  const searchType = options.searchType ?? ref<SearchType>(null)
   const isSearching = ref(false)
   const searchError = ref('')
   const searchStatus = ref('')
@@ -70,12 +87,18 @@ export function useSearch() {
   const searchAbortController = ref<AbortController | null>(null)
 
   // Computed properties
+  // The type the text in the field would be searched as, for the hint under it
+  const inputType = computed<SearchType>(() =>
+    searchQuery.value.trim() ? detectSearchType(searchQuery.value) : null,
+  )
+
   const searchPlaceholder = computed(() => {
-    if (searchType.value === 'asin') {
+    const type = inputType.value ?? searchType.value
+    if (type === 'asin') {
       return 'Enter ASIN (e.g., B08G9PRS1K)'
-    } else if (searchType.value === 'title') {
+    } else if (type === 'title') {
       return 'Title, author, or ASIN (e.g., The Hobbit)'
-    } else if (searchType.value === 'isbn') {
+    } else if (type === 'isbn') {
       return 'Enter ISBN (e.g., 9780547928227 or 0547928220)'
     }
     return 'Search by ASIN, ISBN, or title'
@@ -113,23 +136,10 @@ export function useSearch() {
     return 'title'
   }
 
+  // Typing prepares the next search; it neither stops the running one (only Cancel does) nor changes
+  // the type of the results on screen (searchType), which belongs to the search that found them
   const handleSearchInput = () => {
     searchError.value = ''
-    const query = searchQuery.value.trim()
-
-    if (isSearching.value) {
-      try {
-        cancelSearch()
-      } catch (e) {
-        logger.debug('Error cancelling previous search on input', e)
-      }
-    }
-
-    if (query) {
-      searchType.value = detectSearchType(query)
-    } else {
-      searchType.value = null
-    }
   }
 
   const performSearch = async () => {
@@ -356,6 +366,16 @@ export function useSearch() {
           : Array.isArray(meta.Authors)
             ? (meta.Authors as SearchResult['authors'])
             : undefined,
+        // The record's series, genres and dates, as a title search's results carry them: a
+        // book added from this result (Library Import's Find Match) keeps them
+        ...asinResultSeries(meta.series),
+        genres: Array.isArray(meta.genres)
+          ? meta.genres
+              .map((genre) => (typeof genre === 'string' ? genre : (genre?.name ?? '')))
+              .filter(Boolean)
+          : undefined,
+        releaseDate: typeof meta.releaseDate === 'string' ? meta.releaseDate : undefined,
+        publishDate: typeof meta.publishDate === 'string' ? meta.publishDate : undefined,
       }
 
       return [mapped]
@@ -457,6 +477,7 @@ export function useSearch() {
 
     // Computed
     searchPlaceholder,
+    inputType,
 
     // Methods
     detectSearchType,

@@ -15,30 +15,20 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
     [Trait("Category", "Application")]
     public sealed class ScanQueueSemanticsTests : BaseTests
     {
-        private static readonly ScanPathPhysicalIdentity PhysicalIdentity = new(
-            "scan-queue-test-boundary",
-            "scan-queue-test-root");
-
         [Fact]
-        public void ScanJob_Serialization_DoesNotExposePhysicalIdentity()
+        public void ScanJob_Serialization_DoesNotExposeAuthorizationMode()
         {
             var job = new ScanJob
             {
-                AudiobookId = 42,
-                PhysicalIdentity = PhysicalIdentity
+                AudiobookId = 42
             };
 
             var json = JsonSerializer.Serialize(job);
 
             Assert.DoesNotContain(
-                nameof(ScanJob.PhysicalIdentity),
-                json,
-                StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(
                 nameof(ScanJob.AuthorizationMode),
                 json,
                 StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(PhysicalIdentity, job.PhysicalIdentity);
         }
 
         [Theory]
@@ -62,13 +52,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 audiobook,
                 first,
                 CreateHostIdentity(first, root, caseSensitivity),
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             var secondJob = await queue.EnqueueScanAsync(new ScanEnqueueCommand(
                 audiobook,
                 second,
                 CreateHostIdentity(second, root, caseSensitivity),
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
 
             Assert.Equal(shouldDedupe, firstJob == secondJob);
@@ -92,14 +80,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 audiobook,
                 path,
                 identity,
-                PhysicalIdentity,
                 IsAuthoritativeScope: false,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             var authoritative = await queue.EnqueueScanAsync(new ScanEnqueueCommand(
                 audiobook,
                 path,
                 identity,
-                PhysicalIdentity,
                 IsAuthoritativeScope: true,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
 
@@ -120,7 +106,6 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 audiobook,
                 path,
                 CreateUnixIdentity(path, FileSystemCaseSensitivity.Sensitive),
-                PhysicalIdentity,
                 IsAuthoritativeScope: false,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             Assert.True(queue.Reader.TryRead(out _));
@@ -165,13 +150,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 audiobook,
                 firstPath,
                 CreateUnixIdentity(firstPath, firstSensitivity),
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             var secondJob = await queue.EnqueueScanAsync(new ScanEnqueueCommand(
                 audiobook,
                 secondPath,
                 CreateUnixIdentity(secondPath, secondSensitivity),
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
 
             Assert.Equal(shouldDedupe, firstJob == secondJob);
@@ -200,13 +183,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 audiobook,
                 windowsPath,
                 windowsIdentity,
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
             var secondJob = await queue.EnqueueScanAsync(new ScanEnqueueCommand(
                 audiobook,
                 unixPath,
                 CreateUnixIdentity(unixPath, FileSystemCaseSensitivity.Insensitive),
-                PhysicalIdentity,
                 AuthorizationMode: ScanAuthorizationMode.PreauthorizedPath));
 
             Assert.NotEqual(firstJob, secondJob);
@@ -324,8 +305,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     [],
                     1,
                     "initial-worker",
-                    1),
-                PhysicalIdentity);
+                    1));
             var originalId = Assert.IsType<Guid>(original);
             Assert.True(queue.Reader.TryRead(out var originalJob));
             Assert.Equal("/library/book", originalJob.Path);
@@ -401,12 +381,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
 
             var firstJob = await queue.EnqueueMoveHandoffScanAsync(
                 audiobook,
-                firstClaim,
-                PhysicalIdentity);
+                firstClaim);
             var conflictingJob = await queue.EnqueueMoveHandoffScanAsync(
                 audiobook,
-                conflictingClaim,
-                PhysicalIdentity);
+                conflictingClaim);
 
             Assert.NotNull(firstJob);
             Assert.Null(conflictingJob);

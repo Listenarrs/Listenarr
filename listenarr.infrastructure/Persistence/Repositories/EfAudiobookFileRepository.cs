@@ -61,7 +61,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 var page = await _db.AudiobookFiles
                     .AsNoTracking()
                     .Where(f => f.Id > lastSeenId)
-                    .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null)
+                    // A size that is missing, or is the proc-link lstat sentinel an
+                    // earlier registration recorded, is missing metadata too.
+                    .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null
+                        || f.Size == null || f.Size == AudiobookFile.ProcLinkLstatSize)
                     .Where(f => f.PathSyntax == null || f.PathSyntax == hostSyntax)
                     .OrderBy(f => f.Id)
                     .Take(pageSize)

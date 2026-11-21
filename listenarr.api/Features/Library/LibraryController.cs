@@ -220,6 +220,19 @@ namespace Listenarr.Api.Features.Library
                 cancellationToken);
         }
 
+        [HttpGet("{id}/delete-capabilities")]
+        public async Task<IActionResult> GetDeleteCapabilities(
+            int id,
+            CancellationToken cancellationToken = default)
+        {
+            var capabilities = await _deleteWorkflow.GetCapabilitiesAsync(
+                id,
+                cancellationToken);
+            return capabilities == null
+                ? NotFound(new { message = "Audiobook not found" })
+                : Ok(capabilities);
+        }
+
         /// <summary>
         /// Delete multiple audiobooks in a single transaction.
         /// </summary>

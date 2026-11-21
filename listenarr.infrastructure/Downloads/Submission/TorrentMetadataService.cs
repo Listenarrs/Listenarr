@@ -87,57 +87,6 @@ public sealed class TorrentMetadataService : ITorrentMetadataService
         var end = magnetUri.IndexOf('&', start);
         var value = Uri.UnescapeDataString(
             magnetUri[start..(end < 0 ? magnetUri.Length : end)]).Trim();
-        if (value.Length == 40 && value.All(Uri.IsHexDigit))
-        {
-            return value.ToUpperInvariant();
-        }
-
-        return value.Length == 32 && TryDecodeBase32(value, out var bytes)
-            ? Convert.ToHexString(bytes)
-            : null;
-    }
-
-    private static bool TryDecodeBase32(string value, out byte[] decoded)
-    {
-        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-        decoded = new byte[20];
-        var outputIndex = 0;
-        var buffer = 0;
-        var bits = 0;
-
-        foreach (var character in value.ToUpperInvariant())
-        {
-            var digit = alphabet.IndexOf(character);
-            if (digit < 0)
-            {
-                decoded = [];
-                return false;
-            }
-
-            buffer = (buffer << 5) | digit;
-            bits += 5;
-            if (bits < 8)
-            {
-                continue;
-            }
-
-            bits -= 8;
-            if (outputIndex >= decoded.Length)
-            {
-                decoded = [];
-                return false;
-            }
-
-            decoded[outputIndex++] = (byte)(buffer >> bits);
-            buffer &= (1 << bits) - 1;
-        }
-
-        if (outputIndex != 20 || bits != 0)
-        {
-            decoded = [];
-            return false;
-        }
-
-        return true;
+        return TorrentInfoHash.ToHex(value)?.ToUpperInvariant();
     }
 }

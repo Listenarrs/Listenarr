@@ -248,21 +248,16 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var liveIdentity = anchor.GetDirectoryObjectIdentity();
-            if (!anchor.MatchesManagedDirectoryIdentity(
-                    rootMatch.Root.DirectoryObjectIdentityVersion,
-                    rootMatch.Root.DirectoryObjectIdentity)
-                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+            if (!BoundaryVisibilityMatchesOrThrowUnavailable(
                     anchor,
-                    "The managed root is temporarily unavailable while its authorized physical generation is being verified."))
+                    "The managed root is temporarily unavailable while its current path is being verified."))
             {
                 throw new InvalidOperationException(
-                    "The managed root no longer identifies its authorized physical generation.");
+                    "The managed root changed while its current path was being verified.");
             }
 
             return new ManagedLibraryBoundaryAuthorization(
                 rootMatch.Root.Id,
-                liveIdentity,
                 anchor);
         }
         catch
@@ -379,17 +374,16 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if ((!ignoreUnavailableReason
-                    && !string.IsNullOrWhiteSpace(identityUnavailableReason))
-                || !boundary.MatchesManagedDirectoryIdentity(
-                    expectedIdentityVersion,
-                    expectedIdentity)
-                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+            _ = expectedIdentityVersion;
+            _ = expectedIdentity;
+            _ = identityUnavailableReason;
+            _ = ignoreUnavailableReason;
+            if (!BoundaryVisibilityMatchesOrThrowUnavailable(
                     boundary,
-                    "The managed root boundary is temporarily unavailable while its authorized physical generation is being verified."))
+                    "The managed root boundary is temporarily unavailable while its current path is being verified."))
             {
                 throw new InvalidOperationException(
-                    "The managed root boundary no longer identifies its authorized physical generation.");
+                    "The managed root boundary changed while its current path was being verified.");
             }
 
             var current = boundary.Duplicate();
@@ -400,7 +394,12 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
                         boundaryPath,
                         semantics))
                 {
-                    var relative = Path.GetRelativePath(boundaryPath, parentPath);
+                    if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                            boundaryPath, parentPath, semantics, out var relative))
+                    {
+                        throw new InvalidOperationException(
+                            "The authorized directory parent escaped its managed root boundary.");
+                    }
                     foreach (var segment in relative.Split(
                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                         StringSplitOptions.RemoveEmptyEntries))

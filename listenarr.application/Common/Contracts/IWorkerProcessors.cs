@@ -55,7 +55,8 @@ namespace Listenarr.Application.Common.Contracts
         string Target,
         Guid HandoffId,
         int MoveHistoryId,
-        bool MoveHistoryCreated);
+        bool MoveHistoryCreated,
+        bool SourceRetained = false);
 
     public interface IMoveJobProcessor
     {

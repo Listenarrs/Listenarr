@@ -21,6 +21,10 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
+import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
+import { useConfigurationStore } from '@/stores/configuration'
+import { buildSeriesFields } from '@/utils/seriesUtils'
+import type { SeriesEntry } from '@/utils/seriesUtils'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
 
 export interface LibraryImportItem {
@@ -41,6 +45,8 @@ export interface LibraryImportItem {
   selectedMatch: SearchResult | null
   hasSearched: boolean // true once auto-search was attempted
   isSearching: boolean // currently in-flight
+  // Why the last import dropped the match (its Audible record could not be found)
+  matchError?: string
   // Selection
   selected: boolean
 }
@@ -63,6 +69,24 @@ function pickBestMatch(results: SearchResult[], detectedAuthor?: string): Search
     return { r, match }
   })
   return scored.find((s) => s.match)?.r ?? results[0] ?? null
+}
+
+// The Audible catalogue has no usable record for the match's ASIN in its region: the book must not
+// be imported without it, the user picks the match (and its region) again
+class MatchRecordNotFoundError extends Error {}
+
+function regionLabel(region: string): string {
+  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
+}
+
+type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
+
+// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
+// stub: an ASIN but no title) and tag each one with the region it came from.
+function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
+  return results
+    .filter((result) => !(result.asin && !result.title))
+    .map((result) => ({ ...result, region: result.region || region }))
 }
 
 function normalizeGenres(genres: unknown): string[] | undefined {
@@ -100,14 +124,15 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
       ? result.authors.map((a) => a.name ?? '').filter(Boolean)
       : []
 
-  // series may come back as AudibleSeries[] from the search endpoint
+  // series may come back as AudibleSeries[] from the search endpoint. A book can belong to
+  // more than one series (Audnexus seriesPrimary/seriesSecondary), so every entry becomes a
+  // membership; the scalar fields stay populated from the primary for older consumers.
   const seriesRaw = result.series as unknown
-  const seriesItem = Array.isArray(seriesRaw)
-    ? (seriesRaw as Array<{ name?: string; asin?: string; position?: string }>)[0]
-    : null
-  const series = seriesItem?.name ?? (typeof seriesRaw === 'string' ? seriesRaw : undefined)
-  const seriesNumber = seriesItem?.position ?? result.seriesNumber
-  const seriesAsin = seriesItem?.asin ?? result.seriesAsin
+  const seriesEntries = Array.isArray(seriesRaw) ? (seriesRaw as SeriesEntry[]) : []
+  const seriesFields = buildSeriesFields(seriesEntries)
+  const series = seriesFields.series ?? (typeof seriesRaw === 'string' ? seriesRaw : undefined)
+  const seriesNumber = seriesFields.seriesNumber ?? result.seriesNumber
+  const seriesAsin = seriesFields.seriesAsin ?? result.seriesAsin
 
   return {
     title: result.title ?? '',
@@ -117,6 +142,9 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
     series,
     seriesNumber,
     seriesAsin,
+    ...(seriesFields.seriesMemberships
+      ? { seriesMemberships: seriesFields.seriesMemberships }
+      : {}),
     description: result.description,
     publisher: result.publisher,
     language: result.language,
@@ -128,6 +156,7 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
     narrators: result.narrators?.map((n) => n.name ?? '').filter(Boolean),
     publishYear: result.releaseDate?.substring(0, 4) ?? result.publishDate?.substring(0, 4),
     metadataSource: result.metadataSource,
+    region: result.region,
   }
 }
 
@@ -135,9 +164,20 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const items = ref<Record<string, LibraryImportItem>>({})
   const lookupQueue = ref<string[]>([])
   const isProcessing = ref(false)
+  // Find Match searches running in their modals: importing waits until none is left, so a row can't
+  // be imported while its match is being chosen
+  const findMatchSearchCount = ref(0)
+  const findMatchSearching = computed(() => findMatchSearchCount.value > 0)
+  function findMatchSearchStarted() {
+    findMatchSearchCount.value += 1
+  }
+  function findMatchSearchEnded() {
+    findMatchSearchCount.value = Math.max(0, findMatchSearchCount.value - 1)
+  }
   const rootFolderId = ref<number | null>(null)
   const scanStatus = ref<'idle' | 'scanning' | 'done' | 'error'>('idle')
   const scanError = ref<string | null>(null)
+  const scanWarnings = ref<string[]>([])
   const lastScannedAt = ref<string | null>(null)
   const action = ref<'none' | 'move' | 'hardlink/copy'>('none')
   const monitor = ref<'none' | 'all'>('all')
@@ -154,12 +194,29 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Scan ─────────────────────────────────────────────────────────────────
 
+  // Only the latest load or scan may write the state: starting one stops listening to the previous
+  // scan, and an older one answering late is ignored
+  let currentOperation = 0
+  let stopCurrentScan: (() => void) | null = null
+
+  function _beginOperation(folderId: number): number {
+    stopCurrentScan?.()
+    stopCurrentScan = null
+    // Start Matching works on the rows shown: another folder's rows replace them, so it stops
+    if (folderId !== rootFolderId.value) stopProcessing()
+    return ++currentOperation
+  }
+
   async function initFromRootFolder(id: number) {
+    const operation = _beginOperation(id)
     rootFolderId.value = id
     scanStatus.value = 'idle'
+    scanWarnings.value = []
     try {
       const saved = await apiService.getSavedUnmatchedFiles(id)
+      if (operation !== currentOperation) return
       if (saved.lastScannedAt) lastScannedAt.value = saved.lastScannedAt
+      scanWarnings.value = saved.warnings ?? []
       const persisted = _loadPersistedMatches(id)
       const newItems: Record<string, LibraryImportItem> = {}
       for (const item of saved.items) {
@@ -172,6 +229,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             hasSearched: existing.hasSearched,
             isSearching: false,
             selected: existing.selected,
+            matchError: existing.matchError,
           }
         } else if (p) {
           newItems[item.fullPath] = {
@@ -180,6 +238,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             hasSearched: p.hasSearched,
             isSearching: false,
             selected: p.selected,
+            matchError: p.matchError,
           }
         } else {
           newItems[item.fullPath] = unmatchedToImportItem(item)
@@ -193,14 +252,21 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   async function triggerScan(id: number) {
+    const operation = _beginOperation(id)
+    const isCurrent = () => operation === currentOperation
+    // Matches already made in this folder carry over to the new results, even when it wasn't loaded
+    const persisted = _loadPersistedMatches(id)
+    if (rootFolderId.value !== id) {
+      // Another folder's rows must not show under this one, even if the scan fails
+      items.value = {}
+      lastScannedAt.value = null
+    }
     rootFolderId.value = id
     scanStatus.value = 'scanning'
     scanError.value = null
-    try {
-      localStorage.removeItem(_storageKey(id))
-    } catch {
-      /* non-fatal */
-    }
+    scanWarnings.value = []
+    // The saved matches stay until this scan's results replace them: a scan that replaces this one
+    // reads them again
 
     let jobId = ''
     let settled = false
@@ -215,24 +281,29 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       }
     }
 
+    stopCurrentScan = cleanUp
+
     async function onComplete(completedJobId: string) {
-      if (settled) return
+      if (settled || !isCurrent()) return
       settled = true
       cleanUp()
       try {
         const response = await apiService.getUnmatchedResults(completedJobId)
-        _populateFromItems(response.items)
+        if (!isCurrent()) return
+        _populateFromItems(response.items, persisted)
+        scanWarnings.value = response.warnings ?? []
         _persistMatches()
         lastScannedAt.value = new Date().toISOString()
         scanStatus.value = 'done'
       } catch (e) {
+        if (!isCurrent()) return
         scanStatus.value = 'error'
         scanError.value = (e as Error)?.message ?? 'Failed to fetch results'
       }
     }
 
     function onFailed(error?: string) {
-      if (settled) return
+      if (settled || !isCurrent()) return
       settled = true
       cleanUp()
       scanStatus.value = 'error'
@@ -253,9 +324,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     try {
       const result = await apiService.scanUnmatchedFiles(id)
       jobId = result.jobId
-      if (settled) return // SignalR already handled it before this line
+      if (settled || !isCurrent()) return // SignalR already handled it, or another scan replaced it
       // Poll once immediately — handles fast scans
       const check = await apiService.getUnmatchedResults(jobId)
+      if (!isCurrent()) return
       if (check.status === 'Completed') {
         await onComplete(jobId)
       } else if (check.status === 'Failed') {
@@ -278,10 +350,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
   }
 
-  function _populateFromItems(scanItems: UnmatchedFileItem[]) {
+  function _populateFromItems(
+    scanItems: UnmatchedFileItem[],
+    persisted: Record<string, PersistedEntry> = {},
+  ) {
     const newItems: Record<string, LibraryImportItem> = {}
     for (const item of scanItems) {
-      const existing = items.value[item.fullPath]
+      const existing = items.value[item.fullPath] ?? persisted[item.fullPath]
       const fresh = unmatchedToImportItem(item)
       newItems[item.fullPath] = existing
         ? {
@@ -289,6 +364,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             selectedMatch: existing.selectedMatch,
             hasSearched: existing.hasSearched,
             selected: existing.selected,
+            matchError: existing.matchError,
           }
         : fresh
     }
@@ -301,6 +377,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     selectedMatch: SearchResult | null
     hasSearched: boolean
     selected: boolean
+    matchError?: string
   }
 
   function _storageKey(folderId: number): string {
@@ -315,6 +392,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         selectedMatch: item.selectedMatch,
         hasSearched: item.hasSearched,
         selected: item.selected,
+        matchError: item.matchError,
       }
     }
     try {
@@ -334,7 +412,33 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
   }
 
+  // ─── Region-aware search ──────────────────────────────────────────────────
+
+  async function _configuredRegion(): Promise<string> {
+    const configStore = useConfigurationStore()
+    if (!configStore.applicationSettings) await configStore.loadApplicationSettings()
+    return normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
+  }
+
+  // Search one Audible region: the one given (picked by the user) or the configured one. There is no
+  // automatic switch to another catalogue. Results are tagged with their region, so the import
+  // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
+  async function searchInRegion(
+    params: AdvancedSearchParams,
+    region?: string,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    const searchRegion = region || (await _configuredRegion())
+    const results = signal
+      ? await apiService.advancedSearch({ ...params, region: searchRegion }, signal)
+      : await apiService.advancedSearch({ ...params, region: searchRegion })
+    return usableInRegion(results, searchRegion)
+  }
+
   // ─── Queue Processing ─────────────────────────────────────────────────────
+
+  // Only the latest Start Matching run may go on: a stopped one ends after its search in flight
+  let currentMatchingRun = 0
 
   function startProcessing() {
     const unsearched = itemList.value.filter((i) => !i.hasSearched).map((i) => i.id)
@@ -346,6 +450,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   function stopProcessing() {
+    currentMatchingRun++
     lookupQueue.value = []
     isProcessing.value = false
     // Clear any in-flight isSearching flags
@@ -358,7 +463,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   async function processNext() {
-    while (isProcessing.value && lookupQueue.value.length > 0) {
+    const run = ++currentMatchingRun
+    while (run === currentMatchingRun && isProcessing.value && lookupQueue.value.length > 0) {
       const id: string = lookupQueue.value[0]!
       lookupQueue.value = lookupQueue.value.slice(1)
 
@@ -370,11 +476,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       try {
         const searchParams = buildLibraryImportSearchParams(item, 5)
         const byAsin = !!searchParams.asin
-        const results = await apiService.advancedSearch(searchParams)
+        const results = await searchInRegion(searchParams)
         metadataFetchCount.value++
         // ASIN results are authoritative — take the first result directly without author comparison
         const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
-        const current = items.value[id]!
+        // The row may have left the page meanwhile (another folder loaded or scanned)
+        const current = items.value[id]
+        if (!current) continue
         items.value = {
           ...items.value,
           [id]: {
@@ -395,20 +503,28 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           }
       }
     }
-    isProcessing.value = false
+    if (run === currentMatchingRun) isProcessing.value = false
   }
 
   // ─── Per-row manual search ────────────────────────────────────────────────
 
-  async function searchItem(id: string, query: string) {
+  // Manual search box detection, not a series-identifier guard: a real Audible product ASIN
+  // is not always B0-prefixed (ISBN-shaped ones, ten digits or nine and an X, are valid
+  // ten-character ASINs on the catalogue too), so this stays the loose ten-character check
+  // rather than looksLikeAsin, which is deliberately narrower for series-membership
+  // identifiers.
+  const MANUAL_SEARCH_ASIN_PATTERN = /^[A-Z0-9]{10}$/i
+
+  async function searchItem(id: string, query: string, region?: string) {
     const item = items.value[id]
     if (!item) return
 
     items.value[id] = { ...item, isSearching: true }
     try {
-      const isAsin = /^[A-Z0-9]{10}$/i.test(query.trim())
-      const results = await apiService.advancedSearch(
+      const isAsin = MANUAL_SEARCH_ASIN_PATTERN.test(query.trim())
+      const results = await searchInRegion(
         isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
+        region,
       )
       items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
       return results
@@ -423,7 +539,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   function selectMatch(id: string, match: SearchResult) {
     const item = items.value[id]
     if (!item) return
-    items.value[id] = { ...item, selectedMatch: match, hasSearched: true, selected: true }
+    items.value[id] = {
+      ...item,
+      selectedMatch: match,
+      hasSearched: true,
+      selected: true,
+      matchError: undefined,
+    }
     _persistMatches()
   }
 
@@ -459,27 +581,44 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // Search results often have authors: [{ asin, name: undefined }] — the full
   // metadata fetch is the only way to get real author/narrator names.
   async function _enrichMetadata(match: SearchResult): Promise<AudibleBookMetadata> {
-    const base = matchToMetadata(match)
+    // A match saved before regions were recorded has none: use (and keep) the configured region
+    const region = match.region || (await _configuredRegion())
+    const base = { ...matchToMetadata(match), region }
     if (!match.asin) return base
+    const notFound = new MatchRecordNotFoundError(
+      `Audible ${regionLabel(region)} has no record for ${match.asin}. ` +
+        'Use "Search for a match" to pick the book again, in the right region.',
+    )
+    type AudiblePayload = {
+      asin?: string
+      title?: string
+      authors?: { name?: string }[]
+      narrators?: { name?: string }[]
+      series?: SeriesEntry[]
+    }
+    let resp: { source?: string; metadata?: AudiblePayload } | AudiblePayload
     try {
-      type AudiblePayload = {
-        authors?: { name?: string }[]
-        narrators?: { name?: string }[]
-      }
-      const resp = await apiService.getAudibleMetadata<
+      resp = await apiService.getAudibleMetadata<
         { source?: string; metadata?: AudiblePayload } | AudiblePayload
-      >(match.asin)
-      const raw: AudiblePayload =
-        resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)
-      const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
-      const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
-      return {
-        ...base,
-        ...(enrichedAuthors.length > 0 ? { authors: enrichedAuthors } : {}),
-        ...(enrichedNarrators.length > 0 ? { narrators: enrichedNarrators } : {}),
-      }
-    } catch {
-      return base
+      >(match.asin, region)
+    } catch (e: unknown) {
+      if ((e as { status?: number })?.status === 404) throw notFound
+      throw new Error(`Audible metadata lookup failed: ${(e as Error)?.message ?? 'unknown error'}`)
+    }
+    const raw: AudiblePayload =
+      (resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)) ?? {}
+    // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
+    if (raw.asin && !raw.title) throw notFound
+    const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
+    const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
+    // The product record is the better source of series data than the search match, and
+    // its memberships and legacy scalars have to move together.
+    const enrichedSeries = buildSeriesFields(raw.series)
+    return {
+      ...base,
+      ...(enrichedAuthors.length > 0 ? { authors: enrichedAuthors } : {}),
+      ...(enrichedNarrators.length > 0 ? { narrators: enrichedNarrators } : {}),
+      ...(enrichedSeries.seriesMemberships ? enrichedSeries : {}),
     }
   }
 
@@ -568,6 +707,24 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         _persistMatches()
         imported++
       } catch (e) {
+        if (e instanceof MatchRecordNotFoundError) {
+          // Leave the row unresolved, with the reason, rather than import a book with no metadata.
+          // Only if it still holds the match that failed: a match chosen meanwhile stays.
+          const current = items.value[item.id]
+          if (current && current.selectedMatch === match) {
+            items.value = {
+              ...items.value,
+              [item.id]: {
+                ...current,
+                selectedMatch: null,
+                hasSearched: true,
+                selected: false,
+                matchError: e.message,
+              },
+            }
+            _persistMatches()
+          }
+        }
         const msg = `${item.folderName}: ${(e as Error)?.message ?? 'Import failed'}`
         importErrors.value.push(msg)
         logger.debug('[libraryImport] Import error:', msg)
@@ -582,9 +739,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     items,
     lookupQueue,
     isProcessing,
+    findMatchSearching,
+    findMatchSearchStarted,
+    findMatchSearchEnded,
     rootFolderId,
     scanStatus,
     scanError,
+    scanWarnings,
     lastScannedAt,
     action,
     monitor,
@@ -603,6 +764,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     stopProcessing,
     processNext,
     searchItem,
+    searchInRegion,
+    configuredRegion: _configuredRegion,
     selectMatch,
     clearMatch,
     toggleSelect,

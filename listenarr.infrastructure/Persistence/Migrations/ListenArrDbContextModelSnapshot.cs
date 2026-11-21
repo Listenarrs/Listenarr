@@ -991,6 +991,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("None");
 
+                    b.Property<bool>("ForceCopyAndRetainSource")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("IdentityKeyVersion")
                         .HasColumnType("INTEGER");
 
@@ -1034,6 +1037,13 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceCleanupMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("RetainSource");
+
                     b.Property<string>("SourceDirectoryCleanupState")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1055,6 +1065,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("SourcePathSyntax")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("SourcePolicyRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourceRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourceStorageContractRevision")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1080,6 +1099,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("TargetPathSyntax")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TargetPolicyRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetStorageContractRevision")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -1395,8 +1423,25 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("Unknown");
 
+                    b.Property<int>("StorageContractRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("WeakStoragePolicyRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("WeakStorageSourceCleanupPolicy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("RetainSource");
 
                     b.HasKey("Id");
 
@@ -1650,6 +1695,53 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("SeriesCacheEntries");
                 });
 
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.WeakStorageScanCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AudiobookFileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedPhysicalObjectIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedResolvedPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedStoredPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ScanToken")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanToken");
+
+                    b.HasIndex("AudiobookId", "ConfirmedAt", "ExpiresAt");
+
+                    b.ToTable("WeakStorageScanCandidates", (string)null);
+                });
+
             modelBuilder.Entity("Listenarr.Domain.Configuration.ApiConfiguration", b =>
                 {
                     b.Property<string>("Id")
@@ -1714,6 +1806,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("AudnexusApiUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("AutomaticSearchBookDelaySeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchCooldownHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchIntervalHours")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("CompletedFileAction")
                         .HasColumnType("INTEGER");
@@ -1856,6 +1957,41 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("ApplicationSettings");
                 });
 
+            modelBuilder.Entity("Listenarr.Domain.Downloads.BlockedRelease", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("BlockedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReleaseIdentifier")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId", "ReleaseIdentifier")
+                        .IsUnique();
+
+                    b.ToTable("BlockedReleases");
+                });
+
             modelBuilder.Entity("Listenarr.Domain.Downloads.CompatibilityFilePublicationJournal", b =>
                 {
                     b.Property<Guid>("OperationId")
@@ -1863,6 +1999,12 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CleanupOwner")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1873,6 +2015,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4096)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("DestinationPolicyRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DestinationRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DestinationStorageContractRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("EffectiveAction")
                         .HasColumnType("INTEGER");
 
@@ -1880,11 +2031,22 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ExpectedBatchMemberCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExpectedBatchSourceManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsCompanionFile")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("ProtocolVersion")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("QuarantinePath")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("RequestedAction")
                         .HasColumnType("INTEGER");
@@ -1900,10 +2062,19 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4096)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("SourcePolicyRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourceRootFolderId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("SourceSha256")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("SourceStorageContractRevision")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("State")
                         .HasColumnType("INTEGER");
@@ -1921,6 +2092,8 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("OperationId");
 
                     b.HasIndex("AudiobookId");
+
+                    b.HasIndex("BatchId");
 
                     b.HasIndex("State");
 
@@ -2287,6 +2460,96 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RemotePathMappings");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Downloads.VerifiedFileRenameJournal", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AudiobookFileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DestinationPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DestinationRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DestinationStorageContractRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedBatchManifestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ExpectedBatchMemberCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RetirementPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SourceLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceStorageContractRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StagingPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("AudiobookId");
+
+                    b.HasIndex("BatchId");
+
+                    b.HasIndex("State");
+
+                    b.ToTable("VerifiedFileRenameJournals", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Identity.User", b =>
