@@ -26,8 +26,8 @@ const source = {
   leagues: `${importRoot}/Jules Verne/Twenty Thousand Leagues Under the Sea/Twenty Thousand Leagues Under the Sea.m4b`,
 }
 
-const monitorSelect = (page: Page) => page.getByLabel(/^Monitor:/)
-const importActionSelect = (page: Page) => page.getByLabel(/^On import:/)
+const monitorSelect = (page: Page) => page.getByRole('combobox', { name: 'Monitor:' })
+const importActionSelect = (page: Page) => page.getByRole('combobox', { name: /^On import:/ })
 
 /** Scans E2E Import and matches its books; Pellucidar stays unmatched. */
 async function scanAndMatch(page: Page) {
