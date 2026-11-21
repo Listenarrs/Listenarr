@@ -1199,7 +1199,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             CompanionPublicationProbe? probe = null,
             IFilePublicationSourceCapability? sourceCapability = null,
             IFilePublicationCapabilityResolver? publicationResolver = null,
-            Func<string, Audiobook>? otherBook = null)
+            Func<string, Audiobook>? otherBook = null,
+            Func<IAudiobookRepository, IAudiobookRepository>? decorateAudiobookRepository = null)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join([libraryRoot, .. sourceFolderParts ?? ["Old"]]);
@@ -1241,7 +1242,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     configureFileMover?.Invoke(mover);
                 },
                 filePublicationSourceCapabilityOverride: sourceCapability,
-                filePublicationCapabilityResolverOverride: publicationResolver);
+                filePublicationCapabilityResolverOverride: publicationResolver,
+                decorateAudiobookRepository: decorateAudiobookRepository);
             db.Audiobooks.Add(new Audiobook
             {
                 Id = 5,
@@ -1635,6 +1637,28 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
 
         private static AudiobookFile OtherTrackedFile(string storedPath) =>
             new() { Id = 61, AudiobookId = 6, Path = storedPath, Format = "m4b" };
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_OwnershipLookupFailureKeepsTheCommittedOrganizeResult()
+        {
+            // The companion step runs after the audio move and its database update committed: a
+            // failing ownership query must leave the companions in place, not hide that result.
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover" },
+                decorateAudiobookRepository: repository => FailingCallProxy<IAudiobookRepository>.Create(
+                    repository,
+                    nameof(IAudiobookRepository.GetOtherPathReferenceSnapshotsAsync),
+                    new InvalidOperationException("database unavailable")));
+
+            Assert.True(result.Success);
+            Assert.Null(result.Error);
+            var renamed = Assert.Single(result.RenamedFiles);
+            Assert.True(renamed.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "Book.m4b")));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+        }
 
         [Fact]
         public async Task ExecuteRename_FolderChange_AnotherBookInASiblingFolderDoesNotHoldBackCompanions()
@@ -3241,7 +3265,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             IMoveQueueService? moveQueueServiceOverride = null,
             IFilePublicationSourceCapability? filePublicationSourceCapabilityOverride = null,
             IVerifiedFileRenameTransactionCoordinator? verifiedFileRenameTransactionCoordinatorOverride = null,
-            IFilePublicationCapabilityResolver? filePublicationCapabilityResolverOverride = null)
+            IFilePublicationCapabilityResolver? filePublicationCapabilityResolverOverride = null,
+            Func<IAudiobookRepository, IAudiobookRepository>? decorateAudiobookRepository = null)
         {
             var dbName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -3414,7 +3439,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 config.Object,
                 fileNaming,
                 fileMover.Object,
-                repo,
+                decorateAudiobookRepository?.Invoke(repo) ?? repo,
                 fileRepository,
                 identityResolver,
                 mutationCoordinator ?? new FilesystemMutationCoordinator(),

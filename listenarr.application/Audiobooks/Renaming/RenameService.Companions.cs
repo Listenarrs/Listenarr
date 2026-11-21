@@ -66,13 +66,26 @@ public partial class RenameService
             return;
         }
 
-        if (!await AudiobookExclusiveFolderReference.IsExclusiveAsync(
+        bool exclusive;
+        try
+        {
+            exclusive = await AudiobookExclusiveFolderReference.IsExclusiveAsync(
                 audiobook.Id,
                 previous,
                 semantics,
                 _audiobookRepository,
                 _audiobookFileRepository,
-                cancellationToken))
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        {
+            // The organize already committed: a failed lookup leaves the companions in place
+            // rather than turning that result into a failure.
+            _logger.LogWarning(ex, "Could not check which books reference {Folder}; leaving its companion files in place", previous);
+            return;
+        }
+
+        if (!exclusive)
         {
             // Another book's base path or tracked files sit in, below or above that folder (or
             // cannot be resolved), so its cover and metadata may be that book's.
