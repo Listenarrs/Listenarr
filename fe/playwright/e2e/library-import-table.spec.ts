@@ -9,6 +9,7 @@ import {
   startMatchingButton,
   test,
 } from './support/test.js'
+import { folder, importBook } from './support/import-folders.js'
 
 const header = (page: import('@playwright/test').Page, name: string) =>
   page.locator('.import-table thead th', { hasText: name })
@@ -28,11 +29,11 @@ test.describe('Library Import table', () => {
     await expect
       .poll(() => rowFolders(page))
       .toEqual([
-        'Tanar of Pellucidar',
-        'Pellucidar',
-        'Twenty Thousand Leagues Under the Sea', // Captain Nemo
-        'A Princess of Mars', // Barsoom
-        'Allan Quatermain',
+        folder.Tanar,
+        folder.Pellucidar,
+        folder.Leagues, // Captain Nemo
+        folder.Princess, // Barsoom
+        folder.Allan,
       ])
 
     await header(page, 'Path').locator('.sort-button').click()
@@ -41,32 +42,26 @@ test.describe('Library Import table', () => {
     await expect
       .poll(() => rowFolders(page))
       .toEqual([
-        'A Princess of Mars', // Edgar Rice Burroughs/
-        'Pellucidar',
-        'Tanar of Pellucidar',
-        'Allan Quatermain', // H. Rider Haggard/
-        'Twenty Thousand Leagues Under the Sea', // Jules Verne/
+        folder.Princess, // Edgar Rice Burroughs/
+        folder.Pellucidar,
+        folder.Tanar,
+        folder.Allan, // H. Rider Haggard/
+        folder.Leagues, // Jules Verne/
       ])
 
     // Format, then the number of files.
     await header(page, 'Format').locator('.sort-button').click()
     await header(page, 'Format').locator('.sort-button').click()
     await expect(page.locator('.summary-text')).toHaveText('Sorted by Format (descending)')
-    await expect.poll(async () => (await rowFolders(page))[0]).toBe('Allan Quatermain')
+    await expect.poll(async () => (await rowFolders(page))[0]).toBe(folder.Allan)
 
     // By match title; the unmatched book last.
     await header(page, 'Match').locator('.sort-button').click()
     await expect
       .poll(() => rowFolders(page))
-      .toEqual([
-        'A Princess of Mars',
-        'Allan Quatermain',
-        'Tanar of Pellucidar',
-        'Twenty Thousand Leagues Under the Sea',
-        'Pellucidar',
-      ])
+      .toEqual([folder.Princess, folder.Allan, folder.Tanar, folder.Leagues, folder.Pellucidar])
     await header(page, 'Match').locator('.sort-button').click()
-    await expect.poll(async () => (await rowFolders(page)).at(-1)).toBe('A Princess of Mars')
+    await expect.poll(async () => (await rowFolders(page)).at(-1)).toBe(folder.Princess)
   })
 
   test('on a narrow screen, the sort is chosen from lists', async ({ page }) => {
@@ -81,9 +76,7 @@ test.describe('Library Import table', () => {
     await sort.selectOption('path')
     await order.selectOption('desc')
     await expect(page.locator('.summary-text')).toHaveText('Sorted by Path (descending)')
-    await expect
-      .poll(async () => (await rowFolders(page))[0])
-      .toBe('Twenty Thousand Leagues Under the Sea')
+    await expect.poll(async () => (await rowFolders(page))[0]).toBe(folder.Leagues)
 
     // Columns can't be resized there: the header row carrying the resize handles is hidden on a narrow
     // screen, so there is no edge to drag.
@@ -170,9 +163,9 @@ test.describe('Library Import table', () => {
     expect((await listenarr.rootFolders()).map((folder) => folder.name)).toContain('E2E Extra')
 
     await scan(page)
-    await expect.poll(() => rowFolders(page)).toEqual(['Tarzan of the Apes'])
-    await expect(importRow(page, 'Tarzan of the Apes').locator('.file-path')).toHaveText(
-      '/e2e/extra/Edgar Rice Burroughs/Tarzan of the Apes/Tarzan of the Apes.m4b',
+    await expect.poll(() => rowFolders(page)).toEqual([folder.Tarzan])
+    await expect(importRow(page, folder.Tarzan).locator('.file-path')).toHaveText(
+      `/e2e/extra/${importBook('Tarzan').path}/${importBook('Tarzan').fileNames[0]}`,
     )
   })
 })

@@ -91,7 +91,7 @@ export async function openLibraryImport(page: Page, query = '') {
   await expect(page.getByRole('heading', { name: 'Library Import' })).toBeVisible()
 }
 
-/** The row of the book in that folder (the folder's name, as generate-library-fixtures.sh writes it). */
+/** The row of the book in that folder (the last part of its folder in tests/Fixtures/Audiobooks/import-folders.json: `folder.Princess`). */
 export const importRow = (page: Page, folder: string) =>
   page
     .locator('.import-row')

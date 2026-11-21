@@ -1,0 +1,38 @@
+{
+  "roots": {
+    "import": {
+      "Princess": {
+        "folder": "Edgar Rice Burroughs/A Princess of Mars",
+        "files": [{ "name": "A Princess of Mars.m4b", "fixture": "B008DFUGCQ.m4b" }]
+      },
+      "Tanar": {
+        "folder": "Edgar Rice Burroughs/Tanar of Pellucidar",
+        "files": [{ "name": "Tanar of Pellucidar.m4b", "fixture": "B0C6B525PQ.m4b" }]
+      },
+      "Pellucidar": {
+        "folder": "Edgar Rice Burroughs/Pellucidar",
+        "files": [{ "name": "Pellucidar.m4b", "fixture": "no-tags.m4b" }]
+      },
+      "Allan": {
+        "folder": "H. Rider Haggard/Allan Quatermain",
+        "files": [
+          { "name": "Allan Quatermain - Part 01.mp3", "fixture": "B0096QR7Z0-part.mp3" },
+          { "name": "Allan Quatermain - Part 02.mp3", "fixture": "B0096QR7Z0-part.mp3" },
+          { "name": "Allan Quatermain - Part 03.mp3", "fixture": "B0096QR7Z0-part.mp3" }
+        ]
+      },
+      "Leagues": {
+        "folder": "Jules Verne/Twenty Thousand Leagues Under the Sea",
+        "files": [{ "name": "Twenty Thousand Leagues Under the Sea.m4b", "fixture": "B01FKWL15A.m4b" }]
+      }
+    },
+    "second": {
+      "Tarzan": {
+        "folder": "Edgar Rice Burroughs/Tarzan of the Apes",
+        "files": [{ "name": "Tarzan of the Apes.m4b", "fixture": "B002V5B7TK.m4b" }]
+      }
+    },
+    "empty": {},
+    "library": {}
+  }
+}

@@ -13,17 +13,15 @@ import {
   type LibraryBook,
   type ListenarrApi,
 } from './support/test.js'
+import { folder, importBook } from './support/import-folders.js'
 
-const importRoot = '/e2e/import'
 const libraryRoot = '/e2e/library'
+// The files of the books in E2E Import (tests/Fixtures/Audiobooks/import-folders.json).
 const source = {
-  princess: `${importRoot}/Edgar Rice Burroughs/A Princess of Mars/A Princess of Mars.m4b`,
-  tanar: `${importRoot}/Edgar Rice Burroughs/Tanar of Pellucidar/Tanar of Pellucidar.m4b`,
-  allan: [1, 2, 3].map(
-    (part) =>
-      `${importRoot}/H. Rider Haggard/Allan Quatermain/Allan Quatermain - Part 0${part}.mp3`,
-  ),
-  leagues: `${importRoot}/Jules Verne/Twenty Thousand Leagues Under the Sea/Twenty Thousand Leagues Under the Sea.m4b`,
+  princess: importBook('Princess').files[0]!,
+  tanar: importBook('Tanar').files[0]!,
+  allan: importBook('Allan').files,
+  leagues: importBook('Leagues').files[0]!,
 }
 
 const monitorSelect = (page: Page) => page.getByRole('combobox', { name: 'Monitor:' })
@@ -68,9 +66,7 @@ test.describe('Library Import apply', () => {
     // In place, a file can only join a book in its own folder: the seeded Twenty Thousand Leagues lives
     // in the library's output folder, so its file is not registered and its row stays.
     await expect(page.getByText('Import errors').first()).toBeVisible()
-    await expect
-      .poll(() => rowFolders(page))
-      .toEqual(['Twenty Thousand Leagues Under the Sea', 'Pellucidar'])
+    await expect.poll(() => rowFolders(page)).toEqual([folder.Leagues, folder.Pellucidar])
 
     // Each book's files are registered where they are.
     for (const [asin, paths] of [
@@ -91,14 +87,12 @@ test.describe('Library Import apply', () => {
 
     // A new scan only finds the books that weren't imported.
     await scan(page)
-    await expect
-      .poll(() => rowFolders(page))
-      .toEqual(['Twenty Thousand Leagues Under the Sea', 'Pellucidar'])
+    await expect.poll(() => rowFolders(page)).toEqual([folder.Leagues, folder.Pellucidar])
   })
 
   test('moves the selected books into the chosen root folder', async ({ page, listenarr }) => {
     await scanAndMatch(page)
-    for (const book of ['A Princess of Mars', 'Twenty Thousand Leagues Under the Sea']) {
+    for (const book of [folder.Princess, folder.Leagues]) {
       await importRow(page, book).locator('input[type="checkbox"]').uncheck()
     }
     await importActionSelect(page).selectOption('move')
@@ -109,7 +103,7 @@ test.describe('Library Import apply', () => {
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
     await expect
       .poll(() => rowFolders(page))
-      .toEqual(['A Princess of Mars', 'Twenty Thousand Leagues Under the Sea', 'Pellucidar'])
+      .toEqual([folder.Princess, folder.Leagues, folder.Pellucidar])
 
     for (const [asin, sources] of [
       ['B0C6B525PQ', [source.tanar]],
@@ -126,7 +120,7 @@ test.describe('Library Import apply', () => {
       for (const path of sources) expect(await fileExists(path)).toBe(false)
     }
     // The emptied folder stays: it is inside a root folder, which only Listenarr's managed cleanup may change.
-    expect(await fileExists(`${importRoot}/H. Rider Haggard/Allan Quatermain`)).toBe(true)
+    expect(await fileExists(importBook('Allan').directory)).toBe(true)
     await expect(page.getByText('Import completed with warnings').first()).toBeVisible()
     expect(await fileExists(source.princess)).toBe(true)
   })
@@ -137,7 +131,7 @@ test.describe('Library Import apply', () => {
   }) => {
     await scanAndMatch(page)
     await page.locator('thead input[type="checkbox"]').uncheck()
-    await importRow(page, 'Allan Quatermain').locator('input[type="checkbox"]').check()
+    await importRow(page, folder.Allan).locator('input[type="checkbox"]').check()
     await importActionSelect(page).selectOption('hardlink/copy')
     await page.locator('.destination-select').selectOption({ label: libraryRoot })
     await importButton(page).click()
@@ -159,9 +153,7 @@ test.describe('Library Import apply', () => {
     const before = await libraryBook(listenarr, 'B01FKWL15A')
     await scanAndMatch(page)
     await page.locator('thead input[type="checkbox"]').uncheck()
-    await importRow(page, 'Twenty Thousand Leagues Under the Sea')
-      .locator('input[type="checkbox"]')
-      .check()
+    await importRow(page, folder.Leagues).locator('input[type="checkbox"]').check()
     await importActionSelect(page).selectOption('move')
     await page.locator('.destination-select').selectOption({ label: libraryRoot })
     await importButton(page).click()
@@ -182,42 +174,36 @@ test.describe('Library Import apply', () => {
     await openLibraryImport(page)
     await scan(page)
     // A search result whose product record Audible doesn't have.
-    await importRow(page, 'Tanar of Pellucidar')
-      .locator('button[title="Search for a match"]')
-      .click()
+    await importRow(page, folder.Tanar).locator('button[title="Search for a match"]').click()
     await page
       .getByTestId('find-match-result')
       .filter({ hasText: 'Tanar of Pellucidar (Dramatized)' })
       .click()
     await page.getByTestId('find-match-confirm').click()
-    await expect(importRow(page, 'Tanar of Pellucidar').locator('.match-title')).toHaveText(
+    await expect(importRow(page, folder.Tanar).locator('.match-title')).toHaveText(
       'Tanar of Pellucidar (Dramatized)',
     )
 
     await importButton(page).click()
     await expect(page.getByText('Import errors').first()).toBeVisible({ timeout: 60_000 })
-    await expect(importRow(page, 'Tanar of Pellucidar').locator('.match-error')).toHaveText(
+    await expect(importRow(page, folder.Tanar).locator('.match-error')).toHaveText(
       'Audible United States (US) has no record for B0TANARDRM. Use "Search for a match" to pick the book again, in the right region.',
     )
-    await expect(
-      importRow(page, 'Tanar of Pellucidar').locator('input[type="checkbox"]'),
-    ).toBeDisabled()
+    await expect(importRow(page, folder.Tanar).locator('input[type="checkbox"]')).toBeDisabled()
     expect((await listenarr.library()).some((book) => book.asin === 'B0TANARDRM')).toBe(false)
 
     // The row survives a reload with its reason; a new match clears it.
     await page.reload()
-    await expect(importRow(page, 'Tanar of Pellucidar').locator('.match-error')).toContainText(
+    await expect(importRow(page, folder.Tanar).locator('.match-error')).toContainText(
       'has no record for B0TANARDRM',
     )
-    await importRow(page, 'Tanar of Pellucidar')
-      .locator('button[title="Search for a match"]')
-      .click()
+    await importRow(page, folder.Tanar).locator('button[title="Search for a match"]').click()
     await page.getByTestId('find-match-result').filter({ hasNotText: 'Dramatized' }).first().click()
     await page.getByTestId('find-match-confirm').click()
-    await expect(importRow(page, 'Tanar of Pellucidar').locator('.match-error')).toHaveCount(0)
+    await expect(importRow(page, folder.Tanar).locator('.match-error')).toHaveCount(0)
     await importButton(page).click()
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
-    await expect(importRow(page, 'Tanar of Pellucidar')).toHaveCount(0)
+    await expect(importRow(page, folder.Tanar)).toHaveCount(0)
   })
 
   test('a match saved before matches had a region is imported from the configured region', async ({
@@ -226,7 +212,7 @@ test.describe('Library Import apply', () => {
   }) => {
     await scanAndMatch(page)
     await page.locator('thead input[type="checkbox"]').uncheck()
-    await importRow(page, 'Tanar of Pellucidar').locator('input[type="checkbox"]').check()
+    await importRow(page, folder.Tanar).locator('input[type="checkbox"]').check()
     // What an older version saved: the same match, without its region.
     const rootFolderId = await page.locator('.folder-select').inputValue()
     await page.evaluate((id) => {
@@ -250,17 +236,15 @@ test.describe('Library Import apply', () => {
   }) => {
     await scanAndMatch(page)
     await page.locator('thead input[type="checkbox"]').uncheck()
-    await importRow(page, 'A Princess of Mars').locator('input[type="checkbox"]').check()
-    await importRow(page, 'Tanar of Pellucidar').locator('input[type="checkbox"]').check()
+    await importRow(page, folder.Princess).locator('input[type="checkbox"]').check()
+    await importRow(page, folder.Tanar).locator('input[type="checkbox"]').check()
     await rm(hostPath(source.princess))
 
     await importButton(page).click()
     await expect(page.getByText('Import complete').first()).toBeVisible({ timeout: 60_000 })
     await expect(page.getByText('1 book imported').first()).toBeVisible()
     await expect(page.getByText('Import errors').first()).toBeVisible()
-    await expect(importRow(page, 'Tanar of Pellucidar')).toHaveCount(0)
-    await expect(
-      importRow(page, 'A Princess of Mars').locator('input[type="checkbox"]'),
-    ).toBeChecked()
+    await expect(importRow(page, folder.Tanar)).toHaveCount(0)
+    await expect(importRow(page, folder.Princess).locator('input[type="checkbox"]')).toBeChecked()
   })
 })
