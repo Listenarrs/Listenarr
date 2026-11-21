@@ -8,7 +8,7 @@
 # It runs tests/Listenarr.FakeProviders (the API with fixture-backed metadata providers) instead of the
 # production entry point. With LISTENARR_COVERAGE_DIR set, the host runs under dotnet-coverage and
 # writes one Cobertura report per process lifetime there when it stops.
-ARG LISTENARR_IMAGE
+ARG LISTENARR_IMAGE=listenarr-e2e-app
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS test-host-build
 ARG DOTNET_COVERAGE_VERSION=18.12.0
