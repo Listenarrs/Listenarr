@@ -313,7 +313,8 @@ namespace Listenarr.Domain.Downloads
                 StartedAt = StartedAt,
                 CompletedAt = CompletedAt,
                 ErrorMessage = ErrorMessage,
-                DownloadClientId = DownloadClientId
+                DownloadClientId = DownloadClientId,
+                Metadata = new Dictionary<string, object>(Metadata)
             };
         }
     }

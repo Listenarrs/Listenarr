@@ -356,8 +356,23 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             await downloadRepository.UpdateAsync(download);
+            await NotifyStatusChangeAsync(previous.Status, download);
+        }
 
-            switch (previous.Status, download.Status)
+        public async Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default)
+        {
+            if (!await downloadRepository.TryUpdateFromClientPollAsync(expected, updated, ct))
+            {
+                return false;
+            }
+
+            await NotifyStatusChangeAsync(expected.Status, updated);
+            return true;
+        }
+
+        private async Task NotifyStatusChangeAsync(DownloadStatus previousStatus, Download download)
+        {
+            switch (previousStatus, download.Status)
             {
                 case var (old, next) when old == next:
                     return;

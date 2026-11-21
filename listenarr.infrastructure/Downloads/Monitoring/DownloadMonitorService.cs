@@ -202,10 +202,11 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     foreach (Download download in updatedDownloads)
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-                        await downloadService.UpdateAsync(download);
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
-                        if (previousDownload == null)
+                        if (previousDownload == null ||
+                            !await downloadService.TryUpdateFromClientPollAsync(previousDownload, download, cancellationToken))
                         {
+                            clientDownloads.Remove(download);
                             continue;
                         }
 
