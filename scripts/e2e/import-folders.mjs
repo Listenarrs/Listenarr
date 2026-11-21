@@ -1,9 +1,11 @@
 // The audiobook folders the browser E2E suite scans and imports, built from one manifest:
-// tests/Fixtures/Audiobooks/import-folders.json lists, per root folder (import, second, empty,
-// library), each book's folder and the checked-in pre-tagged fixture each of its files is copied from.
+// tests/Fixtures/Audiobooks/import-folders.json lists the checked-in pre-tagged fixtures and their tags
+// (`fixtures`, what regenerate-fixtures.mjs writes) and, per root folder (import, second, empty,
+// library), each book's folder and the fixture each of its files is copied from (`roots`).
 // The specs read the same manifest (fe/playwright/e2e/support/import-folders.ts), so a book is named
-// in one place. The manifest is checked before anything is written: a missing fixture, an audio file
-// no book uses, two books in one folder or a path leaving its root fails with the book's name.
+// in one place. The manifest is checked before anything is written: a listed fixture without its file,
+// an audio file or a book's fixture not listed, a listed fixture no book uses, two books in one folder
+// or a path leaving its root fails with the fixture's or the book's name.
 import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,6 +25,12 @@ export async function readImportFolders(manifestPath = defaultManifestPath) {
   const fixtures = new Set(
     (await readdir(dirname(manifestPath))).filter((name) => !notAudio.has(name)),
   )
+  for (const fixture of Object.keys(manifest.fixtures)) {
+    if (!fixtures.has(fixture)) throw new Error(`fixtures.${fixture}: no file ${fixture} next to ${manifestPath}`)
+  }
+  for (const fixture of fixtures) {
+    if (!(fixture in manifest.fixtures)) throw new Error(`${fixture} is not listed in fixtures of ${manifestPath}`)
+  }
   const used = new Set()
   for (const [root, books] of Object.entries(manifest.roots)) {
     const owners = new Map()
@@ -36,15 +44,15 @@ export async function readImportFolders(manifestPath = defaultManifestPath) {
         if (file.name.includes('/') || file.name.includes('\\') || file.name === '..') {
           throw new Error(`${id}: file ${file.name} must be a plain file name`)
         }
-        if (!fixtures.has(file.fixture)) {
-          throw new Error(`${id}: no fixture ${file.fixture} next to ${manifestPath}`)
+        if (!(file.fixture in manifest.fixtures)) {
+          throw new Error(`${id}: fixture ${file.fixture} is not listed in fixtures`)
         }
         used.add(file.fixture)
       }
     }
   }
-  for (const fixture of fixtures) {
-    if (!used.has(fixture)) throw new Error(`${fixture} is not used by any book of ${manifestPath}`)
+  for (const fixture of Object.keys(manifest.fixtures)) {
+    if (!used.has(fixture)) throw new Error(`fixtures.${fixture} is not used by any book`)
   }
   return manifest
 }

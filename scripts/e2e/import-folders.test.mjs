@@ -29,6 +29,7 @@ async function tree(directory, prefix = '') {
 }
 
 const manifest = {
+  fixtures: { 'mars.m4b': { title: 'Mars', author: 'Burroughs', album: 'Mars' }, 'allan.mp3': {} },
   roots: {
     import: {
       Mars: { folder: 'Burroughs/Mars', files: [{ name: 'Mars.m4b', fixture: 'mars.m4b' }] },
@@ -69,15 +70,31 @@ test('writeImportFolders copies each fixture to its book folder, one folder per 
   })
 })
 
-test('readImportFolders names the book whose fixture is missing', async () => {
+test('readImportFolders names a listed fixture whose file is missing', async () => {
   await withFixtures(manifest, { 'allan.mp3': 'allan audio' }, async ({ manifestPath }) => {
-    await assert.rejects(readImportFolders(manifestPath), /import\.Mars: no fixture mars\.m4b/)
+    await assert.rejects(readImportFolders(manifestPath), /fixtures\.mars\.m4b: no file mars\.m4b/)
   })
 })
 
-test('readImportFolders names an audio file no book uses', async () => {
-  await withFixtures(manifest, { ...fixtures, 'unused.m4b': 'x' }, async ({ manifestPath }) => {
-    await assert.rejects(readImportFolders(manifestPath), /unused\.m4b is not used by any book/)
+test('readImportFolders names an audio file the fixtures do not list', async () => {
+  await withFixtures(manifest, { ...fixtures, 'unlisted.m4b': 'x' }, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /unlisted\.m4b is not listed in fixtures/)
+  })
+})
+
+test('readImportFolders names the book whose fixture is not listed', async () => {
+  const unlisted = structuredClone(manifest)
+  delete unlisted.fixtures['mars.m4b']
+  await withFixtures(unlisted, { 'allan.mp3': 'allan audio' }, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /import\.Mars: fixture mars\.m4b is not listed in fixtures/)
+  })
+})
+
+test('readImportFolders names a listed fixture no book uses', async () => {
+  const unused = structuredClone(manifest)
+  unused.fixtures['spare.m4b'] = {}
+  await withFixtures(unused, { ...fixtures, 'spare.m4b': 'x' }, async ({ manifestPath }) => {
+    await assert.rejects(readImportFolders(manifestPath), /fixtures\.spare\.m4b is not used by any book/)
   })
 })
 
