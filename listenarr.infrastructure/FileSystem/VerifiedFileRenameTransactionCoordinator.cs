@@ -1,6 +1,7 @@
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -22,6 +23,7 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
     internal Action? BeforeFallbackPublicationForTest { get; set; }
     internal Action? AfterFallbackPublicationForTest { get; set; }
     internal bool ForceCopyForHardlinkForTest { get; set; }
+    internal Func<SafeFileHandle, bool> HardlinkIdentityProbe { get; set; } = HardlinkIdentityCapability.CanVerify;
     internal Action? AfterFallbackLinkCreatedForTest { get; set; }
 
     public async Task<VerifiedFileRenamePreparationResult> PrepareAsync(
@@ -207,7 +209,7 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
                 {
                     using var stagingHandle = stagingEntry.DuplicateHandleForOperation();
                     if (!ForceCopyForHardlinkForTest
-                        && HardlinkIdentityCapability.CanVerify(stagingHandle))
+                        && HardlinkIdentityProbe(stagingHandle))
                     {
                         var linkCreated = false;
                         try

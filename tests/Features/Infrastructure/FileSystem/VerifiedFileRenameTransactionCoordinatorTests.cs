@@ -115,6 +115,32 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
     }
 
     [LinuxTheory]
+    [InlineData(0x65735546u, false)] // FUSE (rclone, sshfs, s3fs): rejects link() or cannot prove identity
+    [InlineData(0xff534d42u, false)] // CIFS
+    [InlineData(0xef53u, true)]      // ext4
+    public async Task PrepareAsync_NoReplaceRenameUnsupported_LinksOnlyOnFileSystemsWithVerifiableIdentity(
+        uint fileSystemType, bool expectLink)
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.HardlinkIdentityProbe = _ => HardlinkIdentityCapability.SupportsFileSystemType(fileSystemType);
+        var linkAttempted = false;
+        coordinator.AfterFallbackLinkCreatedForTest = () => linkAttempted = true;
+
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.True(result.Success, result.Error);
+        await using var lease = result.Lease!;
+        Assert.Equal(expectLink, linkAttempted);
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.StagingPath));
+    }
+
+    [LinuxTheory]
     [InlineData(null, false, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
     [InlineData(22, false, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
     [InlineData(22, true, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
