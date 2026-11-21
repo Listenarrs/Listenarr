@@ -345,9 +345,6 @@ jobs:
         working-directory: fe
         run: npx playwright install --with-deps chromium
 
-      - name: Install synthetic audiobook generator dependencies
-        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
-
       - name: Run Playwright E2E tests (browser, app in Docker, 3 shards)
         working-directory: fe
         run: npm run test:e2e -- --stacks=3${{ inputs.coverage && ' --coverage' || '' }}
