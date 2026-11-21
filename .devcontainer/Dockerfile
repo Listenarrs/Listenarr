@@ -24,14 +24,12 @@ RUN apt-get update \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
-# - ffmpeg, python3-venv, git: scripts/e2e/generate-library-fixtures.sh; ffprobe for tests/Listenarr.BackendIntegrationTests
+# - ffmpeg (ffprobe) for tests/Listenarr.BackendIntegrationTests; git; the browser libraries:
 # - the browser libraries: headless Playwright Chromium frontend integration tests
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ffmpeg \
 		git \
-		python3 \
-		python3-venv \
 		libasound2t64 \
 		libgbm1 \
 		libgtk-3-0t64 \
