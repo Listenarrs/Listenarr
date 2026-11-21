@@ -25,6 +25,7 @@
     "test:repository-paths": "node --test scripts/validate-repository-paths.test.mjs",
     "test:e2e-gif": "node --test scripts/e2e/webm-to-gif.test.mjs",
     "test:e2e-plan": "node --test scripts/lib/e2e-plan.test.mjs",
+    "e2e:regenerate-fixtures": "bash scripts/e2e/regenerate-fixtures.sh",
     "ci:fork": "node scripts/ci/run-tests.mjs",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",

@@ -8,9 +8,9 @@
 # <output directory>/empty   a root folder without audio files
 # <output directory>/library the destination of Move and Hardlink / Copy
 #
-# The six files in scripts/e2e/fixtures/ (one second of silence each, 1 to 6 KB) carry the tags
-# ffprobe reads at scan time; copying them keeps those tags, so this needs no ffmpeg. How to
-# regenerate them: scripts/e2e/fixtures/README.md.
+# The six files in scripts/e2e/fixtures/ (one second of silence each, about 1 KB) carry the tags
+# ffprobe reads at scan time; copying them keeps those tags, so this needs no ffmpeg. They come from
+# scripts/e2e/regenerate-fixtures.sh (npm run e2e:regenerate-fixtures), which defines each book.
 set -euo pipefail
 
 script_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
