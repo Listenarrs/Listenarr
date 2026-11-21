@@ -23,9 +23,10 @@ namespace Listenarr.Application.Downloads.Contracts
     /// them the client listed, and whether that answer can be trusted to be the whole of it.
     /// </summary>
     /// <remarks>
-    /// An unreported download comes back from the poll unchanged, so the returned list cannot
-    /// show that it was missing. Missing means removed only when <see cref="IsComplete"/> holds:
-    /// an adapter that skips an item it cannot read leaves it out while the client still has it.
+    /// The gateway returns only the downloads the client listed, so the returned list cannot say
+    /// which of the polled downloads were missing. Missing means removed only when
+    /// <see cref="IsComplete"/> holds: an adapter that skips an item it cannot read leaves it out
+    /// while the client still has it.
     /// </remarks>
     public sealed class DownloadPollReport
     {
