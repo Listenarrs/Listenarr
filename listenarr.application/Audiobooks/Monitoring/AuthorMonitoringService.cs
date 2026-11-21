@@ -173,6 +173,11 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             };
         }
 
+        public Task<MonitoredAuthor?> UpdateQualityProfileAsync(int id, int qualityProfileId, CancellationToken cancellationToken = default)
+        {
+            return _authors.UpdateQualityProfileAsync(id, qualityProfileId, cancellationToken);
+        }
+
         public async Task<bool> UnmonitorAuthorAsync(int id, CancellationToken cancellationToken = default)
         {
             return await _authors.DeleteAsync(id, cancellationToken);

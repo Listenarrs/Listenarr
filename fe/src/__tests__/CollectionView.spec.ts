@@ -32,6 +32,7 @@ const {
   mockGetAuthorMonitoringStatus,
   mockGetSeriesMonitoringStatus,
   mockMonitorAuthor,
+  mockUpdateAuthorMonitoringProfile,
   mockMonitorSeries,
   mockUnmonitorAuthor,
   mockUnmonitorSeries,
@@ -84,6 +85,7 @@ const {
     existingCount: 0,
     failedCount: 0,
   })),
+  mockUpdateAuthorMonitoringProfile: vi.fn(),
   mockUnmonitorAuthor: vi.fn(async () => ({ message: 'Author monitoring disabled' })),
   mockUnmonitorSeries: vi.fn(async () => ({ message: 'Series monitoring disabled' })),
   mockToastSuccess: vi.fn(),
@@ -112,6 +114,7 @@ vi.mock('@/services/api', () => ({
     getAuthorMonitoringStatus: mockGetAuthorMonitoringStatus,
     getSeriesMonitoringStatus: mockGetSeriesMonitoringStatus,
     monitorAuthor: mockMonitorAuthor,
+    updateAuthorMonitoringProfile: mockUpdateAuthorMonitoringProfile,
     monitorSeries: mockMonitorSeries,
     unmonitorAuthor: mockUnmonitorAuthor,
     unmonitorSeries: mockUnmonitorSeries,
@@ -131,6 +134,7 @@ vi.mock('@/services/toastService', () => ({
 
 describe('CollectionView', () => {
   beforeEach(() => {
+    mockUpdateAuthorMonitoringProfile.mockReset()
     const pinia = createPinia()
     setActivePinia(pinia)
     mockGetLibrary.mockReset()
@@ -1457,55 +1461,76 @@ describe('CollectionView', () => {
     expect(mockMonitorAuthor).not.toHaveBeenCalled()
   })
 
-  it.each([false, true])('sends the selected profile (existing monitor: %s)', async (existing) => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    mockGetAuthorCatalog.mockResolvedValue({
-      author: { asin: 'AUTHOR123', name: 'Andy Weir' },
-      totalBooks: 0,
-      books: [],
-    })
-    if (existing) {
-      mockGetAuthorMonitoringStatus.mockResolvedValue({
-        isMonitored: true,
-        monitoredAuthor: { id: 7, qualityProfileId: 3 },
+  it.each(['start', 'save', 'stale'])(
+    'handles the selected author profile (%s)',
+    async (action) => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      mockGetAuthorCatalog.mockResolvedValue({
+        author: { asin: 'AUTHOR123', name: 'Andy Weir' },
+        totalBooks: 0,
+        books: [],
       })
-    }
+      if (action !== 'start') {
+        mockGetAuthorMonitoringStatus.mockResolvedValueOnce({
+          isMonitored: true,
+          monitoredAuthor: { id: 7, qualityProfileId: 3 },
+        })
+        mockUpdateAuthorMonitoringProfile.mockResolvedValue({ id: 7, qualityProfileId: 2 })
+      }
+      if (action === 'stale') {
+        mockUpdateAuthorMonitoringProfile.mockRejectedValue(
+          Object.assign(new Error('Missing monitor'), { status: 404 }),
+        )
+      }
 
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: '/', name: 'home', component: { template: '<div />' } },
-        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
-      ],
-    })
-    await router.push('/collection/author/Andy%20Weir')
-    await router.isReady().catch(() => {})
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/', name: 'home', component: { template: '<div />' } },
+          { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+        ],
+      })
+      await router.push('/collection/author/Andy%20Weir')
+      await router.isReady().catch(() => {})
 
-    const store = useLibraryStore()
-    store.audiobooks = [] as unknown as import('@/types').Audiobook[]
-    store.fetchLibrary = vi.fn(async () => undefined)
+      const store = useLibraryStore()
+      store.audiobooks = [] as unknown as import('@/types').Audiobook[]
+      store.fetchLibrary = vi.fn(async () => undefined)
 
-    const wrapper = mount(CollectionView, {
-      global: {
-        plugins: [pinia, router],
-        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
-      },
-    })
-    await flushPromises()
+      const wrapper = mount(CollectionView, {
+        global: {
+          plugins: [pinia, router],
+          stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+        },
+      })
+      await flushPromises()
 
-    const select = wrapper.get('[data-testid="monitoring-quality-profile"]')
-    expect((select.element as HTMLSelectElement).value).toBe('3')
-    await select.setValue('2')
-    const button = existing
-      ? wrapper.findAll('button').find((candidate) => candidate.text() === 'Save Profile')!
-      : wrapper.get('.author-monitor-btn')
-    await button.trigger('click')
-    await flushPromises()
+      const select = wrapper.get('[data-testid="monitoring-quality-profile"]')
+      expect((select.element as HTMLSelectElement).value).toBe('3')
+      await select.setValue('2')
+      const button =
+        action !== 'start'
+          ? wrapper.findAll('button').find((candidate) => candidate.text() === 'Save Profile')!
+          : wrapper.get('.author-monitor-btn')
+      await button.trigger('click')
+      await flushPromises()
 
-    expect(mockMonitorAuthor).toHaveBeenCalledWith(expect.objectContaining({ qualityProfileId: 2 }))
-    expect(mockUnmonitorAuthor).not.toHaveBeenCalled()
-  })
+      const startRequest = expect.objectContaining({ qualityProfileId: 2 })
+      expect(mockMonitorAuthor.mock.calls).toEqual(action === 'start' ? [[startRequest]] : [])
+      expect(mockUpdateAuthorMonitoringProfile.mock.calls).toEqual(
+        action === 'start' ? [] : [[7, 2]],
+      )
+      expect(mockGetAuthorMonitoringStatus).toHaveBeenCalledTimes(action === 'save' ? 1 : 2)
+      expect(wrapper.text().includes('Save Profile')).toBe(action === 'save')
+      expect(mockToastWarning.mock.calls).toEqual(
+        action === 'stale'
+          ? [['Monitoring changed', 'Check the current monitoring status before saving again.']]
+          : [],
+      )
+      expect(mockUnmonitorAuthor).not.toHaveBeenCalled()
+    },
+  )
 
   it('monitors a series using the configured region and language defaults', async () => {
     const pinia = createPinia()

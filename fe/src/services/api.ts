@@ -45,6 +45,8 @@ import type {
   AuthorCatalogResponse,
   AuthorLookupResponse,
   AuthorMonitoringStatusResponse,
+  MonitoredAuthor,
+  MonitoredSeries,
   MonitorAuthorResponse,
   MonitorSeriesResponse,
   SeriesMonitoringStatusResponse,
@@ -497,6 +499,16 @@ class ApiService {
     })
   }
 
+  async updateAuthorMonitoringProfile(
+    id: number,
+    qualityProfileId: number,
+  ): Promise<MonitoredAuthor> {
+    return this.request<MonitoredAuthor>(`/authors/monitoring/${id}/quality-profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ qualityProfileId }),
+    })
+  }
+
   async unmonitorAuthor(id: number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/authors/monitoring/${id}`, {
       method: 'DELETE',
@@ -524,6 +536,16 @@ class ApiService {
     return this.request<MonitorSeriesResponse>('/series/monitoring', {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  }
+
+  async updateSeriesMonitoringProfile(
+    id: number,
+    qualityProfileId: number,
+  ): Promise<MonitoredSeries> {
+    return this.request<MonitoredSeries>(`/series/monitoring/${id}/quality-profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ qualityProfileId }),
     })
   }
 

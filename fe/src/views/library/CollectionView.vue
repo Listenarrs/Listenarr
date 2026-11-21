@@ -304,7 +304,7 @@
                 !hasValidMonitoringQualityProfile ||
                 monitoringQualityProfileId === authorMonitoringStatus?.qualityProfileId
               "
-              @click="saveAuthorMonitoringProfile"
+              @click="saveMonitoringQualityProfile"
             >
               Save Profile
             </button>
@@ -372,7 +372,7 @@
                 !hasValidMonitoringQualityProfile ||
                 monitoringQualityProfileId === seriesMonitoringStatus?.qualityProfileId
               "
-              @click="saveSeriesMonitoringProfile"
+              @click="saveMonitoringQualityProfile"
             >
               Save Profile
             </button>
@@ -878,6 +878,7 @@ import {
   PhFolderOpen,
 } from '@phosphor-icons/vue'
 import { apiService } from '@/services/api'
+import { getApiValidationError } from '@/services/apiErrors'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -2144,20 +2145,66 @@ function openAddToLibrary(audiobook: CollectionDisplayItem) {
   pendingAddBook.value = audiobook.addMetadata
 }
 
-function toggleAuthorMonitoring() {
-  return updateAuthorMonitoring(false)
+async function saveMonitoringQualityProfile() {
+  if (!isAuthorCollection.value && !isSeriesCollection.value) return
+  const isAuthor = isAuthorCollection.value
+  const monitoringStatus = isAuthor ? authorMonitoringStatus : seriesMonitoringStatus
+  const busy = isAuthor ? authorMonitoringBusy : seriesMonitoringBusy
+  const monitor = monitoringStatus.value
+  const profileId = monitoringQualityProfileId.value
+  if (
+    busy.value ||
+    !monitor ||
+    profileId === null ||
+    profileId === monitor.qualityProfileId ||
+    !hasValidMonitoringQualityProfile.value
+  )
+    return
+
+  const collectionPath = route.path
+  busy.value = true
+  try {
+    if (isAuthor) {
+      const updated = await apiService.updateAuthorMonitoringProfile(monitor.id, profileId)
+      if (route.path === collectionPath && monitoringStatus.value?.id === monitor.id) {
+        authorMonitoringStatus.value = updated
+      }
+    } else {
+      const updated = await apiService.updateSeriesMonitoringProfile(monitor.id, profileId)
+      if (route.path === collectionPath && monitoringStatus.value?.id === monitor.id) {
+        seriesMonitoringStatus.value = updated
+      }
+    }
+    if (route.path === collectionPath) {
+      toast.success('Monitoring profile saved', 'Future additions will use the selected profile.')
+    }
+  } catch (error) {
+    if (route.path !== collectionPath) return
+    const status = (error as { status?: number } | null)?.status
+    if (status === 404 || status === 409) {
+      if (isAuthor) await loadAuthorMonitoringStatus()
+      else await loadSeriesMonitoringStatus()
+      toast.warning(
+        'Monitoring changed',
+        'Check the current monitoring status before saving again.',
+      )
+      return
+    }
+    const message =
+      getApiValidationError(error)?.message ??
+      (error instanceof Error ? error.message : 'Failed to update the quality profile.')
+    toast.error('Quality profile could not be saved', message)
+  } finally {
+    busy.value = false
+  }
 }
 
-function saveAuthorMonitoringProfile() {
-  return updateAuthorMonitoring(true)
-}
-
-async function updateAuthorMonitoring(saveProfile: boolean) {
+async function toggleAuthorMonitoring() {
   if (!isAuthorCollection.value || authorMonitoringBusy.value) return
 
   authorMonitoringBusy.value = true
   try {
-    if (authorMonitoringStatus.value && !saveProfile) {
+    if (authorMonitoringStatus.value) {
       await apiService.unmonitorAuthor(authorMonitoringStatus.value.id)
       authorMonitoringStatus.value = null
       toast.success(
@@ -2190,7 +2237,7 @@ async function updateAuthorMonitoring(saveProfile: boolean) {
         ? `Added ${response.addedCount} audiobook${response.addedCount === 1 ? '' : 's'} from the current catalog.`
         : 'No new audiobooks needed to be added from the current catalog.'
 
-    toast.success(saveProfile ? 'Author monitoring profile saved' : 'Author monitored', details)
+    toast.success('Author monitored', details)
 
     if (response.failedCount > 0 || response.errorMessage) {
       const warningMessage =
@@ -2205,7 +2252,7 @@ async function updateAuthorMonitoring(saveProfile: boolean) {
     toast.error('Author monitoring failed', message)
     errorTracking.captureException(err as Error, {
       component: 'CollectionView',
-      operation: 'updateAuthorMonitoring',
+      operation: 'toggleAuthorMonitoring',
       metadata: {
         author: name.value,
         region: authorCatalogRegion.value,
@@ -2217,20 +2264,12 @@ async function updateAuthorMonitoring(saveProfile: boolean) {
   }
 }
 
-function toggleSeriesMonitoring() {
-  return updateSeriesMonitoring(false)
-}
-
-function saveSeriesMonitoringProfile() {
-  return updateSeriesMonitoring(true)
-}
-
-async function updateSeriesMonitoring(saveProfile: boolean) {
+async function toggleSeriesMonitoring() {
   if (!isSeriesCollection.value || seriesMonitoringBusy.value) return
 
   seriesMonitoringBusy.value = true
   try {
-    if (seriesMonitoringStatus.value && !saveProfile) {
+    if (seriesMonitoringStatus.value) {
       await apiService.unmonitorSeries(seriesMonitoringStatus.value.id)
       seriesMonitoringStatus.value = null
       toast.success(
@@ -2263,7 +2302,7 @@ async function updateSeriesMonitoring(saveProfile: boolean) {
         ? `Added ${response.addedCount} audiobook${response.addedCount === 1 ? '' : 's'} from the current series catalog.`
         : 'No new audiobooks needed to be added from the current series catalog.'
 
-    toast.success(saveProfile ? 'Series monitoring profile saved' : 'Series monitored', details)
+    toast.success('Series monitored', details)
 
     if (response.failedCount > 0 || response.errorMessage) {
       const warningMessage =
@@ -2278,7 +2317,7 @@ async function updateSeriesMonitoring(saveProfile: boolean) {
     toast.error('Series monitoring failed', message)
     errorTracking.captureException(err as Error, {
       component: 'CollectionView',
-      operation: 'updateSeriesMonitoring',
+      operation: 'toggleSeriesMonitoring',
       metadata: {
         series: name.value,
         region: seriesCatalogRegion.value,
@@ -2498,6 +2537,10 @@ watch(searchQuery, () => {
 })
 
 watch([type, name], async () => {
+  ++authorMonitoringStatusRequestId.value
+  ++seriesMonitoringStatusRequestId.value
+  authorMonitoringStatus.value = null
+  seriesMonitoringStatus.value = null
   currentPage.value = 1
   lastClickedIndex.value = null
   showFullAuthorDescription.value = false

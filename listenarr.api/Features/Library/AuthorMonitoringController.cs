@@ -104,6 +104,25 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
+        [HttpPut("{id:int}/quality-profile")]
+        [ProducesResponseType(typeof(MonitoredAuthorResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<MonitoredAuthorResponse>> UpdateQualityProfile(
+            int id,
+            [FromBody] MonitoringQualityProfileRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var monitor = await _authorMonitoringService.UpdateQualityProfileAsync(id, request.QualityProfileId, cancellationToken);
+                return monitor == null ? NotFound() : Ok(ToResponse(monitor));
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+        }
+
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> UnmonitorAuthor(int id, CancellationToken cancellationToken = default)
         {
