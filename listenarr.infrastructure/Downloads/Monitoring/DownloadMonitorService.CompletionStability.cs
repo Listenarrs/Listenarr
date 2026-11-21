@@ -161,8 +161,10 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         /// Lets a held download through to finalization when its client stops listing it.
         /// </summary>
         /// <remarks>
-        /// A download the client drops before the window passes comes back unchanged and is never
-        /// seen complete again, and orphan cleanup would then delete it as missing from the client.
+        /// A download the client drops before the window passes is no longer returned by the gateway
+        /// and is never seen complete again, and orphan cleanup would then delete it as missing from
+        /// the client. <see cref="WithHeldDownloadsMissingFromPoll"/> puts it back into the pass,
+        /// because it carries a completion observation, so it reaches this release instead.
         /// Without the window the import was enqueued on the first pass, so this does exactly that:
         /// it applies only to a download the client itself reported complete, and if the files went
         /// with the item, the import fails the same way it would have without the window.
