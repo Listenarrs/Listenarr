@@ -65,11 +65,12 @@ test('regenerateFixtures runs ffmpeg once per fixture of the manifest, into the 
         roots: {},
       }),
     )
+    const output = join(directory, 'out')
     const runs = []
-    await regenerateFixtures({ manifestPath, output: '/out', run: async (args) => runs.push(args) })
+    await regenerateFixtures({ manifestPath, output, run: async (args) => runs.push(args) })
     assert.deepEqual(
       runs.map((args) => args.at(-1)),
-      ['/out/a.m4b', '/out/b.mp3'],
+      [join(output, 'a.m4b'), join(output, 'b.mp3')],
     )
   } finally {
     await rm(directory, { recursive: true, force: true })
