@@ -23,6 +23,7 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task<Download> AddAsync(Download download);
         Task<Download?> FindAsync(string id);
         Task UpdateAsync(Download download);
+        Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default);
         Task UpdateMetadataAsync(string id, string key, object? value);
 
         /// <summary>

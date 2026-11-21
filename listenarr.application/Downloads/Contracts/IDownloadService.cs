@@ -84,5 +84,6 @@ namespace Listenarr.Application.Downloads.Contracts
         /// </summary>
         /// <param name="download">The download with updated information</param>
         Task UpdateAsync(Download download);
+        Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default);
     }
 }
