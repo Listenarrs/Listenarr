@@ -25,6 +25,7 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<MonitoredAuthor?> GetByNameRegionLanguageAsync(string normalizedName, string region, string language, CancellationToken ct = default);
         Task<List<MonitoredAuthor>> GetDueForSyncAsync(DateTime cutoff, CancellationToken ct = default);
         Task<MonitoredAuthor> UpsertAsync(MonitoredAuthor author, CancellationToken ct = default);
+        Task<MonitoredAuthor?> UpdateQualityProfileAsync(int id, int qualityProfileId, CancellationToken ct = default);
         Task<bool> DeleteAsync(int id, CancellationToken ct = default);
     }
 }

@@ -32,6 +32,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         private readonly string imageUrl1 = "http://example.com/a1.jpg";
         private readonly string imageUrl2 = "http://example.com/a2.jpg";
         private string tempRoot = null!;
+        private QualityProfile defaultProfile = null!;
 
         public override async Task InitializeAsync()
         {
@@ -71,6 +72,11 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .WithIsDefault()
                 .WithPath(tempRoot)
                 .Build());
+
+            // Adds require a resolvable quality profile.
+            var profile = new QualityProfileBuilder().WithName("Standard").Build();
+            profile.IsDefault = true;
+            defaultProfile = await _qualityProfileRepository.AddAsync(profile);
         }
 
         private async Task ReinitializeAsync(Action<ServiceCollectionBuilder> configure)
@@ -151,6 +157,20 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public void AddToLibrary_UsesOneControllerAndWorkflowPerRequestScope()
+        {
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
+
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>());
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>());
+        }
+
+        [Fact]
         public async Task AddToLibrary_ConcurrentIdentifierlessSameDestination_CommitsExactlyOnce()
         {
             var destination = Path.Join(tempRoot, "Identifierless", "Book");
@@ -163,11 +183,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 DestinationPath = destination,
                 Monitored = true
             };
-            var controller = _provider.GetRequiredService<LibraryController>();
+            // One scope per request, as in the app: two requests never share a DbContext, which isn't
+            // thread-safe; the same in-memory database stays behind both.
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
 
             var results = await Task.WhenAll(
-                controller.AddToLibrary(CreateRequest()),
-                controller.AddToLibrary(CreateRequest()));
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()));
 
             Assert.Single(results, result => result is OkObjectResult);
             Assert.Single(results, result => result is ConflictObjectResult);
@@ -657,6 +680,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             await ReinitializeAsync(builder =>
                 builder.WithSingleton<INotificationService>(notifications.Object));
 
+            var beforeAdd = DateTime.UtcNow;
             var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
                 new LibraryController.AddToLibraryRequest
                 {
@@ -670,6 +694,9 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.IsType<OkObjectResult>(result);
             var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            var added = Assert.IsType<DateTime>(audiobook.Added);
+            Assert.Equal(DateTimeKind.Utc, added.Kind);
+            Assert.InRange(added, beforeAdd, DateTime.UtcNow);
             var history = Assert.Single(await _historyRepository.GetByAudiobookIdAsync(audiobook.Id));
             Assert.Equal("Added", history.EventType);
             Assert.Equal(audiobook.Id, history.AudiobookId);
@@ -1402,6 +1429,85 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal("destination_path_invalid", root.GetProperty("code").GetString());
             Assert.Equal("destinationPath", root.GetProperty("field").GetString());
             Assert.Equal(customPath, root.GetProperty("resolvedDestination").GetString());
+        }
+
+        [Fact]
+        public async Task AddToLibrary_WithoutProfile_AssignsDefaultProfile()
+        {
+            var actionResult = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata { Title = "Default Profile Book", Author = "Author" },
+                    Monitored = true
+                });
+
+            Assert.IsType<OkObjectResult>(actionResult);
+            var stored = Assert.Single(await _audiobookRepository.GetAllAsync());
+            Assert.Equal(defaultProfile.Id, stored.QualityProfileId);
+        }
+
+        [Fact]
+        public async Task AddToLibrary_WithoutProfileAndNoDefault_IsRejected()
+        {
+            await _qualityProfileRepository.DeleteAsync(defaultProfile.Id);
+
+            var actionResult = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata { Title = "No Profile Book", Author = "Author" },
+                    Monitored = true
+                });
+
+            AssertQualityProfileRejection(actionResult, "quality_profile_required");
+            Assert.Empty(await _audiobookRepository.GetAllAsync());
+        }
+
+        [Fact]
+        public async Task AddToLibrary_WithUnknownProfileId_IsRejected()
+        {
+            var actionResult = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata { Title = "Unknown Profile Book", Author = "Author" },
+                    Monitored = true,
+                    QualityProfileId = defaultProfile.Id + 999
+                });
+
+            AssertQualityProfileRejection(actionResult, "quality_profile_invalid");
+            Assert.Empty(await _audiobookRepository.GetAllAsync());
+        }
+
+        [Fact]
+        public async Task AddWorkflowFallback_WithoutProfileAndNoDefault_IsRejected()
+        {
+            await _qualityProfileRepository.DeleteAsync(defaultProfile.Id);
+            var workflow = new LibraryAddWorkflow(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IImageCacheService>(),
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IHistoryRepository>(),
+                _provider.GetRequiredService<ILibraryDestinationMutationGuard>(),
+                _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
+                _provider.GetRequiredService<ILogger<LibraryAddWorkflow>>());
+
+            var actionResult = await workflow.AddAsync(new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata { Title = "Fallback No Profile Book", Author = "Author" },
+                Monitored = true
+            });
+
+            AssertQualityProfileRejection(actionResult, "quality_profile_required");
+            Assert.Empty(await _audiobookRepository.GetAllAsync());
+        }
+
+        private static void AssertQualityProfileRejection(IActionResult actionResult, string expectedCode)
+        {
+            var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+            var payload = System.Text.Json.JsonSerializer.Serialize(badRequest.Value);
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            Assert.Equal(expectedCode, root.GetProperty("code").GetString());
+            Assert.Equal("qualityProfileId", root.GetProperty("field").GetString());
         }
 
         [Fact]

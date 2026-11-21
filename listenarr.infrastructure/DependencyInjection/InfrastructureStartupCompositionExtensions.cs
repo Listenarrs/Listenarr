@@ -18,6 +18,7 @@
 
 using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Downloads.Blocklist;
+using Listenarr.Infrastructure.DependencyInjection.Workers;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Configuration;
@@ -82,6 +83,12 @@ public static class InfrastructureStartupCompositionExtensions
                     "[Startup] Normalized {Count} legacy move job row(s) after applying durable move migrations",
                     repairedPostMigrationData.MoveJobsRepaired);
             }
+            if (repairedPostMigrationData.AudiobookAddedDatesBackfilled > 0)
+            {
+                Log.Logger.Information(
+                    "[Startup] Backfilled Date Added for {Count} legacy audiobook row(s) from durable library evidence",
+                    repairedPostMigrationData.AudiobookAddedDatesBackfilled);
+            }
             Log.Logger.Information("[Startup] EF Core migrations applied successfully");
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -112,6 +119,12 @@ public static class InfrastructureStartupCompositionExtensions
         if (!disableHostedServices)
         {
             services.AddListenarrHostedServices(configuration);
+        }
+        else
+        {
+            // ManualImportController needs the scan queue even with the background workers off.
+            // A host that wants the unmatched scan to run (the test hosts) calls AddUnmatchedScanWorker itself.
+            services.AddScanQueueService();
         }
 
         services.AddHostedService<StartupDbNormalizer>();

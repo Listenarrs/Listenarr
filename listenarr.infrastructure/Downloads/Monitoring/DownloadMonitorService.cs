@@ -78,7 +78,6 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
     {
         private static readonly TimeSpan OrphanCleanupInterval = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan OrphanCleanupQueueTimeout = TimeSpan.FromSeconds(15);
-        private static readonly TimeSpan OrphanCleanupStaleSnapshotMaxAge = TimeSpan.FromMinutes(3);
 
         private int _pollingInterval = 30;
         private DateTime _lastFullBroadcast = DateTime.MinValue;
@@ -203,10 +202,11 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     foreach (Download download in updatedDownloads)
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-                        await downloadService.UpdateAsync(download);
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
-                        if (previousDownload == null)
+                        if (previousDownload == null ||
+                            !await downloadService.TryUpdateFromClientPollAsync(previousDownload, download, cancellationToken))
                         {
+                            clientDownloads.Remove(download);
                             continue;
                         }
 
@@ -219,7 +219,9 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                             client,
                             clientDownloads,
                             clientQueuePoller,
-                            orphanCleanupService);
+                            downloadClientGateway,
+                            orphanCleanupService,
+                            cancellationToken);
                         ScheduleNextOrphanCleanup(client);
                     }
                 }
@@ -256,26 +258,57 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             DownloadClientConfiguration client,
             List<Download> clientDownloads,
             DownloadClientQueuePoller clientQueuePoller,
-            DownloadOrphanCleanupService orphanCleanupService)
+            IDownloadClientGateway downloadClientGateway,
+            DownloadOrphanCleanupService orphanCleanupService,
+            CancellationToken cancellationToken)
         {
             try
             {
+                var candidates = orphanCleanupService.GetEligibleDownloads(clientDownloads);
+                if (candidates.Count == 0) return;
+
                 // Durable orphan removal belongs to the monitor worker, not the
                 // queue display path. Use the same full-snapshot poller safeguards
-                // as queue display so cached, unavailable, or suspiciously empty
-                // snapshots never drive destructive cleanup.
+                // as queue display so a failed or incomplete client response is
+                // reported unavailable and never drives destructive cleanup.
                 var queueResults = await clientQueuePoller.FetchAsync(
                     [client],
                     OrphanCleanupQueueTimeout,
-                    OrphanCleanupStaleSnapshotMaxAge,
                     maxParallelClientPolls: 1);
                 var clientQueueResult = queueResults.Single();
+                var liveItems = clientQueueResult.QueueItems;
 
+                if (!clientQueueResult.IsUnavailable && !clientQueueResult.IsIncomplete)
+                {
+                    // The full snapshot is scoped to the client's category. A tracked job
+                    // whose category changed is missing from it but still in the client,
+                    // so look tracked jobs up by ID too. If that lookup fails, skip cleanup.
+                    List<QueueItem> trackedItems;
+                    try
+                    {
+                        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        timeoutCts.CancelAfter(OrphanCleanupQueueTimeout);
+                        trackedItems = await downloadClientGateway.GetTrackedQueueItemsAsync(client, candidates, timeoutCts.Token);
+                        timeoutCts.Token.ThrowIfCancellationRequested();
+                    }
+                    catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogWarning(
+                            "Skipping orphan cleanup for client {ClientName}: tracked download lookup failed ({FailureType})",
+                            LogRedaction.SanitizeText(client.Name ?? client.Id), ex.GetType().Name);
+                        return;
+                    }
+
+                    liveItems = [.. liveItems, .. trackedItems];
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
                 await orphanCleanupService.RemoveOrphansAsync(
                     client,
                     clientQueueResult,
-                    clientQueueResult.QueueItems,
-                    clientDownloads);
+                    liveItems,
+                    candidates,
+                    cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

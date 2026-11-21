@@ -30,23 +30,33 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
             new(NullLogger.Instance);
 
         [Fact]
-        public void BuildTitleFallbackSearchQuery_DropsTheAuthor_KeepsTitleAndSeries()
+        public void BuildTitleFallbackSearchQuery_DropsTheAuthorAndTheSeries_KeepsTheTitle()
         {
             var book = new AudiobookBuilder()
-                .WithTitle("Artemis")
-                .WithAuthor("Andy Weir")
-                .WithSeries("Standalone")
+                .WithTitle("A Princess of Mars")
+                .WithAuthor("Edgar Rice Burroughs")
+                .WithSeries("Barsoom")
                 .Build();
 
             var full = _classifier.BuildSearchQuery(book);
             var fallback = _classifier.BuildTitleFallbackSearchQuery(book);
 
-            // The full query carries the author; the fallback drops it but keeps title + series.
-            Assert.Contains("Andy Weir", full);
-            Assert.DoesNotContain("Andy Weir", fallback);
-            Assert.Contains("Artemis", fallback);
-            Assert.Contains("Standalone", fallback);
+            Assert.Contains("Edgar Rice Burroughs", full);
+            Assert.Equal("A Princess of Mars", fallback);
         }
 
+        [Fact]
+        public void BuildTitleFallbackSearchQuery_UsesTheSharedQueryTitle()
+        {
+            var book = new AudiobookBuilder()
+                .WithTitle("A Princess of Mars (Unabridged)")
+                .WithAuthor("Edgar Rice Burroughs")
+                .Build();
+
+            var fallback = _classifier.BuildTitleFallbackSearchQuery(book);
+
+            Assert.Equal(AudiobookSearchQueryBuilder.BuildQueryTitle(book.Title), fallback);
+            Assert.Equal("A Princess of Mars", fallback);
+        }
     }
 }

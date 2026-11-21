@@ -1,6 +1,6 @@
 {
   "name": "listenarr",
-  "version": "1.8.0",
+  "version": "1.10.6",
   "private": true,
   "description": "Listenarr - Automated audiobook downloading and management",
   "engines": {
@@ -23,6 +23,8 @@
     "lint:frontend": "cd fe && npm run lint:check",
     "validate:repository-paths": "node scripts/validate-repository-paths.mjs",
     "test:repository-paths": "node --test scripts/validate-repository-paths.test.mjs",
+    "test:e2e-gif": "node --test scripts/e2e/webm-to-gif.test.mjs",
+    "ci:fork": "node scripts/ci/run-tests.mjs",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",
     "format": "npm run format:backend && npm run format:frontend",

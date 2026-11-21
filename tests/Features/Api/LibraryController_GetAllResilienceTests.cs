@@ -17,7 +17,7 @@
  */
 using System.Net;
 using Asp.Versioning.ApiExplorer;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Api

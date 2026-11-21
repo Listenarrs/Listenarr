@@ -17,7 +17,7 @@
  */
 using System.Net;
 using Listenarr.Api.Attributes;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;

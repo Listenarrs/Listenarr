@@ -79,7 +79,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
             try
             {
-                var history = await ReadHistoryWithMeasurementAsync(client, QueueSurface, cancellationToken);
+                var history = await ReadHistoryWithMeasurementAsync(client, QueueSurface, cancellationToken, requireCompleteSnapshot: !isMonitorPoll);
                 AppendHistory(
                     client,
                     QueueSurface,
@@ -87,16 +87,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     activeIdentities,
                     history,
                     cancellationToken,
-                    entry => TryMergeOrAppendQueueItem(client, entry, activeIdentities, items),
+                    entry => TryMergeOrAppendQueueItem(client, entry, activeIdentities, items, failOnUnreadableEntry: !isMonitorPoll),
                     monitoredIdSet);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
+                // History is required past the early return above. A full poll drives
+                // orphan cleanup, and a monitored item missing from listgroups can only
+                // be resolved here, so a failed or unreadable history fails the snapshot.
                 LogEnrichmentFailure(client, QueueSurface, items.Count, ex);
-                if (isMonitorPoll && historyRequired)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling NZBGet history.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling NZBGet history.", ex);
             }
         }
 
@@ -125,16 +125,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             }
         }
 
-        private async Task<IReadOnlyList<NzbgetHistoryEntry>> ReadHistoryWithMeasurementAsync(
+        internal async Task<IReadOnlyList<NzbgetHistoryEntry>> ReadHistoryWithMeasurementAsync(
             DownloadClientConfiguration client,
             string surface,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool requireCompleteSnapshot = false)
         {
             var startTimestamp = timeProvider.GetTimestamp();
             var historyCount = 0;
             try
             {
-                var history = await historyReader.ReadAsync(client, cancellationToken);
+                var history = await historyReader.ReadAsync(client, cancellationToken, requireCompleteSnapshot);
                 historyCount = history.Count;
                 return history;
             }
@@ -243,7 +244,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             DownloadClientConfiguration client,
             NzbgetHistoryEntry entry,
             IReadOnlyList<ActiveHistoryIdentity> activeIdentities,
-            IList<QueueItem> items)
+            IList<QueueItem> items,
+            bool failOnUnreadableEntry)
         {
             try
             {
@@ -264,7 +266,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
                 items.Add(historyItem);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (!failOnUnreadableEntry && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(
                     "Failed to map NZBGet queue history entry clientId={ClientId} surface={Surface} failureType={FailureType}",

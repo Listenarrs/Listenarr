@@ -86,7 +86,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
 
         [Fact]
         [Trait("Method", "RemoveOrphansAsync")]
-        public async Task RemoveOrphansAsync_DoesNotRemoveIdlessDownloadWhenLiveSnapshotIsEmpty()
+        public async Task RemoveOrphansAsync_RemovesIdlessDownloadWhenLiveSnapshotIsEmpty()
         {
             var client = CreateClient();
             var download = await AddDownloadAsync(
@@ -99,6 +99,96 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             await service.RemoveOrphansAsync(
                 client,
                 CreateLiveSnapshot(client, []),
+                [],
+                [download]);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            _metricsMock.Verify(m => m.Increment("download.orphan.unlinked_removed", 1), Times.Once);
+            _metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<double>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "RemoveOrphansAsync")]
+        public async Task RemoveOrphansAsync_RemovesOnlyTrackedDownloadWhenLiveSnapshotIsEmpty()
+        {
+            var client = CreateClient();
+            var download = await AddDownloadAsync(
+                id: "sole-active-orphan",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-10),
+                metadata: new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "deleted-in-client"
+                });
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+
+            await service.RemoveOrphansAsync(
+                client,
+                CreateLiveSnapshot(client, []),
+                [],
+                [download]);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            _metricsMock.Verify(m => m.Increment("download.orphan.removed", 1), Times.Once);
+            _metricsMock.Verify(m => m.Increment("download.orphan.unlinked_removed", It.IsAny<double>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Method", "RemoveOrphansAsync")]
+        public async Task RemoveOrphansAsync_DoesNotRemoveRecentDownloadWhenLiveSnapshotIsEmpty()
+        {
+            var client = CreateClient();
+            var download = await AddDownloadAsync(
+                id: "recent-empty-snapshot-download",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-1),
+                metadata: new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "deleted-in-client"
+                });
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+
+            await service.RemoveOrphansAsync(
+                client,
+                CreateLiveSnapshot(client, []),
+                [],
+                [download]);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
+        }
+
+        [Theory]
+        [Trait("Method", "RemoveOrphansAsync")]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        public async Task RemoveOrphansAsync_DoesNotRemoveWhenEmptySnapshotIsNotTrusted(bool usedCachedSnapshot, bool isUnavailable)
+        {
+            var client = CreateClient();
+            var download = await AddDownloadAsync(
+                id: "untrusted-empty-snapshot-download",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-10),
+                metadata: new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "deleted-in-client"
+                });
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+
+            await service.RemoveOrphansAsync(
+                client,
+                new ClientQueueFetchResult(
+                    client,
+                    [],
+                    usedCachedSnapshot,
+                    isUnavailable,
+                    snapshotAge: null,
+                    failureReason: isUnavailable ? "unavailable" : null,
+                    snapshotState: isUnavailable ? "unavailable" : "cached",
+                    snapshotRefreshedAtUtc: DateTimeOffset.UtcNow),
                 [],
                 [download]);
 
@@ -220,6 +310,38 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 [download]);
 
             Assert.NotNull(await _downloadRepository.GetByIdAsync(download.Id));
+            _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
+        }
+
+        [Theory]
+        [Trait("Method", "RemoveOrphansAsync")]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task RemoveOrphansAsync_PreservesChangedPersistedState(bool importStarted)
+        {
+            var client = CreateClient();
+            var original = await AddDownloadAsync(
+                id: "changed-during-poll",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-10),
+                metadata: importStarted ? new() { ["ClientDownloadId"] = "missing-client-item" } : null);
+            var stale = Assert.Single(await _downloadRepository.GetActiveAsync());
+            if (importStarted)
+            {
+                await _downloadRepository.UpdateAsync(original.Importing());
+            }
+            else
+            {
+                await _downloadRepository.FillMissingClientIdentifiersAsync(original.Id, "recovered-client-item", isTorrentClient: false);
+            }
+
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+            await service.RemoveOrphansAsync(client, CreateLiveSnapshot(client, []), [], [stale]);
+
+            var persisted = await _downloadRepository.GetByIdAsync(original.Id);
+            Assert.Equal(importStarted ? DownloadStatus.ImportPending : DownloadStatus.Downloading, persisted?.Status);
+            Assert.Equal(importStarted ? "missing-client-item" : "recovered-client-item", persisted?.GetExternalId());
             _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
         }
 

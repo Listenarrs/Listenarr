@@ -21,37 +21,27 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _logger = logger;
         }
 
+        /// <summary>
+        /// Builds the indexer query for the automatic search sweep.
+        /// </summary>
+        /// <remarks>
+        /// The query is composed by <see cref="AudiobookSearchQueryBuilder"/> rather than
+        /// here. This path used to append the series name unconditionally, repeating text
+        /// the title already carried, and it disagreed with the download path about what
+        /// belongs in a query at all.
+        /// </remarks>
         public string BuildSearchQuery(Audiobook audiobook)
         {
-            var parts = new List<string>();
-
-            if (!string.IsNullOrEmpty(audiobook.Title))
-                parts.Add(audiobook.Title);
-
-            if (audiobook.Authors != null && audiobook.Authors.Any())
-                parts.Add(audiobook.Authors.First());
-
-            if (!string.IsNullOrEmpty(audiobook.Series))
-                parts.Add(audiobook.Series);
-
-            return string.Join(" ", parts);
+            return AudiobookSearchQueryBuilder.Build(audiobook);
         }
 
         // Author-free fallback query: many release names omit the author, so the full
-        // title+author query can return nothing even when the book is available. A title
-        // (+ series) query recovers those. Callers must constrain the broadened results to
-        // titles that still match the book before grabbing.
+        // title+author query can return nothing even when the book is available. The shared
+        // query title recovers those, without the series. Callers must constrain the
+        // broadened results to titles that still match the book before grabbing.
         public string BuildTitleFallbackSearchQuery(Audiobook audiobook)
         {
-            var parts = new List<string>();
-
-            if (!string.IsNullOrEmpty(audiobook.Title))
-                parts.Add(audiobook.Title);
-
-            if (!string.IsNullOrEmpty(audiobook.Series))
-                parts.Add(audiobook.Series);
-
-            return string.Join(" ", parts);
+            return AudiobookSearchQueryBuilder.BuildQueryTitle(audiobook.Title);
         }
 
         public bool IsTorrentResult(SearchResult result)

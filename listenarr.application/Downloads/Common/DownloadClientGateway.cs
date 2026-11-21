@@ -105,6 +105,22 @@ namespace Listenarr.Application.Downloads.Common
             return snapshot with { Items = [.. await Task.WhenAll(tasks)] };
         }
 
+        public async Task<List<QueueItem>> GetTrackedQueueItemsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default)
+        {
+            var ids = downloads
+                .SelectMany(download => DownloadQueueMetadataMatcher.GetKnownClientItemIds(download.Metadata))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ids.Count == 0)
+            {
+                return [];
+            }
+
+            var adapter = ResolveAdapter(client);
+            return await adapter.GetTrackedQueueAsync(client, ids, ct);
+        }
+
         public async Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default)
         {
             if (client == null)
@@ -175,7 +191,7 @@ namespace Listenarr.Application.Downloads.Common
             var ids = GetExternalIds(downloads);
             if (ids.Count == 0)
             {
-                return downloads;
+                return [];
             }
 
             var adapter = ResolveAdapter(client);
@@ -198,6 +214,7 @@ namespace Listenarr.Application.Downloads.Common
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
             items = [.. await Task.WhenAll(tasks)];
 
+            var updatedIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (QueueItem item in items)
             {
                 var download = downloads.FirstOrDefault(d =>
@@ -233,10 +250,13 @@ namespace Listenarr.Application.Downloads.Common
                     isExplicitCompletedState,
                     item.Status);
 
-                download = QueueItemConverter.UpdateFromQueueItem(download, item);
+                QueueItemConverter.UpdateFromQueueItem(download, item);
+                updatedIds.Add(download.Id);
             }
 
-            return downloads;
+            // An absent job has no new telemetry. Writing its snapshot back could
+            // overwrite status or identifiers saved while the poll was in flight.
+            return downloads.Where(download => updatedIds.Contains(download.Id)).ToList();
         }
 
         /// <summary>

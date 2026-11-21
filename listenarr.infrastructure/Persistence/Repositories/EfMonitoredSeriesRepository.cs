@@ -44,16 +44,31 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 ? await _db.MonitoredSeries.FindAsync(new object[] { series.Id }, ct)
                 : null;
 
+            // Serialize new profile references with profile deletion. A sync that only
+            // updates timestamps or errors does not write the profile assignment.
+            var profileId = series.QualityProfileId;
+            var assigningProfile = profileId.HasValue && (existing == null
+                || _db.Entry(existing).Property(monitor => monitor.QualityProfileId).OriginalValue != profileId);
+            await using var transaction = assigningProfile && _db.Database.IsRelational()
+                && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            if (assigningProfile && !await _db.QualityProfiles.AnyAsync(profile => profile.Id == profileId, ct))
+            {
+                throw new ArgumentException($"Quality profile with ID {profileId} no longer exists. Select a valid quality profile.");
+            }
+
             if (existing == null)
             {
                 _db.MonitoredSeries.Add(series);
-                await _db.SaveChangesAsync(ct);
-                return series;
             }
-
-            _db.Entry(existing).CurrentValues.SetValues(series);
+            else
+            {
+                _db.Entry(existing).CurrentValues.SetValues(series);
+            }
             await _db.SaveChangesAsync(ct);
-            return existing;
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return existing ?? series;
         }
 
         public async Task<MonitoredSeries?> GetByNameRegionLanguageAsync(string normalizedName, string region, string language, CancellationToken ct = default)
@@ -68,6 +83,26 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Where(s => s.LastCheckedAt == null || s.LastCheckedAt < cutoff)
                 .OrderBy(s => s.LastCheckedAt ?? DateTime.MinValue)
                 .ToListAsync(ct);
+        }
+
+        public async Task<MonitoredSeries?> UpdateQualityProfileAsync(int id, int qualityProfileId, CancellationToken ct = default)
+        {
+            await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            var series = await _db.MonitoredSeries.SingleOrDefaultAsync(monitor => monitor.Id == id, ct);
+            if (series == null) return null;
+
+            if (!await _db.QualityProfiles.AnyAsync(profile => profile.Id == qualityProfileId, ct))
+            {
+                throw new ArgumentException($"Quality profile with ID {qualityProfileId} no longer exists. Select a valid quality profile.");
+            }
+
+            series.QualityProfileId = qualityProfileId;
+            series.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return series;
         }
 
         public async Task<bool> DeleteAsync(int id, CancellationToken ct = default)

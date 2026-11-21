@@ -1,0 +1,27 @@
+{
+  "products": [
+    {
+      "asin": "B0C6B525PQ",
+      "title": "Tanar of Pellucidar",
+      "language": "english",
+      "authors": [{ "name": "Edgar Rice Burroughs", "asin": "B000APZOQA" }],
+      "narrators": [{ "name": "Rob Vlock" }],
+      "series": [{ "asin": "B0C6PELLUC", "title": "Pellucidar", "sequence": "3" }],
+      "content_type": "Product",
+      "content_delivery_type": "SinglePartBook",
+      "release_date": "2023-05-25",
+      "runtime_length_min": 540
+    },
+    {
+      "asin": "B0TANARDRM",
+      "title": "Tanar of Pellucidar (Dramatized)",
+      "language": "english",
+      "authors": [{ "name": "Edgar Rice Burroughs", "asin": "B000APZOQA" }],
+      "content_type": "Product",
+      "content_delivery_type": "SinglePartBook",
+      "release_date": "2024-01-01",
+      "runtime_length_min": 120
+    }
+  ],
+  "total_results": 2
+}

@@ -16,13 +16,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
         TransmissionRpcClient rpcClient,
         ILogger<TransmissionAdapter> logger)
     {
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        private const string IncompleteSnapshotMessage = "Incomplete Transmission queue snapshot.";
+
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var isMonitorPoll = ids.Count > 0;
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore labels, so a tracked torrent
+            // stays visible after its label changes. Display and discovery keep them.
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             // Keep local filtering for monitor calls. Listenarr stores hash-shaped IDs,
             // while Transmission RPC ID targeting varies across server versions.
@@ -31,7 +34,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                 method = "torrent-get",
                 arguments = new
                 {
-                    fields = new[]
+                    fields = ignoreCategory ? ["id", "hashString"] : new[]
                     {
                         "id", "hashString", "name", "percentDone", "status", "totalSize", "rateDownload", "rateUpload",
                         "leftUntilDone", "eta", "downloadDir", "addedDate", "uploadedEver", "uploadRatio", "labels"
@@ -42,20 +45,36 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
 
             try
             {
-                var response = await rpcClient.InvokeAsync(client, payload, ct);
+                var response = await rpcClient.InvokeAsync(client, payload, ct, allowDuplicateProperties: ids.Count > 0 && !ignoreCategory);
+
+                // HTTP 200 only means the RPC call was answered. An RPC error can still
+                // carry an empty torrents array, which must not read as an empty queue.
+                if (!response.TryGetProperty("result", out var resultProp) ||
+                    resultProp.ValueKind != JsonValueKind.String ||
+                    !string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    var message = $"Transmission RPC did not report success for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
+                    logger.LogWarning("Transmission RPC did not report success for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
+                    throw new DownloadClientAdapterPollingException(message);
+                }
+
                 if (!response.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != JsonValueKind.Array)
                 {
                     var message = $"Transmission returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("Transmission returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
+                var needsNumericId = ignoreCategory && ids.Any(id => int.TryParse(id, out _));
+                var needsHash = ignoreCategory && ids.Any(id => !int.TryParse(id, out _));
                 foreach (var torrent in torrents.EnumerateArray())
                 {
+                    if (ignoreCategory)
+                    {
+                        AddTrackedIdentities(torrent, needsHash, needsNumericId, items);
+                        continue;
+                    }
+
                     try
                     {
                         var labels = TransmissionResponseMapper.ExtractLabels(torrent);
@@ -64,10 +83,23 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                             continue;
                         }
 
-                        items.Add(TransmissionResponseMapper.MapQueueItem(client, torrent));
+                        var item = TransmissionResponseMapper.MapQueueItem(client, torrent);
+                        if (ids.Count == 0 && string.IsNullOrWhiteSpace(item.Id))
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
+                        items.Add(item);
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so a torrent we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (ids.Count == 0)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Failed to map Transmission torrent entry (non-fatal)");
                     }
                 }
@@ -79,13 +111,35 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Failed to retrieve Transmission queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling Transmission queue.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling Transmission queue.", ex);
             }
 
             return FilterByIds(items, ids);
+        }
+
+        private static void AddTrackedIdentities(JsonElement torrent, bool needsHash, bool needsNumericId, List<QueueItem> items)
+        {
+            var hash = needsHash ? TransmissionResponseMapper.GetTorrentHash(torrent) : string.Empty;
+            if (needsHash && torrent.TryGetProperty("hash_string", out _) && torrent.TryGetProperty("hashString", out var alternateHash) &&
+                (alternateHash.ValueKind != JsonValueKind.String || !string.Equals(hash, alternateHash.GetString(), StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new DownloadClientAdapterPollingException("Transmission returned conflicting hashes for a torrent.");
+            }
+
+            var numericId = torrent.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) && value > 0
+                ? value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : null;
+
+            // Both ID formats have been used by the adapter. If a stored format
+            // cannot be checked against this entry, absence is ambiguous.
+            if ((needsHash && string.IsNullOrWhiteSpace(hash)) || (needsNumericId && numericId == null))
+            {
+                throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+            }
+
+            if (needsHash) items.Add(new QueueItem { Id = hash });
+            if (needsNumericId) items.Add(new QueueItem { Id = numericId! });
         }
 
         private static List<QueueItem> FilterByIds(List<QueueItem> items, List<string> ids)

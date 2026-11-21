@@ -26,12 +26,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             JsonElement ffprobeData;
             try
             {
-                if (!File.Exists(_ffprobePath))
-                {
-                    throw new FfmpegException("ffprobe binary is unavailable.");
-                }
+                var ffprobePath = ResolveFfprobePath()
+                    ?? throw new FfmpegException("ffprobe binary is unavailable.");
 
-                if (!FileSystemSafety.TryValidateMutationTarget(_ffprobePath, [_baseDir], out var safeFfprobePath, out var ffprobeReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(ffprobePath, [_applicationBaseDirectory, _legacyDirectory], out var safeFfprobePath, out var ffprobeReason))
                 {
                     throw new FfmpegException($"ffprobe binary is unavailable or outside configured root: {LogRedaction.SanitizeText(ffprobeReason)}");
                 }
@@ -41,13 +39,20 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     throw new FfmpegException($"ffprobe target does not exist: {sanitizedPublicPath}");
                 }
 
-                if (!FileUtils.IsAudioFile(fileSource.PublicPath))
+                if (!FileUtils.IsAudioFile(fileSource.PublicPath)
+                    && !FileUtils.IsAmbiguousAudioContainer(fileSource.PublicPath))
                 {
                     throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedPublicPath}");
                 }
 
+                var ffprobeFailure = (await ValidateFfprobeAsync(safeFfprobePath)).Failure;
+                if (ffprobeFailure != null)
+                {
+                    throw new FfmpegException($"ffprobe binary is unavailable: {LogRedaction.SanitizeText(ffprobeFailure)}");
+                }
+
                 var safeReadPath = Path.GetFullPath(fileSource.ReadPath);
-                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
+                _logger.LogInformation("Running ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
 
                 var startInfo = new ProcessStartInfo
                 {
@@ -106,23 +111,20 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             return metadata;
         }
 
-        public string FfprobePath
-        {
-            get
-            {
-                return _ffprobePath;
-            }
-        }
-
         public async Task<string> GetLicenseAsync()
         {
-            var licensePath = Path.Join(_baseDir, "LICENSE_NOTICE.txt");
-            if (System.IO.File.Exists(licensePath))
+            var path = ResolveFfprobePath();
+            if (path == null)
             {
-                return await System.IO.File.ReadAllTextAsync(licensePath);
+                return string.Empty;
             }
 
-            return string.Empty;
+            if (path != ResolvePackagedFfprobePath())
+            {
+                return LegacyLicenseNotice;
+            }
+
+            return PackagedLicenseNotice((await ValidateFfprobeAsync(path)).Version);
         }
     }
 }

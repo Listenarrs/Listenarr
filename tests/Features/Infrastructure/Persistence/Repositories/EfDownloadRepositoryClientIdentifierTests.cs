@@ -91,5 +91,23 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence.Repositories
             Assert.Null(await _downloadRepository.FillMissingClientIdentifiersAsync(
                 "does-not-exist", "hash-A", isTorrentClient: true));
         }
+
+        [Fact]
+        public async Task TryUpdateFromClientPollAsync_DoesNotOverwriteAnImportTransition()
+        {
+            await _downloadRepository.AddAsync(new DownloadBuilder().WithId("stale-poll").WithTitle("Book")
+                .WithStatus(DownloadStatus.Downloading).WithExternalId("live-client-item").Build());
+            var persisted = (await _downloadRepository.GetByIdAsync("stale-poll"))!;
+            var expected = persisted.Clone();
+            var telemetry = persisted.Clone();
+            telemetry.Progress = 50;
+            await _downloadRepository.UpdateAsync(persisted.Importing());
+
+            Assert.False(await _downloadRepository.TryUpdateFromClientPollAsync(expected, telemetry));
+
+            var current = await _downloadRepository.GetByIdAsync("stale-poll");
+            Assert.Equal(DownloadStatus.ImportPending, current?.Status);
+            Assert.NotEqual(50m, current?.Progress);
+        }
     }
 }

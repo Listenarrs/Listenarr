@@ -97,10 +97,11 @@ public sealed class ReleasedJournalRecoveryUpgradeTests : BaseTests
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");
+                await using var legacySeed = new Released134SeedDbContext(options);
                 if (ownerMode != 0)
                 {
-                    legacy.Audiobooks.Add(audiobook);
-                    await legacy.SaveChangesAsync();
+                    legacySeed.Audiobooks.Add(audiobook);
+                    await legacySeed.SaveChangesAsync();
                 }
                 await legacy.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO "FileMutationJournals" (

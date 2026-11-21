@@ -87,6 +87,17 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <returns>List of updated values for the given IDs</returns>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default);
 
+        /// <summary>
+        /// Look up tracked items by ID without the client's configured category, so a
+        /// tracked job stays visible after its category changes. Orphan cleanup uses it
+        /// to confirm an item is gone. A failed lookup throws.
+        /// </summary>
+        /// <param name="client">Download client configuration</param>
+        /// <param name="ids">Client item IDs of tracked downloads</param>
+        /// <param name="ct"></param>
+        /// <returns>Identity-only items for cleanup membership, not progress, import, or action decisions.</returns>
+        Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default);
+
         Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
         /// <summary>

@@ -23,6 +23,7 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task<Download> AddAsync(Download download);
         Task<Download?> FindAsync(string id);
         Task UpdateAsync(Download download);
+        Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default);
         Task UpdateMetadataAsync(string id, string key, object? value);
 
         /// <summary>
@@ -39,6 +40,8 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
             bool isTorrentClient,
             CancellationToken ct = default);
         Task RemoveAsync(string id);
+        /// <summary>Deletes an orphan only if its persisted status and client identity still match the snapshot.</summary>
+        Task<bool> TryRemoveUnchangedOrphanAsync(Download expected, CancellationToken ct = default);
         Task<List<Download>> GetAllAsync();
         Task<List<Download>> GetQueueDisplayCandidatesAsync();
         Task<List<Download>> GetQueueMatchingCandidatesAsync();

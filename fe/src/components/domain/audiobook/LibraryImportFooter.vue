@@ -25,6 +25,21 @@
           <option value="none">None</option>
         </select>
       </label>
+      <label v-if="qualityProfiles.length" class="footer-label">
+        Quality profile for new books
+        <select v-model="qualityProfileId" class="mode-select" :disabled="isImporting">
+          <option :value="null" disabled>Select a quality profile</option>
+          <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
+            {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
+          </option>
+        </select>
+      </label>
+      <span v-else-if="qualityProfilesLoaded" class="footer-label">
+        To import new books, set up a profile in
+        <RouterLink :to="{ path: '/settings', hash: '#quality-profiles' }"
+          >Settings → Quality Profiles</RouterLink
+        >.
+      </span>
       <label class="footer-label">
         On import:
         <select v-model="store.action" class="mode-select" :disabled="isImporting">
@@ -123,9 +138,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { PhWarning, PhPlay, PhStop, PhSpinner, PhDownload } from '@phosphor-icons/vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
@@ -136,12 +152,31 @@ const props = defineProps<{
 }>()
 
 const store = useLibraryImportStore()
+const configStore = useConfigurationStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
 
 const destinationFolderId = ref<number | null>(props.folders[0]?.id ?? null)
 const isImporting = ref(false)
 const importingCount = ref(0)
+const qualityProfiles = computed(() => configStore.qualityProfiles)
+const qualityProfileId = ref<number | null>(null)
+const qualityProfilesLoaded = ref(false)
+
+watch(
+  qualityProfiles,
+  (profiles) => {
+    if (!profiles.some((profile) => profile.id === qualityProfileId.value)) {
+      qualityProfileId.value = profiles.find((profile) => profile.isDefault)?.id ?? null
+    }
+  },
+  { immediate: true },
+)
+
+onMounted(async () => {
+  await configStore.loadQualityProfiles()
+  qualityProfilesLoaded.value = true
+})
 
 const destinationPath = computed(() => {
   if (store.action == 'none') return ''
@@ -183,7 +218,11 @@ async function handleImport() {
   isImporting.value = true
 
   try {
-    const { imported, errors, warnings = [] } = await store.importSelected(destinationPath.value)
+    const {
+      imported,
+      errors,
+      warnings = [],
+    } = await store.importSelected(destinationPath.value, qualityProfileId.value ?? undefined)
 
     if (imported > 0) {
       let msg = `${imported} book${imported !== 1 ? 's' : ''} imported`
@@ -194,7 +233,9 @@ async function handleImport() {
     if (errors.length > 0) {
       toast.error(
         'Import errors',
-        `${errors.length} item${errors.length !== 1 ? 's' : ''} failed - check logs`,
+        errors.length === 1
+          ? errors[0]
+          : `${errors.length} items failed. First error: ${errors[0]}`,
       )
     }
 

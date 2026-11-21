@@ -104,6 +104,25 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
+        [HttpPut("{id:int}/quality-profile")]
+        [ProducesResponseType(typeof(MonitoredAuthorResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<MonitoredAuthorResponse>> UpdateQualityProfile(
+            int id,
+            [FromBody] MonitoringQualityProfileRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var monitor = await _authorMonitoringService.UpdateQualityProfileAsync(id, request.QualityProfileId, cancellationToken);
+                return monitor == null ? NotFound() : Ok(ToResponse(monitor));
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+        }
+
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> UnmonitorAuthor(int id, CancellationToken cancellationToken = default)
         {
@@ -133,6 +152,7 @@ namespace Listenarr.Api.Features.Library
                 AuthorAsin = monitoredAuthor.AuthorAsin,
                 Region = monitoredAuthor.Region,
                 Language = monitoredAuthor.Language,
+                QualityProfileId = monitoredAuthor.QualityProfileId,
                 CreatedAt = monitoredAuthor.CreatedAt,
                 UpdatedAt = monitoredAuthor.UpdatedAt,
                 LastCheckedAt = monitoredAuthor.LastCheckedAt,
@@ -174,6 +194,8 @@ namespace Listenarr.Api.Features.Library
             public string Region { get; set; } = "us";
 
             public string Language { get; set; } = "all";
+
+            public int? QualityProfileId { get; set; }
 
             public DateTime CreatedAt { get; set; }
 

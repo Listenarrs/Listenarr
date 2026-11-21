@@ -23,6 +23,12 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Compile Remove="Listenarr.FakeProviders\**\*.cs" />
+		<EmbeddedResource Remove="Listenarr.FakeProviders\**\*" />
+		<Compile Remove="Listenarr.BackendIntegrationTests\**\*.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<Reference Include="Microsoft.CodeAnalysis">
 			<HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
 			<Private>true</Private>
@@ -36,6 +42,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\listenarr.api\Listenarr.Api.csproj" />
 		<ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
+		<ProjectReference Include="Listenarr.FakeProviders\Listenarr.FakeProviders.csproj" />
 	</ItemGroup>
   <ItemGroup>
     <None Update="Fixtures/AutomaticSearch/identity-policy-v1.json" CopyToOutputDirectory="PreserveNewest" />

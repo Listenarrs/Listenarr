@@ -1,0 +1,53 @@
+{
+  "products": [
+    {
+      "asin": "B0077DEH7A",
+      "title": "The Stand",
+      "language": "english",
+      "authors": [{ "name": "Stephen King" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "sku": "sku-stand",
+      "merchandising_summary": "desc1",
+      "publisher_name": "Random House Audio",
+      "runtime_length_min": 2867
+    },
+    {
+      "asin": "B005UR3VFO",
+      "title": "11-22-63",
+      "language": "english",
+      "authors": [{ "name": "Stephen King" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "sku": "sku-112263",
+      "merchandising_summary": "desc2",
+      "publisher_name": "Simon & Schuster Audio",
+      "runtime_length_min": 1840
+    },
+    {
+      "asin": "B00NOJ47PU",
+      "title": "Not Stephen King",
+      "language": "english",
+      "authors": [{ "name": "Somebody Else" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "sku": "sku-other",
+      "merchandising_summary": "desc3",
+      "publisher_name": "Elsewhere",
+      "runtime_length_min": 600
+    },
+    {
+      "asin": "B019WPM4ZM",
+      "title": "It",
+      "language": "english",
+      "authors": [{ "name": "Stephen King" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "sku": "sku-it",
+      "merchandising_summary": "desc4",
+      "publisher_name": "Simon & Schuster Audio",
+      "runtime_length_min": 2683
+    }
+  ],
+  "total_results": 4
+}

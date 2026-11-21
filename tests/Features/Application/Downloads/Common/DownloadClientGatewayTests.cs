@@ -1,7 +1,7 @@
 using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.DownloadClients;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Common
 {
@@ -139,11 +139,13 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
                 .Build());
             var downloadClientAdapterMock = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
 
-            var downloads = await downloadClientGateway.FetchDownloadsAsync(client, [newDownload]);
+            var absent = new DownloadBuilder().WithId("absent").WithExternalId("absent-in-client").Build();
+            var idless = new DownloadBuilder().WithId("idless").Build();
+            var downloads = await downloadClientGateway.FetchDownloadsAsync(client, [newDownload, absent, idless]);
             Assert.NotEmpty(downloads);
             Assert.Single(downloads);
             Assert.False(downloadClientAdapterMock.LastQueueRequestWasFullSnapshot);
-            Assert.Equal(["1"], downloadClientAdapterMock.LastRequestedQueueIds);
+            Assert.Equal(["1", "absent-in-client"], downloadClientAdapterMock.LastRequestedQueueIds);
 
             var download = downloads.First();
             Assert.NotNull(download);

@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="SharpCompress" />
     <PackageReference Include="HtmlAgilityPack" />
+    <PackageReference Include="Openur.FFprobeStatic" />
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" />
     <PackageReference Include="Polly" />
@@ -30,7 +31,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The licence texts and source notice for the packaged ffprobe travel with it into every build and publish output. -->
+    <None Include="..\licenses\ffprobe\**" LinkBase="licenses\ffprobe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Listenarr.Tests" />
+    <InternalsVisibleTo Include="Listenarr.FakeProviders" />
     <EmbeddedResource Include="Search\Matching\release-annotations.json" LogicalName="Listenarr.Infrastructure.Search.Matching.release-annotations.json" />
   </ItemGroup>
 

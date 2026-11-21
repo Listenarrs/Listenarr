@@ -26,11 +26,18 @@ namespace Listenarr.Application.Downloads.Queue
     {
         private static readonly TimeSpan OrphanedDownloadGracePeriod = TimeSpan.FromMinutes(5);
 
+        public List<Download> GetEligibleDownloads(IEnumerable<Download> downloads)
+        {
+            var now = DateTime.UtcNow;
+            return downloads.Where(download => IsEligible(download, now)).ToList();
+        }
+
         public async Task RemoveOrphansAsync(
             DownloadClientConfiguration client,
             ClientQueueFetchResult clientQueueResult,
             List<QueueItem> mappedQueueItems,
-            List<Download> clientDownloads)
+            List<Download> clientDownloads,
+            CancellationToken ct = default)
         {
             if (clientQueueResult.UsedCachedSnapshot)
             {
@@ -56,16 +63,9 @@ namespace Listenarr.Application.Downloads.Queue
                 return;
             }
 
+            // The live queue and category-independent ID lookup both contribute presence.
+            // A trusted empty result can clear the sole orphan that would otherwise block re-grabs.
             var clientQueue = clientQueueResult.QueueItems;
-            if (clientQueue.Count == 0 && clientDownloads.Any())
-            {
-                logger.LogWarning(
-                    "Skipping orphan cleanup for client {ClientName}: client returned 0 queue items but {Count} downloads are tracked. Client may be temporarily unreachable.",
-                    client.Name,
-                    clientDownloads.Count);
-                return;
-            }
-
             var liveClientItemIds = BuildLiveClientItemIds(clientQueue, mappedQueueItems);
             var now = DateTime.UtcNow;
             var cleanupCandidates = clientDownloads
@@ -91,9 +91,15 @@ namespace Listenarr.Application.Downloads.Queue
                 return;
             }
 
+            var missingFromSnapshotCount = 0;
+            var missingExternalIdCount = 0;
             foreach (var candidate in cleanupCandidates)
             {
                 var download = candidate.Download;
+                if (!await downloadRepository.TryRemoveUnchangedOrphanAsync(download, ct))
+                {
+                    continue;
+                }
 
                 // There are two cleanup paths and both are intentionally logged for
                 // debugging: a known client item disappeared from a trusted snapshot,
@@ -101,6 +107,7 @@ namespace Listenarr.Application.Downloads.Queue
                 // and therefore cannot ever be monitored or reconciled with a client.
                 if (candidate.Reason == OrphanCleanupReason.MissingExternalId)
                 {
+                    missingExternalIdCount++;
                     logger.LogInformation(
                         "Removing unreconcilable active download {DownloadId} '{Title}' for client {ClientName}: no external client ID is stored, so it cannot be monitored or reconciled",
                         download.Id,
@@ -109,6 +116,7 @@ namespace Listenarr.Application.Downloads.Queue
                 }
                 else
                 {
+                    missingFromSnapshotCount++;
                     var externalId = candidate.ExternalIds.First();
                     logger.LogInformation(
                         "Removing orphaned download {DownloadId} '{Title}' for client {ClientName}: external id {ExternalId} was not found in live queue snapshot",
@@ -117,12 +125,8 @@ namespace Listenarr.Application.Downloads.Queue
                         client.Name,
                         externalId);
                 }
-
-                await downloadRepository.RemoveAsync(download.Id);
             }
 
-            var missingFromSnapshotCount = cleanupCandidates.Count(candidate => candidate.Reason == OrphanCleanupReason.MissingFromClientSnapshot);
-            var missingExternalIdCount = cleanupCandidates.Count(candidate => candidate.Reason == OrphanCleanupReason.MissingExternalId);
             if (missingFromSnapshotCount > 0)
             {
                 DownloadQueueDiagnostics.TryIncrementMetric(metrics, "download.orphan.removed", missingFromSnapshotCount);
@@ -153,38 +157,19 @@ namespace Listenarr.Application.Downloads.Queue
             return liveClientItemIds;
         }
 
-        private OrphanCleanupReason? GetCleanupReason(
+        private static OrphanCleanupReason? GetCleanupReason(
             Download download,
             List<string> externalIds,
             HashSet<string> liveClientItemIds,
             DateTime now)
         {
-            if (download.Status is not (DownloadStatus.Queued or DownloadStatus.Downloading or DownloadStatus.Paused))
+            if (!IsEligible(download, now))
             {
-                return null;
-            }
-
-            var age = now - download.StartedAt;
-            if (age < OrphanedDownloadGracePeriod)
-            {
-                logger.LogDebug(
-                    "Skipping orphan cleanup for recent download {DownloadId} '{Title}' (age: {Age:F1} min)",
-                    download.Id,
-                    download.Title,
-                    age.TotalMinutes);
                 return null;
             }
 
             if (externalIds.Count == 0)
             {
-                // Direct-download records are owned internally by Listenarr. They do
-                // not have a download-client queue item to reconcile against, so the
-                // absence of ClientDownloadId/TorrentHash is valid only for DDL.
-                if (string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-
                 return OrphanCleanupReason.MissingExternalId;
             }
 
@@ -195,6 +180,11 @@ namespace Listenarr.Application.Downloads.Queue
 
             return OrphanCleanupReason.MissingFromClientSnapshot;
         }
+
+        private static bool IsEligible(Download download, DateTime now) =>
+            download.Status is (DownloadStatus.Queued or DownloadStatus.Downloading or DownloadStatus.Paused) &&
+            now - download.StartedAt >= OrphanedDownloadGracePeriod &&
+            !string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase);
 
         private enum OrphanCleanupReason
         {

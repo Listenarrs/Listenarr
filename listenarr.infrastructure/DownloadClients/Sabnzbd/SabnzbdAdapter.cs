@@ -88,6 +88,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
         public Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default)
             => GetQueueAsync(client, [], ct);
 
+        public Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+            => _queueFetchWorkflow.GetQueueAsync(client, ids, ct, trackedPresence: true);
+
         public Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
             => _historyFetchWorkflow.GetRecentHistoryAsync(client, limit, ct);
 

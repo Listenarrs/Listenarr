@@ -79,13 +79,12 @@ dotnet ef database update
 cd fe
 npm run test:unit
 
-# Run E2E tests with Cypress
-cd fe  
-npm run test:e2e
-
-# Open Cypress interactively for debugging
+# Run frontend integration tests with Playwright (browser, stubbed API)
 cd fe
-npm run test:e2e:dev
+npm run test:frontend-integration
+
+# Run backend integration tests (whole app in process, API only; needs ffprobe)
+dotnet test tests/Listenarr.BackendIntegrationTests
 ```
 
 ## Architecture Overview
@@ -259,7 +258,7 @@ This produces a single deployment artifact containing both backend and frontend.
 - Automatic migrations on startup
 
 ### External Dependencies
-- FFprobe binary required for audio metadata extraction (auto-installed by `FfmpegInstallerService`)
+- FFprobe binary required for audio metadata extraction (shipped via the `Openur.FFprobeStatic` NuGet package and resolved by `FfmpegService`)
 - Playwright browsers for web scraping (downloaded on first use)
 
 ### CI/CD Integration  

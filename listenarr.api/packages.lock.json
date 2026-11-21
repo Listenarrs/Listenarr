@@ -245,7 +245,7 @@
       "listenarr.application": {
         "type": "Project",
         "dependencies": {
-          "AsyncKeyedLock": "[8.0.2, )",
+          "AsyncKeyedLock": "[8.1.3, )",
           "Listenarr.Domain": "[1.0.0, )"
         }
       },
@@ -255,7 +255,7 @@
       "listenarr.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "AsyncKeyedLock": "[8.0.2, )",
+          "AsyncKeyedLock": "[8.1.3, )",
           "BencodeNET": "[4.0.0, )",
           "HtmlAgilityPack": "[1.12.4, )",
           "Listenarr.Application": "[1.0.0, )",
@@ -263,6 +263,7 @@
           "Microsoft.EntityFrameworkCore": "[10.0.8, )",
           "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.8, )",
           "Microsoft.Extensions.Http.Polly": "[10.0.8, )",
+          "Openur.FFprobeStatic": "[9.0.2.508, )",
           "Polly": "[8.6.6, )",
           "Serilog.Sinks.File": "[7.0.0, )",
           "SharpCompress": "[0.49.1, )",
@@ -272,9 +273,9 @@
       },
       "AsyncKeyedLock": {
         "type": "CentralTransitive",
-        "requested": "[8.0.2, )",
-        "resolved": "8.0.2",
-        "contentHash": "QGys5cnIerNryv7V14PDkvGnlLz69kJtTfdnr+Lndcu+lRre397RNyU4FIeAJWgI9u73lTzXL52Qca9B/ncLXw=="
+        "requested": "[8.1.3, )",
+        "resolved": "8.1.3",
+        "contentHash": "/4iI329KfH9KiQe09QjCf5iM4pTsOSNdVwTRxHyFRUXlOtEh4TwLFsX8isHpAAyz3HvmRRhs5eJRlwD7qcK7jA=="
       },
       "BencodeNET": {
         "type": "CentralTransitive",
@@ -329,6 +330,12 @@
           "Polly.Extensions.Http": "3.0.0"
         }
       },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
+      },
       "Polly": {
         "type": "CentralTransitive",
         "requested": "[8.6.6, )",
@@ -375,6 +382,12 @@
         "type": "Transitive",
         "resolved": "3.50.4.5",
         "contentHash": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q=="
+      },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
       }
     },
     "net10.0/linux-x64": {
@@ -382,6 +395,12 @@
         "type": "Transitive",
         "resolved": "3.50.4.5",
         "contentHash": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q=="
+      },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
       }
     },
     "net10.0/osx-x64": {
@@ -389,6 +408,12 @@
         "type": "Transitive",
         "resolved": "3.50.4.5",
         "contentHash": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q=="
+      },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
       }
     },
     "net10.0/win-x64": {
@@ -396,6 +421,12 @@
         "type": "Transitive",
         "resolved": "3.50.4.5",
         "contentHash": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q=="
+      },
+      "Openur.FFprobeStatic": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.2.508, )",
+        "resolved": "9.0.2.508",
+        "contentHash": "6v9fwkAspw3SJBG4osqOQV+K+sm+odDc9b+RHjIZTAFUzmpMgNDwviKLzI+UeitLKi8atLfuof4dcKF5dZMRHw=="
       }
     }
   }

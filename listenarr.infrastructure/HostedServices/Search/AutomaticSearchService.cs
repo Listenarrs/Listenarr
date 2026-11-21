@@ -248,7 +248,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
                 await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (IsContainableBroadcastFailure(ex, stoppingToken))
             {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
             }
@@ -303,7 +303,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 var hub2 = scope2.ServiceProvider.GetRequiredService<IHubContext<DownloadHub>>();
                 await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (IsContainableBroadcastFailure(ex, stoppingToken))
             {
                 _logger.LogDebug(ex, "Failed to broadcast scored search results for audiobook {Id}", audiobook.Id);
             }
@@ -373,6 +373,16 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
                     audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
             }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // The host is not stopping, so this is a local cancellation or timeout
+                // (HttpClient timeouts surface as TaskCanceledException). Name the submission step here,
+                // then rethrow: the per-book handler skips the LastSearchTime write, so the book
+                // stays eligible for the next cycle instead of waiting out the cooldown.
+                _logger.LogWarning("Canceled/timed out queuing download for audiobook '{Title}': {ResultTitle}. The book stays eligible for the next cycle",
+                    audiobook.Title, topResult.SearchResult.Title);
+                throw;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Failed to queue download for audiobook '{Title}': {ResultTitle}",
@@ -381,6 +391,14 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             return downloadsQueued;
         }
+
+        // A debug broadcast must never decide whether a grab happens. Contain every failure,
+        // including an OperationCanceledException that is not the host stopping (a timeout
+        // surfaces as TaskCanceledException). A real shutdown still propagates.
+        private static bool IsContainableBroadcastFailure(Exception ex, CancellationToken stoppingToken) =>
+            ex is not OutOfMemoryException
+            && ex is not StackOverflowException
+            && !(ex is OperationCanceledException && stoppingToken.IsCancellationRequested);
 
     }
 }

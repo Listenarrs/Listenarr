@@ -468,17 +468,46 @@
             </div>
 
             <div class="option-group">
-              <label class="form-label">Quality Profile</label>
-              <select v-model="options.qualityProfileId" class="form-select">
-                <option :value="null">Use Default Profile</option>
+              <label :for="qualityProfileSelectId" class="form-label">Quality Profile</label>
+              <select
+                :id="qualityProfileSelectId"
+                v-model="options.qualityProfileId"
+                class="form-select"
+                data-testid="quality-profile-select"
+                :disabled="!qualityProfilesLoaded || qualityProfiles.length === 0"
+              >
+                <option :value="null" disabled>Select a quality profile</option>
                 <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                   {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
                 </option>
               </select>
               <small class="form-help">
-                Choose which quality profile to use for automatic downloads. Leave as "Use Default
-                Profile" to automatically use the default profile.
+                Choose which quality profile to use for automatic downloads.
               </small>
+              <div
+                v-if="qualityProfilesLoaded && qualityProfiles.length === 0"
+                class="path-validation-error"
+                data-testid="quality-profile-warning"
+              >
+                <PhWarning :size="16" />
+                <span>
+                  No quality profiles exist. Create one in
+                  <RouterLink
+                    :to="{ path: '/settings', hash: '#quality-profiles' }"
+                    @click="closeModal"
+                    >Settings → Quality Profiles</RouterLink
+                  >
+                  before adding audiobooks.
+                </span>
+              </div>
+              <div
+                v-else-if="qualityProfileValidationError"
+                class="path-validation-error"
+                data-testid="quality-profile-error"
+              >
+                <PhWarning :size="16" />
+                <span>{{ qualityProfileValidationError }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -498,6 +527,8 @@
           metadataLoading ||
           Boolean(destinationPathValidationError) ||
           Boolean(asinValidationError) ||
+          !qualityProfilesLoaded ||
+          Boolean(qualityProfileValidationError) ||
           metadataLookupFailed
         "
       >
@@ -510,7 +541,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick, useId } from 'vue'
 import type {
   AudibleBookMetadata,
   QualityProfile,
@@ -518,6 +549,7 @@ import type {
   AudiobookSeriesMembership,
 } from '@/types'
 import { apiService } from '@/services/api'
+import { isEmptyRecord, recordOfResponse } from '@/services/audiobookSearch'
 import { getApiValidationError } from '@/services/apiErrors'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
@@ -550,7 +582,7 @@ import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 import {
   normalizeSearchRegion,
   orderedSearchRegionOptions,
-  searchRegionOptions,
+  regionLabel,
 } from '@/utils/languageMapping'
 
 interface Props {
@@ -572,6 +604,9 @@ const toast = useToast()
 
 const isAdding = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
+const qualityProfilesLoaded = ref(false)
+const qualityProfileSelectId = useId()
+const serverQualityProfileValidationError = ref<string | null>(null)
 
 const options = ref({
   monitored: true,
@@ -895,6 +930,27 @@ const estimatedFullPath = computed(() => {
 })
 const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)
+watch(
+  () => options.value.qualityProfileId,
+  () => {
+    serverQualityProfileValidationError.value = null
+  },
+)
+
+// A book without a quality profile is never searched, so adding requires a valid one.
+const qualityProfileValidationError = computed(() => {
+  if (!qualityProfilesLoaded.value) return null
+  if (qualityProfiles.value.length === 0) {
+    return 'No quality profiles exist. Create one in Settings → Quality Profiles before adding audiobooks.'
+  }
+  if (serverQualityProfileValidationError.value) return serverQualityProfileValidationError.value
+  const selectedId = options.value.qualityProfileId
+  if (selectedId == null || !qualityProfiles.value.some((profile) => profile.id === selectedId)) {
+    return 'Select a quality profile.'
+  }
+  return null
+})
+
 const destinationPathValidationError = computed(() => {
   if (serverDestinationValidationError.value) return serverDestinationValidationError.value
 
@@ -956,10 +1012,6 @@ const metadataRegionOptions = computed(() =>
     'us',
   ]),
 )
-
-function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
 
 // An ASIN can be corrected by hand (Audible sometimes republishes a book under a new one), but a
 // malformed one could never be looked up again, so it blocks the add; no ASIN is still allowed
@@ -1166,13 +1218,8 @@ async function lookupMetadata(
     | Partial<Audible>
   const source =
     'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
-  const metadata =
-    'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
-      ? payload.metadata
-      : (payload as Partial<Audible>)
-  if (!metadata || typeof metadata !== 'object') return { found: true, enriched: null, source }
-  // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
-  if (metadata.asin && !metadata.title) return { found: false, enriched: null }
+  const metadata = recordOfResponse<Partial<Audible>>(payload)
+  if (isEmptyRecord(metadata)) return { found: false, enriched: null }
   // The record's region, else the region this request found it in: never the book's own region,
   // which may be the catalogue that just failed
   const enrichedMeta = {
@@ -1253,9 +1300,14 @@ const seedPreview = async () => {
   showMetadataEditor.value = false
 
   try {
+    qualityProfilesLoaded.value = false
+    serverQualityProfileValidationError.value = null
     await configStore.loadQualityProfiles()
     if (!isCurrentSeed(generation)) return
     qualityProfiles.value = configStore.qualityProfiles
+    options.value.qualityProfileId =
+      qualityProfiles.value.find((profile) => profile.isDefault)?.id ?? null
+    qualityProfilesLoaded.value = true
 
     // Load application settings to get default root
     await configStore.loadApplicationSettings()
@@ -1575,7 +1627,7 @@ const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
 }
 
 const addToLibrary = async () => {
-  if (!props.book) return
+  if (!props.book || !qualityProfilesLoaded.value) return
   if (metadataLookupFailed.value) return
   if (asinValidationError.value) {
     toast.error('Invalid ASIN', asinValidationError.value)
@@ -1583,6 +1635,10 @@ const addToLibrary = async () => {
   }
   if (destinationPathValidationError.value) {
     toast.error('Invalid destination', destinationPathValidationError.value)
+    return
+  }
+  if (qualityProfileValidationError.value) {
+    toast.error('Quality profile required', qualityProfileValidationError.value)
     return
   }
 
@@ -1597,7 +1653,7 @@ const addToLibrary = async () => {
     submittedTitle = metadataToSend.title || submittedTitle
     const result = await apiService.addToLibrary(metadataToSend, {
       monitored: options.value.monitored,
-      qualityProfileId: options.value.qualityProfileId || undefined,
+      qualityProfileId: options.value.qualityProfileId ?? undefined,
       autoSearch: options.value.autoSearch,
       destinationPath: destination,
     })
@@ -1618,6 +1674,13 @@ const addToLibrary = async () => {
     }
 
     console.error('Failed to add audiobook:', err)
+    const profileError = getApiValidationError(err, 'qualityProfileId')
+    if (profileError) {
+      serverQualityProfileValidationError.value = profileError.message
+      toast.error('Quality profile required', profileError.message)
+      return
+    }
+
     const validationError = getApiValidationError(err, 'destinationPath')
     if (validationError) {
       serverDestinationValidationError.value = validationError.message

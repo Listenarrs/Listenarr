@@ -53,16 +53,39 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await using var transaction = ctx.Database.IsRelational()
                 ? await ctx.Database.BeginTransactionAsync() : null;
             var current = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == download.Id);
-            if (current != null && bool.TryParse(current.GetMetadataString(
-                    Download.ImportSourceRetentionRequiredMetadataKey), out var retainSource) && retainSource)
-            {
-                // Pollers may hold older snapshots while import starts. Retention is
-                // monotonic for this download and must survive their subsequent saves.
-                download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
-            }
+            PreserveImportSourceRetention(current, download);
             ctx.Downloads.Update(download);
             await ctx.SaveChangesAsync();
             if (transaction != null) await transaction.CommitAsync();
+        }
+
+        public async Task<bool> TryUpdateFromClientPollAsync(Download expected, Download updated, CancellationToken ct = default)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync(ct) : null;
+            var current = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(download => download.Id == expected.Id, ct);
+            if (!MatchesClientPollState(current, expected))
+            {
+                return false;
+            }
+
+            PreserveImportSourceRetention(current, updated);
+            ApplyActiveDeduplicationKey(updated);
+            ctx.Downloads.Update(updated);
+            await ctx.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return true;
+        }
+
+        private static void PreserveImportSourceRetention(Download? current, Download updated)
+        {
+            if (current != null && bool.TryParse(current.GetMetadataString(
+                    Download.ImportSourceRetentionRequiredMetadataKey), out var retainSource) && retainSource)
+            {
+                // Retention is monotonic for this download and must survive later saves.
+                updated.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            }
         }
 
         public async Task UpdateMetadataAsync(string id, string key, object? value)
@@ -158,6 +181,40 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             if (d == null) return;
             ctx.Downloads.Remove(d);
             await ctx.SaveChangesAsync();
+        }
+
+        public async Task<bool> TryRemoveUnchangedOrphanAsync(Download expected, CancellationToken ct = default)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
+            // Keep the comparison and delete in the same SQLite write transaction.
+            // A queue refresh or import can claim the record while the client is polled.
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync(ct) : null;
+            var current = await ctx.Downloads.FindAsync([expected.Id], ct);
+            if (current == null || !MatchesClientPollState(current, expected))
+            {
+                return false;
+            }
+
+            ctx.Downloads.Remove(current);
+            await ctx.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return true;
+        }
+
+        private static bool MatchesClientPollState(Download? current, Download expected) =>
+            current != null && current.Status == expected.Status && current.StartedAt == expected.StartedAt &&
+            string.Equals(current.DownloadClientId, expected.DownloadClientId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(current.DownloadPath, expected.DownloadPath, StringComparison.Ordinal) &&
+            string.Equals(current.FinalPath, expected.FinalPath, StringComparison.Ordinal) &&
+            HasSameClientIdentifier(current, expected, "ClientDownloadId") &&
+            HasSameClientIdentifier(current, expected, "TorrentHash");
+
+        private static bool HasSameClientIdentifier(Download current, Download expected, string key)
+        {
+            TryGetMetadataString(current.Metadata, key, out var currentId);
+            TryGetMetadataString(expected.Metadata, key, out var expectedId);
+            return string.Equals(currentId, expectedId, StringComparison.OrdinalIgnoreCase);
         }
 
         public async Task<List<Download>> GetAllAsync()

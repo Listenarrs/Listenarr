@@ -181,7 +181,7 @@ namespace Listenarr.Application.Metadata.Extraction
                     || !_fileSystem.FileExists(ffprobePathService))
                 {
                     _logger.LogInformation(
-                        "No bundled ffprobe available at configured location; skipping ffprobe for file: {File}",
+                        "No usable ffprobe available; skipping ffprobe for file: {File}",
                         LogRedaction.SanitizeFilePath(fileSource.PublicPath));
                     return null;
                 }

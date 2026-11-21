@@ -14,26 +14,10 @@ public sealed class ProductionCompositionValidationTests : BaseTests
     [Fact]
     public void DevelopmentComposition_ValidatesCompleteProductionServiceGraph()
     {
-        var contentRoot = Path.Join(
-            Path.GetTempPath(),
-            "listenarr-tests",
-            $"development-composition-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(contentRoot);
+        var contentRoot = CreateContentRoot();
         try
         {
-            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-            {
-                ContentRootPath = contentRoot,
-                EnvironmentName = Environments.Development
-            });
-            var fileSystem = new LocalFileSystem();
-            builder.Configuration["Listenarr:SqliteDbPath"] = Path.Join(
-                contentRoot,
-                "composition.db");
-            builder.AddListenarrApiServices(fileSystem);
-            builder.Services.AddListenarrInfrastructureComposition(
-                builder.Configuration,
-                builder.Environment);
+            var builder = CreateDevelopmentBuilder(contentRoot);
 
             Type[] affectedSingletonServiceTypes =
             [
@@ -86,6 +70,11 @@ public sealed class ProductionCompositionValidationTests : BaseTests
 
             Type[] affectedScopedServiceTypes =
             [
+                typeof(IAuthorMonitoringService),
+                typeof(ISeriesMonitoringService),
+                typeof(ILibraryAddService),
+                typeof(IQualityProfileService),
+                typeof(IQualityProfileRepository),
                 typeof(IAudiobookDeletionCommitService),
                 typeof(IAudiobookDeletionIntentStore),
                 typeof(IAudiobookDeletionIntentReconciler),
@@ -115,6 +104,8 @@ public sealed class ProductionCompositionValidationTests : BaseTests
                 typeof(ScanBackgroundService),
                 typeof(MoveBackgroundService),
                 typeof(MetadataRescanService),
+                typeof(AuthorMonitoringBackgroundService),
+                typeof(SeriesMonitoringBackgroundService),
                 typeof(DownloadProcessingJobProcessor),
                 typeof(UnmatchedScanBackgroundService),
                 typeof(StartupDbNormalizer)
@@ -179,5 +170,65 @@ public sealed class ProductionCompositionValidationTests : BaseTests
         {
             Directory.Delete(contentRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task DevelopmentComposition_FfmpegServiceResolvesAndChecksThePackagedBinary()
+    {
+        var contentRoot = CreateContentRoot();
+        try
+        {
+            var builder = CreateDevelopmentBuilder(contentRoot);
+            using var provider = builder.Services.BuildServiceProvider(
+                new ServiceProviderOptions
+                {
+                    ValidateScopes = true,
+                    ValidateOnBuild = true
+                });
+
+            // The registration supplies the application base and the production process runner,
+            // so this resolves the binary restored into the test output and runs its -version
+            // check for real.
+            var service = Assert.IsType<FfmpegService>(
+                provider.GetRequiredService<IFfmpegService>());
+            var path = await service.GetFfprobePathAsync();
+
+            Assert.NotNull(path);
+            Assert.StartsWith(
+                Path.GetFullPath(AppContext.BaseDirectory),
+                Path.GetFullPath(path));
+        }
+        finally
+        {
+            Directory.Delete(contentRoot, recursive: true);
+        }
+    }
+
+    private static string CreateContentRoot()
+    {
+        var contentRoot = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"development-composition-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(contentRoot);
+        return contentRoot;
+    }
+
+    private static WebApplicationBuilder CreateDevelopmentBuilder(string contentRoot)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = contentRoot,
+            EnvironmentName = Environments.Development
+        });
+        var fileSystem = new LocalFileSystem();
+        builder.Configuration["Listenarr:SqliteDbPath"] = Path.Join(
+            contentRoot,
+            "composition.db");
+        builder.AddListenarrApiServices(fileSystem);
+        builder.Services.AddListenarrInfrastructureComposition(
+            builder.Configuration,
+            builder.Environment);
+        return builder;
     }
 }

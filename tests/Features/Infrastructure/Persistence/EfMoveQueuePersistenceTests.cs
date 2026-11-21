@@ -9,7 +9,7 @@
  */
 
 using Listenarr.Infrastructure.Persistence.Repositories;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Realtime;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
