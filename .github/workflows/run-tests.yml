@@ -114,6 +114,9 @@ jobs:
       - name: E2E failure-GIF tests
         run: npm run --silent test:e2e-gif
 
+      - name: E2E shard plan tests
+        run: npm run --silent test:e2e-plan
+
       - name: Frontend lint
         run: npm run --silent lint:frontend
 
@@ -345,9 +348,9 @@ jobs:
       - name: Install synthetic audiobook generator dependencies
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
 
-      - name: Run Playwright E2E tests (browser, app in Docker)
+      - name: Run Playwright E2E tests (browser, app in Docker, 3 shards)
         working-directory: fe
-        run: npm run test:e2e${{ inputs.coverage && ' -- --coverage' || '' }}
+        run: npm run test:e2e -- --stacks=3${{ inputs.coverage && ' --coverage' || '' }}
 
       - name: Upload coverage
         if: ${{ !cancelled() && inputs.coverage }}
@@ -355,7 +358,7 @@ jobs:
         with:
           name: coverage-e2e-tests
           path: |
-            fe/test-results/e2e-coverage/lcov.info
+            fe/test-results/e2e-coverage/**/lcov.info
             fe/test-results/e2e-coverage-backend/cobertura.xml
             fe/test-results/e2e-coverage-backend/summary.md
           retention-days: 7

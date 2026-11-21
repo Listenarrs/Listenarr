@@ -4,33 +4,38 @@
 // which answers metadata from fixtures and permits only the download scenarios' loopback qBittorrent
 // sidecar. The container cannot resolve external DNS names.
 //
-// The runner builds the images, generates the audiobook folders (generate-library-fixtures.sh),
-// seeds the library and root folders, then runs Playwright; every test restores the seeded database
-// and files first. With --coverage, coverage is collected on both sides:
-// - frontend: V8 coverage from Chromium, mapped to the sources, in fe/test-results/e2e-coverage/
-//   (index.html, lcov.info);
-// - backend: dotnet-coverage around the test host, merged into cobertura.xml, with summary.md for the
-//   library import code, in fe/test-results/e2e-coverage-backend/.
+// The runner builds the images once, generates the audiobook folders once (generate-library-fixtures.sh),
+// then starts one stack per Playwright shard, each with its own container, ports and seeded directories,
+// and runs the shards in parallel. With --coverage, coverage is collected on both sides:
+// - frontend: V8 coverage from Chromium, mapped to the sources, one report per shard under
+//   fe/test-results/e2e-coverage/frontend/ (the CI coverage job merges every lcov.info);
+// - backend: dotnet-coverage around each host, merged into one Cobertura report in
+//   fe/test-results/e2e-coverage-backend/, with summary.md for the library import code.
 // Both are reported, not gated; a CI run with the coverage input merges them with the other test jobs'
 // (scripts/test-coverage/aggregate.mjs).
-// The container, the images and the temporary data are removed at the end.
+// The containers, the images of a dirty checkout and the temporary data are removed at the end.
 //
-//   node scripts/e2e/run.mjs [--coverage] [--serve] [-- <playwright test arguments>]
+//   node scripts/e2e/run.mjs [--coverage] [--stacks N] [--serve] [-- <playwright test arguments>]
 //
-// --serve starts the stack and waits (Ctrl+C to stop): run Playwright yourself with the variables it prints.
-// Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on.
+// --serve keeps one stack up (no sharding): run Playwright yourself with the variables it prints.
+// Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on to every shard.
+import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   availablePort,
+  ensureImages,
   frontendDirectory,
   playwrightCli,
+  removeImages,
   repositoryRoot,
   start,
   startListenarrStack,
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
+import { stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -38,14 +43,32 @@ const argv = process.argv.slice(2)
 const separator = argv.indexOf('--')
 const options = separator === -1 ? argv : argv.slice(0, separator)
 const playwrightArguments = separator === -1 ? [] : argv.slice(separator + 1)
-for (const option of options) {
+const stacksOption = options.find((option) => option.startsWith('--stacks='))
+const flags = options.filter((option) => option !== stacksOption && !option.startsWith('--stacks'))
+for (const option of flags) {
   if (!['--coverage', '--serve'].includes(option)) throw new Error(`Unknown option ${option}.`)
 }
-const coverage = options.includes('--coverage')
-const serve = options.includes('--serve')
+const coverage = flags.includes('--coverage')
+const serve = flags.includes('--serve')
+const count = stacksOption
+  ? Number(stacksOption.slice('--stacks='.length))
+  : Number(process.env.LISTENARR_E2E_STACKS ?? 3)
+if (serve && count !== 1) throw new Error('--serve works with one stack only (use --stacks=1).')
 
 if (!existsSync(playwrightCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')
+}
+
+const git = (...args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim()
+const head = git('rev-parse', 'HEAD')
+const dirty = git('status', '--porcelain').length > 0
+const runId = `${process.pid}-${Date.now().toString(36)}`
+
+/** Distinct host ports for every stack's API and Vite dev server, chosen before the stacks start. */
+async function allocatePorts(count) {
+  const ports = new Set()
+  while (ports.size < count) ports.add(await availablePort())
+  return [...ports]
 }
 
 // Separate directories: the frontend report tool empties its own when the suite starts.
@@ -58,49 +81,79 @@ if (coverage) {
   await mkdir(rawBackendCoverageDirectory, { recursive: true })
 }
 
+const plan = stackPlan({
+  head,
+  dirty,
+  runId,
+  count,
+  coverage,
+  coverageRoot: join(frontendDirectory, 'test-results'),
+})
+const ports = await allocatePorts(count * 2)
+const apiPorts = ports.slice(0, count)
+const webPorts = ports.slice(count)
+let fixtureTemplate
+let stacks = []
 let exitCode = 1
-let stack
 try {
-  stack = await startListenarrStack({
-    name: 'listenarr-e2e',
-    seedFile: join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'),
-    rootFolders: [
-      { name: 'E2E Import', path: '/e2e/import', isDefault: true },
-      { name: 'E2E Second', path: '/e2e/second' },
-      { name: 'E2E Empty', path: '/e2e/empty' },
-      { name: 'E2E Library', path: '/e2e/library' },
+  fixtureTemplate = await mkdtemp(join(tmpdir(), 'listenarr-e2e-fixtures-'))
+  const generator = start(
+    'bash',
+    [
+      join(repositoryRoot, 'scripts', 'e2e', 'generate-library-fixtures.sh'),
+      fixtureTemplate,
     ],
-    environment: {
-      LISTENARR_E2E_QBITTORRENT: '1',
-      ...(coverage ? { LISTENARR_COVERAGE_DIR: '/coverage' } : {}),
-    },
-    dockerRunArguments: [
-      // The test host stubs outbound clients except for the loopback sidecar.
-      // Disabling DNS also isolates requests outside IHttpClientFactory from external hostnames.
-      '--dns',
-      '127.0.0.1',
-      // dotnet-coverage writes its report when the host stops: give it the time.
-      ...(coverage ? ['--stop-timeout', '120'] : []),
-    ],
-    volumes: coverage ? [`${rawBackendCoverageDirectory}:/coverage`] : [],
-    async generateFixtures(seedFilesystemDirectory) {
-      const generator = start(
-        'bash',
-        [join(repositoryRoot, 'scripts', 'e2e', 'generate-library-fixtures.sh'), seedFilesystemDirectory],
-        { cwd: repositoryRoot },
-      )
-      await waitForExit(generator, 'Synthetic audiobook library generation')
-    },
-  })
+    { cwd: repositoryRoot },
+  )
+  await waitForExit(generator, 'Synthetic audiobook library generation')
 
-  const testEnvironment = {
-    ...stack.testEnvironment,
-    LISTENARR_API_URL: stack.apiUrl,
-    LISTENARR_E2E_WEB_PORT: String(await availablePort()),
-    ...(coverage ? { LISTENARR_COVERAGE: '1' } : {}),
-  }
+  await ensureImages({ appImage: plan.appImage, hostImage: plan.hostImage, reuse: plan.reusable })
+  stacks = await Promise.all(
+    plan.stacks.map(async (descriptor, index) => {
+      if (descriptor.backendCoverageDirectory) await mkdir(descriptor.backendCoverageDirectory, { recursive: true })
+      return startListenarrStack({
+        name: descriptor.name,
+        apiPort: apiPorts[index],
+        appImage: plan.appImage,
+        hostImage: plan.hostImage,
+        buildImages: false,
+        reuseImages: plan.reusable,
+        seedFile: join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'),
+        rootFolders: [
+          { name: 'E2E Import', path: '/e2e/import', isDefault: true },
+          { name: 'E2E Second', path: '/e2e/second' },
+          { name: 'E2E Empty', path: '/e2e/empty' },
+          { name: 'E2E Library', path: '/e2e/library' },
+        ],
+        environment: {
+          LISTENARR_E2E_QBITTORRENT: '1',
+          ...(coverage ? { LISTENARR_COVERAGE_DIR: `/coverage-${descriptor.name}` } : {}),
+        },
+        dockerRunArguments: [
+          // The test host stubs outbound clients except for the loopback sidecar.
+          // Disabling DNS also isolates requests outside IHttpClientFactory from external hostnames.
+          '--dns',
+          '127.0.0.1',
+          // dotnet-coverage writes its report when the host stops: give it the time.
+          ...(coverage ? ['--stop-timeout', '120'] : []),
+        ],
+        volumes: descriptor.backendCoverageDirectory
+          ? [`${descriptor.backendCoverageDirectory}:/coverage-${descriptor.name}`]
+          : [],
+        async generateFixtures(seedFilesystemDirectory) {
+          await rm(seedFilesystemDirectory, { recursive: true, force: true })
+          await cp(fixtureTemplate, seedFilesystemDirectory, { recursive: true })
+        },
+      })
+    }),
+  )
 
   if (serve) {
+    const testEnvironment = {
+      ...stacks[0].testEnvironment,
+      LISTENARR_API_URL: stacks[0].apiUrl,
+      LISTENARR_E2E_WEB_PORT: String(webPorts[0]),
+    }
     console.log('\nListenarr E2E stack is running. In fe/, run Playwright with:\n')
     console.log(
       `env ${Object.entries(testEnvironment)
@@ -117,28 +170,62 @@ try {
     clearInterval(keepAlive)
     exitCode = 0
   } else {
-    const suite = start(
-      process.execPath,
-      [playwrightCli, 'test', '--config', 'playwright.e2e.config.ts', ...playwrightArguments],
-      { cwd: frontendDirectory, env: { ...process.env, ...testEnvironment } },
+    const results = await Promise.allSettled(
+      stacks.map(async (stack, index) => {
+        const descriptor = plan.stacks[index]
+        const testEnvironment = {
+          ...stack.testEnvironment,
+          LISTENARR_API_URL: stack.apiUrl,
+          LISTENARR_E2E_WEB_PORT: String(webPorts[index]),
+          LISTENARR_E2E_OUTPUT_DIR: join(frontendDirectory, 'test-results', 'e2e', String(index)),
+          ...(coverage
+            ? {
+                LISTENARR_COVERAGE: '1',
+                LISTENARR_E2E_COVERAGE_DIR: descriptor.frontendCoverageDirectory,
+              }
+            : {}),
+        }
+        const suite = start(
+          process.execPath,
+          [playwrightCli, 'test', '--config', 'playwright.e2e.config.ts', ...descriptor.shard, ...playwrightArguments],
+          { cwd: frontendDirectory, env: { ...process.env, ...testEnvironment } },
+        )
+        try {
+          await waitForExit(suite, `The E2E suite (shard ${index + 1}/${count})`)
+        } catch (error) {
+          await stack.run(
+            ['logs', '--tail', '300', stack.containerName],
+            `Listenarr container logs after E2E shard ${index + 1} failed`,
+          )
+          throw error
+        }
+      }),
     )
-    try {
-      await waitForExit(suite, 'The E2E suite')
-      exitCode = 0
-    } catch (error) {
-      await stack.run(['logs', '--tail', '300', stack.containerName], 'Listenarr container logs after the E2E suite failed')
-      console.error(error.message)
-    }
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length === 0) exitCode = 0
+    else failures.forEach((failure) => console.error(failure.reason.message))
   }
 
   if (coverage) {
-    // The last process lifetime's report is written when the host stops.
-    await stack.run(['stop', stack.containerName], 'Listenarr container stop for the coverage report')
+    // The last process lifetime's report is written when each host stops.
+    await Promise.all(
+      stacks.map((stack) => stack.run(['stop', stack.containerName], 'Listenarr container stop for the coverage report')),
+    )
+    for (const [index, descriptor] of plan.stacks.entries()) {
+      const reports = (await readdir(descriptor.backendCoverageDirectory)).filter((file) => file.endsWith('.xml'))
+      for (const report of reports) {
+        await cp(
+          join(descriptor.backendCoverageDirectory, report),
+          join(rawBackendCoverageDirectory, `${index}-${report}`),
+        )
+      }
+      await rm(descriptor.backendCoverageDirectory, { recursive: true, force: true })
+    }
     const reports = (await readdir(rawBackendCoverageDirectory)).filter((file) => file.endsWith('.xml'))
     if (reports.length === 0) {
       console.error('No backend coverage report was written.')
     } else {
-      await stack.run(
+      await stacks[0].run(
         [
           'run',
           '--rm',
@@ -148,7 +235,7 @@ try {
           '/opt/dotnet-coverage/dotnet-coverage',
           '--volume',
           `${backendCoverageDirectory}:/coverage`,
-          stack.hostImage,
+          plan.hostImage,
           'merge',
           '--output-format',
           'cobertura',
@@ -158,17 +245,23 @@ try {
         ],
         'Backend coverage merge',
       )
-      await rm(rawBackendCoverageDirectory, { recursive: true, force: true })
       await summarizeBackendCoverage(join(backendCoverageDirectory, 'cobertura.xml'), backendCoverageDirectory)
     }
   }
 } finally {
   // Turn the videos Playwright kept for failed tests into GIFs, whichever path we took out of the suite.
-  // A GIF conversion failure must never skip removing the stack.
   try {
     await convertVideos(join(frontendDirectory, 'test-results', 'e2e'))
   } finally {
-    await stack?.dispose()
+    await Promise.allSettled(stacks.map((stack) => stack.dispose()))
+    if (fixtureTemplate) await rm(fixtureTemplate, { recursive: true, force: true })
+    if (!plan.reusable) {
+      try {
+        await removeImages(plan.appImage, plan.hostImage)
+      } catch (error) {
+        console.error(`Could not clean up the Listenarr images: ${error.message}`)
+      }
+    }
   }
 }
 
