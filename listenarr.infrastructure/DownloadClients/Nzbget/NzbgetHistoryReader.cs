@@ -98,11 +98,21 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             {
                 ct.ThrowIfCancellationRequested();
                 var entry = value.Element("struct");
+                if (entry == null)
+                {
+                    if (requireCompleteSnapshot)
+                    {
+                        throw new InvalidOperationException("Missing NZBGet struct.");
+                    }
+
+                    continue;
+                }
+
                 if (requireCompleteSnapshot)
                 {
                     RequireOnlyChildren(value, "struct");
                     var names = new HashSet<string>(StringComparer.Ordinal);
-                    if (entry!.Elements().Any(element => element.Name != "member") || HasText(entry))
+                    if (entry.Elements().Any(element => element.Name != "member") || HasText(entry))
                     {
                         throw new InvalidOperationException("Incomplete NZBGet struct.");
                     }
@@ -116,7 +126,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                         }
                     }
                 }
-                if (entry != null) yield return entry;
+                yield return entry;
             }
         }
 

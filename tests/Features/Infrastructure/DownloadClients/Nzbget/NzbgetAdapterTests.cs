@@ -2869,15 +2869,15 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         [Fact]
         public async Task GetQueueAsync_NormalizesHostWithSchemeAndPath()
         {
+            const string responseBody = "<?xml version=\"1.0\"?><methodResponse><params><param><value><array><data></data></array></value></param></params></methodResponse>";
+            using var listGroupsResponse = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody) };
+            using var historyResponse = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody) };
+            var responses = new Queue<HttpResponseMessage>([listGroupsResponse, historyResponse]);
             Uri? capturedUri = null;
             var handler = new DelegatingHandlerMock((req, _) =>
             {
                 capturedUri = req.RequestUri;
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        "<?xml version=\"1.0\"?><methodResponse><params><param><value><array><data></data></array></value></param></params></methodResponse>")
-                });
+                return Task.FromResult(responses.Dequeue());
             });
 
             using var http = new HttpClient(handler);

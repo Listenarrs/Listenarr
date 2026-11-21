@@ -63,25 +63,30 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
         var requests = new ConcurrentQueue<string>();
         var server = Task.Run(async () =>
         {
-            try
+            while (listener.IsListening)
             {
-                while (listener.IsListening)
+                HttpListenerContext context;
+                try
                 {
-                    var context = await listener.GetContextAsync();
-                    using var reader = new StreamReader(context.Request.InputStream);
-                    var request = await reader.ReadToEndAsync();
-                    requests.Enqueue(context.Request.RawUrl + " " + request);
-                    var method = type == "nzbget" ? XDocument.Parse(request).Root!.Element("methodName")!.Value : string.Empty;
-                    var body = Response(type, scenario, context.Request, request, method);
-                    var bytes = Encoding.UTF8.GetBytes(body);
-                    context.Response.ContentLength64 = bytes.Length;
-                    await context.Response.OutputStream.WriteAsync(bytes);
-                    context.Response.Close();
+                    context = await listener.GetContextAsync();
                 }
+                catch (Exception ex) when (!listener.IsListening &&
+                    ex is HttpListenerException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // Stop can interrupt an outstanding accept on either platform.
+                    return;
+                }
+
+                using var response = context.Response;
+                using var reader = new StreamReader(context.Request.InputStream);
+                var request = await reader.ReadToEndAsync();
+                requests.Enqueue(context.Request.RawUrl + " " + request);
+                var method = type == "nzbget" ? XDocument.Parse(request).Root!.Element("methodName")!.Value : string.Empty;
+                var body = Response(type, scenario, context.Request, request, method);
+                var bytes = Encoding.UTF8.GetBytes(body);
+                response.ContentLength64 = bytes.Length;
+                await response.OutputStream.WriteAsync(bytes);
             }
-            catch (HttpListenerException) { }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) when (!listener.IsListening) { }
         });
 
         var path = Path.Join(Path.GetTempPath(), $"presence-{Guid.NewGuid():N}.sqlite");
@@ -113,8 +118,7 @@ public sealed class DownloadClientPresenceSafetyTests : BaseTests
             }
             if (scenario.StartsWith("WARNING/", StringComparison.Ordinal))
             {
-                Assert.NotNull(stored);
-                Assert.Equal(DownloadStatus.Downloading, stored.Status);
+                Assert.Equal(DownloadStatus.Downloading, stored?.Status);
             }
         }
         finally

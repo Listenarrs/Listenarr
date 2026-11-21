@@ -67,7 +67,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                     request.Headers.Authorization = authHeader;
                 }
 
-                var response = await httpClient.SendAsync(request, ct);
+                using var response = await httpClient.SendAsync(request, ct);
                 var body = await response.Content.ReadAsStringAsync(ct);
 
                 if (response.StatusCode == HttpStatusCode.Conflict && attempt == 0 && response.Headers.TryGetValues("X-Transmission-Session-Id", out var values))

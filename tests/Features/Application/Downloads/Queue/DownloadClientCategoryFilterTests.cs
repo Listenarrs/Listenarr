@@ -159,10 +159,16 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
               }
             }
             """;
-            var handler = new DelegatingHandlerMock((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            using var monitoredResponse = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
-            }));
+            };
+            using var trackedResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            var responses = new Queue<HttpResponseMessage>([monitoredResponse, trackedResponse]);
+            var handler = new DelegatingHandlerMock((_, _) => Task.FromResult(responses.Dequeue()));
             using var httpClient = new HttpClient(handler);
             var httpFactory = new Mock<IHttpClientFactory>();
             httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
