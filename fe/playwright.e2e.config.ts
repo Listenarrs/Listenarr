@@ -8,8 +8,11 @@ const webUrl = `http://127.0.0.1:${webPort}`
 const coverage = process.env.LISTENARR_COVERAGE === '1'
 // Each parallel shard writes its traces and videos under its own directory.
 const outputDir = process.env.LISTENARR_E2E_OUTPUT_DIR ?? './test-results/e2e'
+// Parallel shards must not optimize dependencies into the same Vite cache at once.
+const viteCacheDir = process.env.LISTENARR_E2E_VITE_CACHE_DIR
 
 export default defineConfig({
+  cacheDir: viteCacheDir,
   testDir: './playwright/e2e',
   testMatch: '**/*.spec.ts',
   outputDir,
