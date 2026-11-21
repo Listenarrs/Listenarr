@@ -160,6 +160,36 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await ctx.SaveChangesAsync();
         }
 
+        public async Task<bool> TryRemoveUnchangedOrphanAsync(Download expected, CancellationToken ct = default)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
+            // Keep the comparison and delete in the same SQLite write transaction.
+            // A queue refresh or import can claim the record while the client is polled.
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync(ct) : null;
+            var current = await ctx.Downloads.FindAsync([expected.Id], ct);
+            if (current == null || current.Status != expected.Status ||
+                current.StartedAt != expected.StartedAt ||
+                !string.Equals(current.DownloadClientId, expected.DownloadClientId, StringComparison.OrdinalIgnoreCase) ||
+                !HasSameClientIdentifier(current, expected, "ClientDownloadId") ||
+                !HasSameClientIdentifier(current, expected, "TorrentHash"))
+            {
+                return false;
+            }
+
+            ctx.Downloads.Remove(current);
+            await ctx.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return true;
+        }
+
+        private static bool HasSameClientIdentifier(Download current, Download expected, string key)
+        {
+            TryGetMetadataString(current.Metadata, key, out var currentId);
+            TryGetMetadataString(expected.Metadata, key, out var expectedId);
+            return string.Equals(currentId, expectedId, StringComparison.OrdinalIgnoreCase);
+        }
+
         public async Task<List<Download>> GetAllAsync()
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();

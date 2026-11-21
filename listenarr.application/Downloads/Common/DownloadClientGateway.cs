@@ -191,7 +191,7 @@ namespace Listenarr.Application.Downloads.Common
             var ids = GetExternalIds(downloads);
             if (ids.Count == 0)
             {
-                return downloads;
+                return [];
             }
 
             var adapter = ResolveAdapter(client);
@@ -214,6 +214,7 @@ namespace Listenarr.Application.Downloads.Common
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
             items = [.. await Task.WhenAll(tasks)];
 
+            var updatedIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (QueueItem item in items)
             {
                 var download = downloads.FirstOrDefault(d =>
@@ -249,10 +250,13 @@ namespace Listenarr.Application.Downloads.Common
                     isExplicitCompletedState,
                     item.Status);
 
-                download = QueueItemConverter.UpdateFromQueueItem(download, item);
+                QueueItemConverter.UpdateFromQueueItem(download, item);
+                updatedIds.Add(download.Id);
             }
 
-            return downloads;
+            // An absent job has no new telemetry. Writing its snapshot back could
+            // overwrite status or identifiers saved while the poll was in flight.
+            return downloads.Where(download => updatedIds.Contains(download.Id)).ToList();
         }
 
         /// <summary>

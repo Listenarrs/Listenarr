@@ -313,6 +313,38 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
         }
 
+        [Theory]
+        [Trait("Method", "RemoveOrphansAsync")]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task RemoveOrphansAsync_PreservesChangedPersistedState(bool importStarted)
+        {
+            var client = CreateClient();
+            var original = await AddDownloadAsync(
+                id: "changed-during-poll",
+                clientId: client.Id,
+                status: DownloadStatus.Downloading,
+                startedAt: DateTime.UtcNow.AddMinutes(-10),
+                metadata: importStarted ? new() { ["ClientDownloadId"] = "missing-client-item" } : null);
+            var stale = Assert.Single(await _downloadRepository.GetActiveAsync());
+            if (importStarted)
+            {
+                await _downloadRepository.UpdateAsync(original.Importing());
+            }
+            else
+            {
+                await _downloadRepository.FillMissingClientIdentifiersAsync(original.Id, "recovered-client-item", isTorrentClient: false);
+            }
+
+            var service = _provider.GetRequiredService<DownloadOrphanCleanupService>();
+            await service.RemoveOrphansAsync(client, CreateLiveSnapshot(client, []), [], [stale]);
+
+            var persisted = await _downloadRepository.GetByIdAsync(original.Id);
+            Assert.Equal(importStarted ? DownloadStatus.ImportPending : DownloadStatus.Downloading, persisted?.Status);
+            Assert.Equal(importStarted ? "missing-client-item" : "recovered-client-item", persisted?.GetExternalId());
+            _metricsMock.Verify(m => m.Increment(It.IsAny<string>(), It.IsAny<double>()), Times.Never);
+        }
+
         private async Task<Download> AddDownloadAsync(
             string id,
             string clientId,
