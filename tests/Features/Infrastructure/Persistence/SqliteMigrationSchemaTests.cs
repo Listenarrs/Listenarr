@@ -33,7 +33,7 @@ public class SqliteMigrationSchemaTests : BaseTests
     // asserted apart from it. Two branches that each add a migration would otherwise rewrite
     // the same two lines of this file and conflict on merge in either order.
     private const string EmbedCoverArtSettingMigrationId =
-        "20261119200000_AddEmbedCoverArtInAudioFilesSetting";
+        "20261121200000_AddEmbedCoverArtInAudioFilesSetting";
 
     private static readonly string[] BranchMigrationIds =
         [EmbedCoverArtSettingMigrationId];

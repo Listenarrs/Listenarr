@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20261119200000_AddEmbedCoverArtInAudioFilesSetting")]
+    [Migration("20261121200000_AddEmbedCoverArtInAudioFilesSetting")]
     partial class AddEmbedCoverArtInAudioFilesSetting
     {
         /// <inheritdoc />
@@ -886,6 +886,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSuccessfulSyncAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("QualityProfileId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Region")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -897,6 +900,8 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("LastCheckedAt");
+
+                    b.HasIndex("QualityProfileId");
 
                     b.HasIndex("AuthorNameNormalized", "Region", "Language")
                         .IsUnique();
@@ -928,6 +933,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSuccessfulSyncAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("QualityProfileId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Region")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -953,6 +961,8 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("LastCheckedAt");
+
+                    b.HasIndex("QualityProfileId");
 
                     b.HasIndex("SeriesNameNormalized", "Region", "Language")
                         .IsUnique();

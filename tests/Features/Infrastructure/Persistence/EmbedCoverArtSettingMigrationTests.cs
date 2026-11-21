@@ -26,7 +26,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 public class EmbedCoverArtSettingMigrationTests : BaseTests
 {
     private const string EmbedCoverArtSettingMigrationId =
-        "20261119200000_AddEmbedCoverArtInAudioFilesSetting";
+        "20261121200000_AddEmbedCoverArtInAudioFilesSetting";
     private const string SettingsTable = "ApplicationSettings";
     private const string EmbedCoverArtColumn = "EmbedCoverArtInAudioFiles";
 
