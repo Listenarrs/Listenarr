@@ -155,11 +155,105 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
                     .Build()
             ];
 
+            Assert.NotNull((await _downloadRepository.GetByIdAsync(download.Id))!.GetCompletionObservedAt());
+
             _monitor.ScheduleNextClientPoll(_client, -100);
             await _monitor.MonitorDownloadsAsync(CancellationToken.None);
 
-            Assert.NotEqual(DownloadStatus.Completed, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+            var inProgress = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotEqual(DownloadStatus.Completed, inProgress!.Status);
+            // Restarting the window means dropping the observation, not keeping the old one: a
+            // later completion report has to wait out a full window of its own.
+            Assert.Null(inProgress.GetCompletionObservedAt());
             Assert.Null(await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync(download.Id));
+        }
+
+        [Fact]
+        [Trait("Scenario", "Polls at unchanged telemetry keep counting from the first completion report")]
+        public async Task CompletionWindow_DoesNotRestart_AcrossHoldCyclesAtUnchangedTelemetry()
+        {
+            // The hold cycles in the tests above mostly follow a poll that changed the row, so a
+            // second write of the same row in one pass would be rejected by the client-poll guard
+            // and go unnoticed. Here the client reports the same completed item on every poll, so
+            // any extra write in a pass lands, and one that cleared the observation would restart
+            // the window on every cycle and never release the download.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCompletionStabilitySeconds(60)
+                .Build());
+
+            var download = await DriveToCompletionAsync();
+            var firstObserved = (await _downloadRepository.GetByIdAsync(download.Id))!.GetCompletionObservedAt();
+            Assert.NotNull(firstObserved);
+
+            for (var cycle = 0; cycle < 2; cycle++)
+            {
+                _clock.Advance(TimeSpan.FromSeconds(20));
+                _monitor.ScheduleNextClientPoll(_client, -100);
+                await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+                var held = await _downloadRepository.GetByIdAsync(download.Id);
+                Assert.NotEqual(DownloadStatus.Completed, held!.Status);
+                Assert.Equal(firstObserved, held.GetCompletionObservedAt());
+            }
+
+            _clock.Advance(TimeSpan.FromSeconds(21));
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            Assert.Equal(DownloadStatus.Completed, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+        }
+
+        [Fact]
+        [Trait("Scenario", "A download the client did not list and that holds no completion is not written back")]
+        public async Task UnlistedDownloadWithoutAnObservation_IsNotWrittenBack()
+        {
+            // Only a held completion the client stopped listing is added back to the pass. Any
+            // other download the client left out has no new telemetry, and writing back the copy
+            // loaded at the start of the pass would overwrite what another writer saved while the
+            // poll was in flight. The progress change below is such a write; the client-poll guard
+            // does not compare progress, so only leaving the row out of the pass keeps it.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCompletionStabilitySeconds(60)
+                .Build());
+
+            var listed = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithDownloading(0)
+                .WithExternalId("1")
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+            var unlisted = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithDownloading(0)
+                .WithExternalId("2")
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+
+            var path = FileUtils.GetAbsolutePath(DownloadCLientAdapterMock.RemotePath, "random title");
+            ClientAdapter().QueueItemsMock = [
+                new QueueItemBuilder()
+                    .WithId("1")
+                    .WithRemotePath(path)
+                    .WithContentPath(path)
+                    .WithSourceFile(Path.Join(path, "file1.mp3"))
+                    .WithProgress(50)
+                    .WithStatus("downloading")
+                    .Build()
+            ];
+            ClientAdapter().DuringFilteredQueueRequest = async () =>
+            {
+                var current = await _downloadRepository.GetByIdAsync(unlisted.Id);
+                current!.Progress = 42;
+                await _downloadRepository.UpdateAsync(current);
+            };
+
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            // The control: the listed download in the same pass was written.
+            Assert.Equal(50m, (await _downloadRepository.GetByIdAsync(listed.Id))!.Progress);
+            var kept = await _downloadRepository.GetByIdAsync(unlisted.Id);
+            Assert.NotNull(kept);
+            Assert.Null(kept!.GetCompletionObservedAt());
+            Assert.Equal(42m, kept.Progress);
         }
 
         [Fact]
