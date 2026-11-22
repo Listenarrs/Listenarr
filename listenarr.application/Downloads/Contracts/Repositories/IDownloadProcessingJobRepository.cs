@@ -35,7 +35,8 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task UpdateAsync(DownloadProcessingJob job);
 
         /// <summary>
-        /// Save a download and the job that will import it in one transaction.
+        /// Save a download and the job that will import it in one transaction, provided the
+        /// stored rows still allow the retry the caller decided on.
         /// </summary>
         /// <remarks>
         /// The worker runs any pending job it can see, and it fails a job whose download is not
@@ -43,11 +44,20 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         /// is eligible, and a failure between the writes leaves a runnable job behind for a download
         /// that is still blocked. The job is inserted when no row has its id yet and updated
         /// otherwise; with no job, only the download is saved.
+        ///
+        /// The caller decides from rows it read before the transaction, and another retry can
+        /// import the download or queue its own job in between. So inside the transaction the
+        /// stored download must still be blocked or awaiting importation, and the download's
+        /// active job must still be <paramref name="expectedActiveJobId"/>. Otherwise nothing is
+        /// saved and the result is false.
         /// </remarks>
+        /// <param name="download">The download as the caller changed it.</param>
+        /// <param name="job">The job to insert or update, or null to save only the download.</param>
+        /// <param name="expectedActiveJobId">The active job the caller found, or null when it found none.</param>
         /// <exception cref="Listenarr.Application.Common.UniqueConstraintViolationException">
         /// When another active job for the download was committed first. Nothing is saved.
         /// </exception>
-        Task SaveWithDownloadAsync(Download download, DownloadProcessingJob? job);
+        Task<bool> TrySaveWithDownloadAsync(Download download, DownloadProcessingJob? job, string? expectedActiveJobId);
         Task<DownloadProcessingJob?> GetByIdAsync(string jobId);
         Task<List<DownloadProcessingJob>> GetByDownloadIdAsync(string downloadId);
         Task<QueueStats> GetStatsAsync();

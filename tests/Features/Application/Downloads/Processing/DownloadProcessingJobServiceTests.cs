@@ -499,7 +499,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
                 .ReturnsAsync(winner);
             repository.Setup(repo => repo.GetByDownloadIdAsync(download.Id))
                 .ReturnsAsync([]);
-            repository.Setup(repo => repo.SaveWithDownloadAsync(download, It.IsAny<DownloadProcessingJob?>()))
+            repository.Setup(repo => repo.TrySaveWithDownloadAsync(download, It.IsAny<DownloadProcessingJob?>(), null))
                 .ThrowsAsync(new UniqueConstraintViolationException(
                     "duplicate active import job",
                     new InvalidOperationException()));

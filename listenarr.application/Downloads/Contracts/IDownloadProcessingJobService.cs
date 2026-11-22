@@ -42,7 +42,10 @@ namespace Listenarr.Application.Downloads.Contracts
         /// its change (the unblock) to the download and does not save it separately. The job is
         /// only ever visible to the worker alongside a download that is eligible to run it.
         /// </summary>
-        /// <exception cref="InvalidOperationException">When the download is not awaiting importation</exception>
+        /// <exception cref="InvalidOperationException">
+        /// When the download is not awaiting importation, or when another retry changed it or its
+        /// jobs after they were read and left no job queued. Nothing is saved.
+        /// </exception>
         Task<string> RequeueAsync(Download download);
 
         /// <summary>
