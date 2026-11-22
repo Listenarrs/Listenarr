@@ -20,13 +20,13 @@ namespace Listenarr.Application.Downloads.Contracts
 {
     /// <summary>
     /// What one monitor poll of a download client said beyond the updated downloads: which of
-    /// them the client listed, and whether that answer can be trusted to be the whole of it.
+    /// them the client listed, and which of the held ones it left out are confirmed gone.
     /// </summary>
     /// <remarks>
     /// The gateway returns only the downloads the client listed, so the returned list cannot say
-    /// which of the polled downloads were missing. Missing means removed only when
-    /// <see cref="IsComplete"/> holds: an adapter that skips an item it cannot read leaves it out
-    /// while the client still has it.
+    /// which of the polled downloads were missing. Missing does not mean removed: an adapter that
+    /// skips an item it cannot read leaves it out while the client still has it. Only a lookup of
+    /// the download's own identity can say it is gone.
     /// </remarks>
     public sealed class DownloadPollReport
     {
@@ -34,9 +34,9 @@ namespace Listenarr.Application.Downloads.Contracts
         public ISet<string> ReportedDownloadIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// False when the client listed items the adapter could not read and left out, so a
-        /// download missing from <see cref="ReportedDownloadIds"/> may still be in the client.
+        /// The ids of the held downloads the poll left out that a successful tracked lookup did
+        /// not find in the client either.
         /// </summary>
-        public bool IsComplete { get; set; } = true;
+        public ISet<string> ConfirmedGoneDownloadIds { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -198,12 +198,7 @@ namespace Listenarr.Application.Downloads.Common
             List<QueueItem> items;
             try
             {
-                var snapshot = await adapter.GetQueueSnapshotAsync(client, ids!, ct);
-                items = snapshot.Items;
-                if (pollReport != null)
-                {
-                    pollReport.IsComplete = snapshot.IsComplete;
-                }
+                items = await adapter.GetQueueAsync(client, ids!, ct);
             }
             catch (DownloadClientAdapterPollingException)
             {

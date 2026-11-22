@@ -23,8 +23,8 @@ using Listenarr.Tests.Mocks.DownloadClients;
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 {
     // The completion stability window end to end against the qBittorrent API mock: a held
-    // completion must survive a restart, and an omitted torrent may only be treated as removed
-    // when the poll that omitted it accounted for every torrent the client listed.
+    // completion must survive a restart, and a torrent the poll left out may only be treated as
+    // removed when a lookup of that torrent no longer finds it.
     [Trait("Name", "QbittorrentCompletionHoldTests")]
     [Trait("Category", "DownloadMonitorService")]
     public class QbittorrentCompletionHoldTests : BaseTests
@@ -62,12 +62,13 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
-        [Trait("Scenario", "A torrent left out of an incomplete poll is not released early")]
+        [Trait("Scenario", "A torrent the poll could not read is not released early")]
         public async Task HeldCompletion_OmittedByAnIncompletePoll_StaysHeld()
         {
             // The reported case: the torrent is still listed, but its files response cannot be
-            // parsed, so the adapter leaves it out and marks the poll incomplete. Reading that
-            // omission as removal queued the import before the window had passed.
+            // parsed, so the adapter leaves it out of the poll. Reading that omission as removal
+            // queued the import before the window had passed. The lookup reads only the hash,
+            // so it still finds the torrent.
             await HoldCompletionAsync();
 
             Api.MalformedFilesForHash = HeldHash;
@@ -80,7 +81,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
-        [Trait("Scenario", "An overdue hold kept by an incomplete poll is logged once")]
+        [Trait("Scenario", "An overdue hold of a torrent the poll could not read is logged once")]
         public async Task HeldCompletion_OverdueAndKeptByAnIncompletePoll_LogsOnceAndStaysHeld()
         {
             await HoldCompletionAsync();
@@ -132,12 +133,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
-        [Trait("Scenario", "A torrent gone from a complete poll is released")]
+        [Trait("Scenario", "A torrent removed from the client is released")]
         public async Task HeldCompletion_GoneFromACompletePoll_IsFinalized()
         {
             // The control for the test above: the same cycle with the torrent genuinely removed
-            // releases it, so a hold that survives is the completeness check and not a harness
-            // that never releases anything.
+            // releases it, so a hold that survives is the lookup and not a harness that never
+            // releases anything.
             await HoldCompletionAsync();
 
             Api.InfoResponseOverride = Queue(Torrent(OtherHash, complete: false));
@@ -225,7 +226,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Null(await _downloadRepository.GetByIdAsync(unobserved.Id));
         }
 
-        private const string OverdueHoldLine = "completion hold has passed its window but the client poll was incomplete";
+        private const string OverdueHoldLine = "completion hold has passed its window but the client poll could not read it";
 
         private static string HeldId => $"tracked-{HeldHash}";
 

@@ -200,7 +200,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     var pollReport = new DownloadPollReport();
                     var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken, pollReport);
 
-                    foreach (Download download in WithHeldDownloadsMissingFromPoll(updatedDownloads, clientDownloads, pollReport))
+                    foreach (Download download in await WithHeldDownloadsMissingFromPollAsync(downloadClientGateway, client, updatedDownloads, clientDownloads, pollReport, cancellationToken))
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
