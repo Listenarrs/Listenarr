@@ -44,6 +44,16 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         }
 
         [Fact]
+        public async Task ProcessQueueAsync_RemovedItemWithoutTorrentHash_DoesNotRecoverFromRecordedPath()
+        {
+            using var scenario = await ArrangeAsync(HttpStatusCode.NotFound, string.Empty, recordContentPath: true, isTorrent: false);
+
+            await scenario.RunAsync();
+
+            Assert.False(File.Exists(Path.Join(scenario.DestRoot, "book.m4b")));
+        }
+
+        [Fact]
         public async Task ProcessQueueAsync_QbittorrentItemStillListed_PublishesFromClientFileList()
         {
             using var scenario = await ArrangeAsync(HttpStatusCode.OK, """[{"name":"BookFolder/book.m4b"}]""", recordContentPath: false);
@@ -54,7 +64,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.False(File.Exists(Path.Join(scenario.DestRoot, "other.m4b")));
         }
 
-        private async Task<Scenario> ArrangeAsync(HttpStatusCode filesStatus, string filesBody, bool recordContentPath)
+        private async Task<Scenario> ArrangeAsync(HttpStatusCode filesStatus, string filesBody, bool recordContentPath, bool isTorrent = true)
         {
             // The save folder is shared with another torrent's payload, as a client's download folder is.
             var saveDir = FileService.GetTempDirectory("dl-save");
@@ -88,9 +98,13 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
                 .WithPath(saveDir)
                 .WithStartDate(DateTime.UtcNow)
                 .WithDownloadClientConfiguration(client)
-                .WithTorrentHash(TorrentHash)
                 .WithAudiobook(audiobook)
                 .Build();
+            if (isTorrent)
+            {
+                download.SetMetadata("TorrentHash", TorrentHash);
+            }
+
             if (recordContentPath)
             {
                 download.SetMetadata("ClientContentPath", contentDir);
