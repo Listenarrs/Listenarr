@@ -39,8 +39,18 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
 
             await scenario.RunAsync();
 
-            Assert.False(File.Exists(Path.Join(scenario.DestRoot, "book.m4b")));
-            Assert.False(File.Exists(Path.Join(scenario.DestRoot, "other.m4b")));
+            Assert.Empty(Directory.GetFiles(scenario.DestRoot, "*", SearchOption.AllDirectories));
+        }
+
+        [Fact]
+        public async Task ProcessQueueAsync_QbittorrentItemRemovedWithContentPathEqualToSaveFolder_ImportsNothing()
+        {
+            // A multi-file torrent without a common root reports the save folder as its content path.
+            using var scenario = await ArrangeAsync(HttpStatusCode.NotFound, string.Empty, recordContentPath: true, contentPathIsSaveFolder: true);
+
+            await scenario.RunAsync();
+
+            Assert.Empty(Directory.GetFiles(scenario.DestRoot, "*", SearchOption.AllDirectories));
         }
 
         [Fact]
@@ -64,7 +74,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.False(File.Exists(Path.Join(scenario.DestRoot, "other.m4b")));
         }
 
-        private async Task<Scenario> ArrangeAsync(HttpStatusCode filesStatus, string filesBody, bool recordContentPath, bool isTorrent = true)
+        private async Task<Scenario> ArrangeAsync(HttpStatusCode filesStatus, string filesBody, bool recordContentPath, bool isTorrent = true, bool contentPathIsSaveFolder = false)
         {
             // The save folder is shared with another torrent's payload, as a client's download folder is.
             var saveDir = FileService.GetTempDirectory("dl-save");
@@ -107,7 +117,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
 
             if (recordContentPath)
             {
-                download.SetMetadata("ClientContentPath", contentDir);
+                download.SetMetadata("ClientContentPath", contentPathIsSaveFolder ? saveDir : contentDir);
             }
 
             await _downloadRepository.AddAsync(download);

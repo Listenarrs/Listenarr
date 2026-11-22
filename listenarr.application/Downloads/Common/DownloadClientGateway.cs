@@ -360,7 +360,7 @@ namespace Listenarr.Application.Downloads.Common
             }
 
             var recordedPath = download.GetMetadataString("ClientContentPath");
-            if (string.IsNullOrWhiteSpace(recordedPath))
+            if (string.IsNullOrWhiteSpace(recordedPath) || ContainsSaveFolder(recordedPath, download.DownloadPath))
             {
                 return item;
             }
@@ -372,6 +372,21 @@ namespace Listenarr.Application.Downloads.Common
                 download.Id,
                 item.SourceFiles.Count);
             return item;
+        }
+
+        // A multi-file torrent without a common root reports its save folder as its content
+        // path, which also holds other torrents' files, so such a path identifies no payload.
+        private static bool ContainsSaveFolder(string contentPath, string? saveFolder)
+        {
+            if (string.IsNullOrWhiteSpace(saveFolder))
+            {
+                return false;
+            }
+
+            var content = Path.TrimEndingDirectorySeparator(Path.GetFullPath(contentPath));
+            var save = Path.TrimEndingDirectorySeparator(Path.GetFullPath(saveFolder));
+            return string.Equals(content, save, StringComparison.OrdinalIgnoreCase)
+                || save.StartsWith(content + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private List<string> ListContentPathFiles(DownloadClientConfiguration client, QueueItem item)
