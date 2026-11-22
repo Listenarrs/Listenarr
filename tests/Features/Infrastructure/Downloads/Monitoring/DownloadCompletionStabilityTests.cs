@@ -308,6 +308,99 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
             Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
         }
 
+        [Fact]
+        [Trait("Scenario", "A failed lookup does not release a held download the poll left out")]
+        public async Task CompletionStaysHeld_WhenTheTrackedLookupFails()
+        {
+            // Absence from the poll is confirmed by looking the held download up in its client.
+            // A lookup that fails says nothing about whether the item is there, so it must not be
+            // read as the item being gone. The control is the release test above, which differs
+            // only in the lookup succeeding.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCompletionStabilitySeconds(60)
+                .Build());
+
+            var download = await DriveToCompletionAsync();
+
+            ClientAdapter().QueueItemsMock = [];
+            ClientAdapter().TrackedQueueException = new DownloadClientAdapterPollingException("client unreachable");
+
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            var held = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotEqual(DownloadStatus.Completed, held!.Status);
+            Assert.NotNull(held.GetCompletionObservedAt());
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
+        }
+
+        [Fact]
+        [Trait("Scenario", "Only a held download the poll left out is looked up, and only that one")]
+        public async Task TrackedLookup_AsksOnlyForTheHeldDownloadThePollLeftOut()
+        {
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCompletionStabilitySeconds(60)
+                .Build());
+
+            var download = await DriveToCompletionAsync();
+
+            // Still listed: the poll has evidence of its own, so nothing is looked up.
+            var lookups = ClientAdapter().TrackedQueueRequestCount;
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+            Assert.Equal(lookups, ClientAdapter().TrackedQueueRequestCount);
+
+            var other = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithDownloading(0)
+                .WithExternalId("2")
+                .WithDownloadClientConfiguration(_client)
+                .Build());
+            var path = FileUtils.GetAbsolutePath(DownloadCLientAdapterMock.RemotePath, "random title two");
+            ClientAdapter().QueueItemsMock = [
+                new QueueItemBuilder()
+                    .WithId("2")
+                    .WithRemotePath(path)
+                    .WithContentPath(path)
+                    .WithSourceFile(Path.Join(path, "file1.mp3"))
+                    .WithProgress(50)
+                    .WithStatus("downloading")
+                    .Build()
+            ];
+
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            Assert.Equal(lookups + 1, ClientAdapter().TrackedQueueRequestCount);
+            Assert.Equal(new[] { "1" }, ClientAdapter().LastTrackedQueueIds);
+            Assert.Equal(DownloadStatus.Completed, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+            Assert.Equal(DownloadStatus.Downloading, (await _downloadRepository.GetByIdAsync(other.Id))!.Status);
+        }
+
+        [Fact]
+        [Trait("Scenario", "A row that has moved into import is not looked up")]
+        public async Task TrackedLookup_IsNotMadeForARowThatHasMovedIntoImport()
+        {
+            // The release only applies to a row still waiting for its first completion, so an
+            // observation that outlived its hold has nothing to confirm and costs no request.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCompletionStabilitySeconds(60)
+                .Build());
+
+            var download = await DriveToCompletionAsync();
+            var importing = await _downloadRepository.GetByIdAsync(download.Id);
+            Assert.NotNull(importing!.GetCompletionObservedAt());
+            await _downloadRepository.UpdateAsync(importing.Importing());
+
+            ClientAdapter().QueueItemsMock = [];
+            var lookups = ClientAdapter().TrackedQueueRequestCount;
+
+            _monitor.ScheduleNextClientPoll(_client, -100);
+            await _monitor.MonitorDownloadsAsync(CancellationToken.None);
+
+            Assert.Equal(lookups, ClientAdapter().TrackedQueueRequestCount);
+            Assert.Equal(DownloadStatus.ImportPending, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+        }
+
         private DownloadCLientAdapterMock ClientAdapter() =>
             _provider.GetServices<IDownloadClientAdapter>()
                 .OfType<DownloadCLientAdapterMock>()

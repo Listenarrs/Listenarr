@@ -150,6 +150,25 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
+        [Trait("Scenario", "An unreadable torrent does not keep a removed one held")]
+        public async Task HeldCompletion_GoneWhileAnotherTorrentIsUnreadable_IsFinalized()
+        {
+            // Another torrent the poll cannot read used to mark the whole poll incomplete, which
+            // kept this removed torrent held for as long as the other one stayed unreadable. The
+            // lookup of the held torrent itself says it is gone.
+            await HoldCompletionAsync();
+
+            Api.InfoResponseOverride = Queue(Torrent(OtherHash, complete: false));
+            Api.MalformedFilesForHash = OtherHash;
+            _clock.Advance(TimeSpan.FromSeconds(30));
+            await RunCycleAsync(Processor);
+
+            Assert.Equal(DownloadStatus.Completed, (await HeldDownloadAsync())!.Status);
+            Assert.NotNull(await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync(HeldId));
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
         [Trait("Scenario", "A held torrent removed while Listenarr was stopped is finalized after restart")]
         public async Task HeldCompletion_TorrentRemovedAcrossARestart_IsFinalizedNotDeleted()
         {
