@@ -39,6 +39,15 @@ public partial class AudiobookFileService
                     "The audiobook base path is unavailable on the current host.");
             }
 
+            // Naming placement is persisted by the validated library workflows. It
+            // remains stable when later imports use a different directory layout.
+            if (audiobook.TryGetNamingDestination(out var placement, out _))
+            {
+                basePath = ResolveStoredAbsolutePathForHost(placement);
+                if (string.IsNullOrWhiteSpace(basePath))
+                    return AuthorizedClaimPath.Failed("The audiobook placement is unavailable on the current host.");
+            }
+
             var existingDirectory = string.IsNullOrWhiteSpace(basePath)
                 ? ResolveStoredFileDirectory(audiobook)
                 : string.Empty;

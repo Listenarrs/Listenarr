@@ -38,6 +38,39 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Import_PersistedPlacement_IgnoresObservedBasePathAcrossRetries(bool custom)
+        {
+            var root = FileService.GetTempDirectory("placement-download-root");
+            var observed = FileService.GetTempDirectory("placement-download-observed");
+            var source = FileService.GetTempDirectory("placement-download-source");
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCopyFileOnCompleted().WithoutMetadataProcessing()
+                .WithOutputPath(root).WithFolderNamingPattern("")
+                .WithFileNamingPattern("{Author}/{Title}/audio")
+                .WithMultiFileNamingPattern("{Author}/{Title}-{DiskNumber:00}").Build());
+            var book = new Audiobook { Title = "Book", Subtitle = "Subtitle", Authors = ["Author"], BasePath = observed };
+            if (custom) book.SetCustomDestination(root); else book.SetNamingRoot(root);
+            book = await _audiobookRepository.AddAsync(book);
+            var files = new List<string>();
+            for (var i = 1; i <= 2; i++) files.Add(await FileService.GetFileAsync(source, $"part{i}.mp3", $"audio-{i}"));
+            var importer = _provider.GetRequiredService<IDownloadImportService>();
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var results = await importer.ImportDownloadFilesAsync(book, files);
+                Assert.True(results.Count(result => result.Success) == 2, System.Text.Json.JsonSerializer.Serialize(new { attempt, results }));
+                foreach (var i in new[] { 1, 2 })
+                    Assert.Contains(results, result => result.FinalPath == (custom
+                        ? Path.Join(root, $"Book-{i:00}.mp3")
+                        : Path.Join(root, "Author", $"Book-{i:00}.mp3")));
+            }
+            Assert.Equal(2, (await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id)).Count);
+            var current = await _audiobookRepository.GetByIdAsync(book.Id);
+            Assert.Equal(root, custom ? current!.CustomDestinationPath : current!.NamingRootPath);
+        }
+
+        [Theory]
         [InlineData(1)]
         [InlineData(2)]
         public async Task Import_ClientOwnedMove_RetainsAudioAndCompanionsAcrossRecovery(int audioCount)

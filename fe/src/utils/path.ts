@@ -433,3 +433,20 @@ export function joinPaths(
   const combined = rel ? `${r}${r.endsWith('/') ? '' : '/'}${rel}` : r
   return useBackslash ? combined.replace(/\//g, '\\') : combined
 }
+
+/** Compare destination spellings without treating an empty value as a filesystem root. */
+export function destinationsEqual(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalize = (value: string | null | undefined): string => {
+    const forward = toForward(value).trim()
+    if (!forward) return ''
+    if (/^[a-zA-Z]:\/+$/u.test(forward)) return forward.slice(0, 2).toLowerCase() + '/'
+    const trimmed = forward.replace(/\/+$/u, '') || '/'
+    return /^[a-zA-Z]:\//u.test(trimmed) || trimmed.startsWith('//')
+      ? trimmed.toLowerCase()
+      : trimmed
+  }
+  return normalize(left) === normalize(right)
+}

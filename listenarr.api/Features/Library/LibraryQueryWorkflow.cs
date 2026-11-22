@@ -68,6 +68,8 @@ public sealed class LibraryQueryWorkflow(
         filePath = audiobook.FilePath,
         fileSize = audiobook.FileSize,
         basePath = audiobook.BasePath,
+        namingRootPath = audiobook.NamingRootPath,
+        customDestinationPath = audiobook.CustomDestinationPath,
         runtime = audiobook.Runtime,
         edition = audiobook.Edition,
         version = audiobook.Version,

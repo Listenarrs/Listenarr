@@ -116,6 +116,8 @@ public partial class AudiobookRepository
             }
 
             var preservedBasePath = existing.BasePath;
+            var preservedNamingRoot = existing.NamingRootPath;
+            var preservedCustomDestination = existing.CustomDestinationPath;
             var preservedFilePath = existing.FilePath;
             var preservedFileSize = existing.FileSize;
             var preservedImageUrl = existing.ImageUrl;
@@ -125,6 +127,8 @@ public partial class AudiobookRepository
             // be stale. Path changes must use a tracked entity or the dedicated expected-source
             // rewrite contract.
             existing.BasePath = preservedBasePath;
+            existing.NamingRootPath = preservedNamingRoot;
+            existing.CustomDestinationPath = preservedCustomDestination;
             existing.FilePath = preservedFilePath;
             existing.FileSize = preservedFileSize;
             existing.ImageUrl = preservedImageUrl;

@@ -50,7 +50,8 @@ namespace Listenarr.Application.Downloads.Import
             IReadOnlyList<FileRegistrationRecoveryReceipt> recoveryReceipts,
             Guid compatibilityBatchId)
         {
-            if (string.IsNullOrEmpty(audiobook.BasePath))
+            var hasNamingPlacement = audiobook.TryGetNamingDestination(out var namingPlacement, out _);
+            if (string.IsNullOrEmpty(audiobook.BasePath) && !hasNamingPlacement)
             {
                 throw new InvalidOperationException($"Audiobook {audiobook.Id} basePath cannot be empty or null");
             }
@@ -67,19 +68,20 @@ namespace Listenarr.Application.Downloads.Import
             }
 
             var settings = await configurationService.GetApplicationSettingsAsync();
-            var expectedBasePath = audiobook.BasePath;
+            var expectedBasePath = audiobook.BasePath ?? string.Empty;
+            var planningBasePath = hasNamingPlacement ? namingPlacement : expectedBasePath;
             var destinationResolution = await ResolveDestinationResolutionAsync(
-                expectedBasePath,
+                planningBasePath,
                 ct);
             var destinationSemantics = destinationResolution.Semantics;
             var normalizedBasePath = NormalizeAuthoritativeBasePath(
-                expectedBasePath,
+                planningBasePath,
                 destinationResolution);
             var destinationOwnershipBoundary = await ResolveDestinationOwnershipBoundaryAsync(
                 normalizedBasePath,
                 destinationResolution,
                 ct);
-            if (!string.Equals(expectedBasePath, normalizedBasePath, StringComparison.Ordinal))
+            if (!hasNamingPlacement && !string.Equals(expectedBasePath, normalizedBasePath, StringComparison.Ordinal))
             {
                 var updated = await audiobookRepository.TryUpdateBasePathAsync(
                     audiobook.Id,
@@ -178,7 +180,7 @@ namespace Listenarr.Application.Downloads.Import
                                 var companionPlaced = ImportCompanionDestinationResolver.TryResolveRelativeDestination(companionSourceRoots, file, audiobook.BasePath, results, fileSourceSemantics, destinationSemantics, out var relativePath);
                                 if (!companionPlaced || !destinationPlanner.TryResolve(audiobook.BasePath, relativePath, destinationSemantics, out var destination))
                                 {
-                                    results.Add(companionPlaced ? ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath) : ImportResult.Skipped($"Companion file {Path.GetFileName(file)} has no destination inside the audiobook folder: it came from neither the batch's source directory nor an archive, and no audio file was imported from its own directory"));
+                                    results.Add(companionPlaced ? ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath ?? normalizedBasePath) : ImportResult.Skipped($"Companion file {Path.GetFileName(file)} has no destination inside the audiobook folder: it came from neither the batch's source directory nor an archive, and no audio file was imported from its own directory"));
                                     logger.LogWarning("Companion import not placed inside the audiobook base path. Audiobook {AudiobookId}, Source {Source}, Placed {Placed}, Relative {Relative}, BasePath {BasePath}", audiobook.Id, file, companionPlaced, relativePath, audiobook.BasePath);
                                     continue;
                                 }
@@ -262,7 +264,7 @@ namespace Listenarr.Application.Downloads.Import
                                 results.Add(ImportResult.ImportFailure(
                                     completedFileAction,
                                     file,
-                                    audiobook.BasePath));
+                                    audiobook.BasePath ?? normalizedBasePath));
                                 continue;
                             }
 
@@ -287,7 +289,7 @@ namespace Listenarr.Application.Downloads.Import
                                 logger.LogDebug(exception, $"ImportFilesFromDirectory: Failed to evaluate quality for multi-file import {file}");
                             }
 
-                            string destDirForFile = audiobook.BasePath;
+                            string destDirForFile = audiobook.BasePath ?? normalizedBasePath;
                             var namingMetadata = BuildNamingMetadata(audiobook, candidateMetadata, Path.GetFileNameWithoutExtension(file));
                             var effectiveDiskNumber = namingDiskNumber > 0 ? namingDiskNumber : (namingMetadata.DiscNumber ?? plan?.DiskNumberHint);
                             var effectiveChapterNumber = namingChapterNumber > 0 ? namingChapterNumber : (namingMetadata.TrackNumber ?? plan?.ChapterNumberHint);
@@ -297,6 +299,7 @@ namespace Listenarr.Application.Downloads.Import
                                 effectiveChapterNumber ??= effectiveDiskNumber;
                             }
 
+                            var stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? plan?.SequenceNumber;
                             var variablesForFile = new Dictionary<string, object>
                             {
                                 { "Author", namingMetadata.Artist ?? "Unknown Author" },
@@ -315,12 +318,14 @@ namespace Listenarr.Application.Downloads.Import
                                 { "ChapterNumber", effectiveChapterNumber?.ToString() ?? string.Empty }
                             };
 
+                            var hasPlacement = audiobook.TryGetNamingDestination(out var placementPath, out var customDirectory);
+                            if (hasPlacement) destDirForFile = placementPath;
                             var folderRelative = fileNamingService.ApplyNamingPattern(folderPattern, variablesForFile, treatAsFilename: false);
-                            if (string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrWhiteSpace(folderRelative))
+                            if ((hasPlacement ? !customDirectory : string.IsNullOrEmpty(audiobook.BasePath)) && !string.IsNullOrWhiteSpace(folderRelative))
                             {
                                 if (!destinationPlanner.TryResolve(destDirForFile, folderRelative, destinationSemantics, out destDirForFile))
                                 {
-                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
+                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath ?? normalizedBasePath));
                                     logger.LogWarning("Blocked folder pattern outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, FolderRelative {FolderRelative}, BasePath {BasePath}", audiobook.Id, file, folderRelative, audiobook.BasePath);
                                     continue;
                                 }
@@ -329,7 +334,12 @@ namespace Listenarr.Application.Downloads.Import
                             var baseFilePattern = isMultiFileBatch ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
                             var ext = Path.GetExtension(file);
                             var patternAllowsSubfolders = baseFilePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0 || baseFilePattern.Contains("ChapterNumber", StringComparison.OrdinalIgnoreCase) || baseFilePattern.Contains('/') || baseFilePattern.Contains('\\');
-                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, variablesForFile, !patternAllowsSubfolders);
+                            var filename = fileNamingService.ApplyNamingPattern(baseFilePattern, variablesForFile, (hasPlacement && customDirectory && string.IsNullOrWhiteSpace(folderPattern)) || !patternAllowsSubfolders);
+                            if (hasNamingPlacement && isMultiFileBatch
+                                && !baseFilePattern.Contains("DiskNumber", StringComparison.OrdinalIgnoreCase)
+                                && !baseFilePattern.Contains("ChapterNumber", StringComparison.OrdinalIgnoreCase)
+                                && stableSuffixNumber.HasValue)
+                                filename = FileUtils.AppendSequenceSuffix(filename, stableSuffixNumber.Value);
                             if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext;
                             if (!patternAllowsSubfolders)
                             {

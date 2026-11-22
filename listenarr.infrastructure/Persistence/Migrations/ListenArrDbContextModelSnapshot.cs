@@ -240,6 +240,12 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Authors")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NamingRootPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CustomDestinationPath")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BasePath")
                         .HasColumnType("TEXT");
 
