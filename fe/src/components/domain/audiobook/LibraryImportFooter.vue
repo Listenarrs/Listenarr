@@ -156,7 +156,17 @@ const configStore = useConfigurationStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
 
-const destinationFolderId = ref<number | null>(props.folders[0]?.id ?? null)
+// In the store, so the choice outlives the page; the first folder until one is chosen, or when the
+// chosen one was removed since
+const destinationFolderId = computed({
+  get: () =>
+    props.folders.some((folder) => folder.id === store.destinationFolderId)
+      ? store.destinationFolderId
+      : (props.folders[0]?.id ?? null),
+  set: (id: number | null) => {
+    store.destinationFolderId = id
+  },
+})
 const isImporting = ref(false)
 const importingCount = ref(0)
 const qualityProfiles = computed(() => configStore.qualityProfiles)

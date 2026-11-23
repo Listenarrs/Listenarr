@@ -259,4 +259,59 @@ describe('LibraryImportFooter', () => {
     await wrapper.vm.$nextTick()
     expect(importButton().disabled).toBe(true)
   })
+
+  it('falls back to the first folder when the saved destination folder no longer exists', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: true,
+      filesystemStatus: 'Ready',
+      filesystemPhase: null,
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+    store.action = 'move'
+    // Chosen on an earlier visit, then removed in Settings > Root Folders
+    store.destinationFolderId = 9
+    store.items = {
+      'C:\\incoming\\Book.mp3': {
+        id: 'C:\\incoming\\Book.mp3',
+        fullPath: 'C:\\incoming\\Book.mp3',
+        sourceFiles: ['C:\\incoming\\Book.mp3'],
+        folderPath: 'C:\\incoming',
+        relativePath: 'Book',
+        folderName: 'Book',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: { title: 'Book', authors: [] } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    const importSelected = vi
+      .spyOn(store, 'importSelected')
+      .mockResolvedValue({ imported: 1, errors: [] })
+
+    const wrapper = mount(LibraryImportFooter, {
+      props: {
+        folders: [
+          { id: 1, path: 'D:\\library' },
+          { id: 2, path: 'E:\\other' },
+        ] as unknown as RootFolder[],
+      },
+      global: { plugins: [pinia] },
+    })
+    await flushPromises()
+
+    expect((wrapper.get('select.destination-select').element as HTMLSelectElement).value).toBe('1')
+    await wrapper.get('button.btn.btn-primary').trigger('click')
+    expect(importSelected).toHaveBeenCalledWith('D:\\library', 2)
+  })
 })
