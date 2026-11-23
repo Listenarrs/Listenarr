@@ -114,6 +114,30 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
     }
 
     [LinuxTheory]
+    [InlineData(null, false, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
+    [InlineData(22, false, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
+    [InlineData(22, true, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
+    [InlineData(null, false, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead)]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task PrepareAsync_PublishedTarget_PreservesSourceUnixMode(
+        int? nativeError, bool forceCopy, UnixFileMode sourceMode)
+    {
+        var scenario = await CreateScenarioAsync();
+        File.SetUnixFileMode(scenario.Source, sourceMode);
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = nativeError;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.True(result.Success, result.Error);
+        await using var lease = result.Lease!;
+        Assert.Equal(sourceMode, File.GetUnixFileMode(scenario.Destination));
+        Assert.Equal(sourceMode, File.GetUnixFileMode(scenario.Source));
+    }
+
+    [LinuxTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task PrepareAsync_FallbackDestinationOccupied_PreservesForeignFileAndSource(bool forceCopy)
