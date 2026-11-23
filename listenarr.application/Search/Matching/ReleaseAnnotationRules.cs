@@ -6,10 +6,10 @@ internal static class ReleaseAnnotationRules
     public const int MaximumFieldLength = 256;
 
     public static ReleaseAnnotationResult Recognize(string value, ReadOnlySpan<char> tail,
-        BookMatchContext context, bool scene, bool beforeTitle, bool technical, bool bracketed, bool signed, bool delimitedPrefix,
+        BookMatchContext context, bool scene, bool beforeTitle, bool technical, bool bracketed, bool inBracket, bool signed, bool delimitedPrefix,
         ReleaseAssessmentBudget budget)
     {
-        var result = ReleaseTechnicalRule.Recognize(value, bracketed, signed, context.AnnotationCatalog, technical);
+        var result = ReleaseTechnicalRule.Recognize(value, bracketed, inBracket, signed, context.AnnotationCatalog, technical);
         var narrator = ReleaseNarratorRule.Recognize(value, tail, context, scene, beforeTitle, technical, budget);
         var group = ReleaseGroupRule.Recognize(value, beforeTitle, bracketed, technical, delimitedPrefix, context.AnnotationCatalog);
         if (narrator.Outcome == AnnotationOutcome.Ambiguous) return narrator;

@@ -30,7 +30,7 @@ public sealed class BookIdentityMatcher
         return result with
         {
             Languages = Array.AsReadOnly(interpretation.Spans
-                .Where(s => s.RuleId == "technical.scene_suffix" && s.Reference != null)
+                .Where(s => s.RuleId is "technical.scene_suffix" or "technical.language" && s.Reference != null)
                 .Select(s => new LanguageEvidence(s.Reference!, s.Origin, s.RuleId!)).Distinct().ToArray()),
             Editions = Array.AsReadOnly(interpretation.Spans
                 .Where(s => s.Role is ReleaseSpanRole.TechnicalMetadata or ReleaseSpanRole.ReferenceSubtitle)
