@@ -13,6 +13,10 @@ test.describe('Library Import footer choices (API-stubbed)', () => {
       rootFolderFixture({ id: 2, name: 'Library', path: '/library', canScanFilesystem: true }),
     ])
     await api.stubLibrary([])
+    await api.stubQualityProfiles([
+      { id: 1, name: 'Standard', isDefault: true },
+      { id: 2, name: 'Lossless', isDefault: false },
+    ])
     await api.stubLibraryImportSavedResults(1, [libraryImportUnmatchedFixture()])
   })
 
@@ -39,5 +43,27 @@ test.describe('Library Import footer choices (API-stubbed)', () => {
 
     await expect(action).toHaveValue('move')
     await expect(destination).toHaveValue('2')
+  })
+
+  test('keeps the quality profile for new books after going to another page and back', async ({
+    page,
+    api,
+  }) => {
+    await page.goto('/library-import')
+    await api.wait('savedLibraryImportResults')
+    const profile = page
+      .locator('.import-footer select')
+      .filter({ has: page.locator('option', { hasText: 'Lossless' }) })
+    await expect(profile).toHaveValue('1')
+
+    await profile.selectOption('2')
+
+    await page.locator('a.nav-item', { hasText: 'Audiobooks' }).click()
+    await expect(page).toHaveURL(/\/audiobooks/)
+    await expect(profile).toHaveCount(0)
+    await page.locator('a.nav-item', { hasText: 'Library Import' }).click()
+    await expect(page).toHaveURL(/\/library-import/)
+
+    await expect(profile).toHaveValue('2')
   })
 })

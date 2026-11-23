@@ -260,7 +260,7 @@ describe('LibraryImportFooter', () => {
     expect(importButton().disabled).toBe(true)
   })
 
-  it('falls back to the first folder when the saved destination folder no longer exists', async () => {
+  it('asks for another destination folder when the saved one no longer exists', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useLibraryImportStore()
@@ -310,8 +310,42 @@ describe('LibraryImportFooter', () => {
     })
     await flushPromises()
 
-    expect((wrapper.get('select.destination-select').element as HTMLSelectElement).value).toBe('1')
-    await wrapper.get('button.btn.btn-primary').trigger('click')
-    expect(importSelected).toHaveBeenCalledWith('D:\\library', 2)
+    // No folder is chosen in its place: Move must not silently go to another library folder
+    const destination = wrapper.get('select.destination-select')
+    expect((destination.element as HTMLSelectElement).selectedOptions[0]?.text).toBe(
+      'Select a folder',
+    )
+    const importButton = wrapper.get('button.btn.btn-primary')
+    expect(importButton.attributes('disabled')).toBeDefined()
+    expect(importButton.attributes('title')).toBe('Select the folder to import into')
+    await importButton.trigger('click')
+    expect(importSelected).not.toHaveBeenCalled()
+
+    await destination.setValue('2')
+    expect(importButton.attributes('disabled')).toBeUndefined()
+    await importButton.trigger('click')
+    expect(importSelected).toHaveBeenCalledWith('E:\\other', 2)
+  })
+
+  it('asks for another quality profile when the saved one no longer exists', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    // Chosen on an earlier visit, then removed in Settings > Quality Profiles
+    store.qualityProfileId = 9
+
+    const wrapper = mount(LibraryImportFooter, {
+      props: { folders: [{ id: 1, path: 'D:\\library' }] as unknown as RootFolder[] },
+      global: { plugins: [pinia] },
+    })
+    await flushPromises()
+
+    // Not the default profile in its place: new books must not get another profile unnoticed
+    const profileSelect = wrapper.get('select:has(option[value="3"])')
+    expect((profileSelect.element as HTMLSelectElement).selectedOptions[0]?.text).toBe(
+      'Select a quality profile',
+    )
+    await profileSelect.setValue('3')
+    expect(store.qualityProfileId).toBe(3)
   })
 })
