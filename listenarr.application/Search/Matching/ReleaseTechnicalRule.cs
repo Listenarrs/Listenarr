@@ -39,7 +39,7 @@ internal static class ReleaseTechnicalRule
     private static readonly HashSet<string> Genres = new(
         ["Horror", "Thriller", "Sci-Fi", "Sci Fi", "Science Fiction", "Classic Fiction"], StringComparer.OrdinalIgnoreCase);
 
-    public static ReleaseAnnotationResult Recognize(string value, bool bracketed, bool signed, ReleaseAnnotationCatalog catalog, bool technical = false)
+    public static ReleaseAnnotationResult Recognize(string value, bool bracketed, bool inBracket, bool signed, ReleaseAnnotationCatalog catalog, bool technical = false)
     {
         if (Bitrate.IsMatch(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.bitrate");
         if (LegacyBits.IsMatch(value)) return bracketed || technical
@@ -56,6 +56,9 @@ internal static class ReleaseTechnicalRule
             return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.scene_suffix",
                 Reference: Parsing.SearchResultAttributeParser.ParseLanguageFromCode(scene.Groups["language"].Value),
                 Strength: "declared_release_language");
+        if (inBracket && Parsing.SearchResultAttributeParser.ParseLanguageFromCode(value) is { } language)
+            return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.language",
+                Reference: language, Strength: "declared_release_language");
         return bracketed && Genres.Contains(value)
             ? new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.genre") : default;
     }

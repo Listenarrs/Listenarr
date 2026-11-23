@@ -22,7 +22,7 @@ internal static class ReleaseAnnotationGrammar
 {
     public static ReleaseSeriesReference? SeriesFromSubtitle(string subtitle) => ReleaseSeriesRule.SeriesFromSubtitle(subtitle);
     public static bool IsTechnical(string value) => ReleaseTechnicalRule.Match(value);
-    public static bool Separator(char value) => "[]{}();:,&-‐‑‒–—―−".Contains(value);
+    public static bool Separator(char value) => "[]{}();:,&/-‐‑‒–—―−".Contains(value);
     public static bool PersonEqual(string known, string candidate, bool scene) =>
         IdentityText.PersonEqual(known, candidate)
         || scene && IdentityText.PersonEqual(ReleaseTextView.SceneWords(known), ReleaseTextView.SceneWords(candidate));

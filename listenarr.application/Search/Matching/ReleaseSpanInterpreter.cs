@@ -93,7 +93,7 @@ internal sealed class ReleaseSpanInterpreter(
                     var rawStart = view.Span(state.At, part.Length, ReleaseSpanRole.Unknown).Start;
                     var signed = rawStart > 0 && "-−+".Contains(view.Original[rawStart - 1]);
                     var annotation = ReleaseAnnotationRules.Recognize(part, view.Text.AsSpan(actualEnd, end - actualEnd), context,
-                        view.IsScene, beforeTitle, state.Metadata, IsBracketed(state.At, actualEnd), signed,
+                        view.IsScene, beforeTitle, state.Metadata, IsBracketed(state.At, actualEnd), InBracket(state.At, actualEnd), signed,
                         DelimitedPrefix(state.At, actualEnd), budget);
                     if (annotation.Explained)
                         Add(actualEnd, state.Credited, state.Metadata || annotation.Role == ReleaseSpanRole.TechnicalMetadata,
@@ -248,6 +248,18 @@ internal sealed class ReleaseSpanInterpreter(
             && (view.Text[start - 1] == '(' && view.Text[end] == ')'
                 || view.Text[start - 1] == '[' && view.Text[end] == ']'
                 || view.Text[start - 1] == '{' && view.Text[end] == '}');
+    }
+
+    // A field of a multi-field annotation such as "[ENG / M4B]": the nearest bracket on
+    // each side must be an opener and its matching closer, with no bracket between.
+    private bool InBracket(int start, int end)
+    {
+        var open = start - 1;
+        while (open >= 0 && !"[]{}()".Contains(view.Text[open])) open--;
+        var close = end;
+        while (close < view.Text.Length && !"[]{}()".Contains(view.Text[close])) close++;
+        return open >= 0 && close < view.Text.Length
+            && (view.Text[open], view.Text[close]) is ('(', ')') or ('[', ']') or ('{', '}');
     }
 
     private bool DelimitedPrefix(int start, int end)
