@@ -87,12 +87,12 @@ internal static class MyAnonamouseRequestFactory
         // text-search mode value, so resolve the final value once and add it once.
         var filterValue = request?.MyAnonamouse?.Filter switch
         {
-            MamTorrentFilter.Active         => "active",
-            MamTorrentFilter.Freeleech      => "fl",
+            MamTorrentFilter.Active => "active",
+            MamTorrentFilter.Freeleech => "fl",
             MamTorrentFilter.FreeleechOrVip => "fl-VIP",
-            MamTorrentFilter.Vip            => "VIP",
-            MamTorrentFilter.NotVip         => "nVIP",
-            _                               => null
+            MamTorrentFilter.Vip => "VIP",
+            MamTorrentFilter.NotVip => "nVIP",
+            _ => null
         };
 
         queryParameters.Add(new("tor[searchType]", filterValue ?? searchType));
