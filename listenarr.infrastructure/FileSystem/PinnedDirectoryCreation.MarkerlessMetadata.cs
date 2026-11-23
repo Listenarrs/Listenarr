@@ -121,6 +121,20 @@ internal sealed partial class PinnedDirectoryCreation
                 File.GetCreationTimeUtc(_fileHandle));
         }
 
+        internal void PreserveUnixModeTo(PinnedFileEntry destination)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(destination);
+            destination.ThrowIfDisposed();
+            if (OperatingSystem.IsWindows()) return;
+
+            var sourceMode = File.GetUnixFileMode(_fileHandle);
+            if (File.GetUnixFileMode(destination._fileHandle) != sourceMode)
+            {
+                File.SetUnixFileMode(destination._fileHandle, sourceMode);
+            }
+        }
+
         internal void PreserveMarkerlessMetadataTo(PinnedFileEntry destination)
         {
             ThrowIfDisposed();

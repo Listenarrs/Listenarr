@@ -158,6 +158,9 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         await input.CopyToAsync(output, 128 * 1024, cancellationToken);
         await output.FlushAsync(cancellationToken);
         output.Flush(flushToDisk: true);
+        // The staging file is created 0600; restore the source mode so a
+        // publish does not silently tighten permissions.
+        source.PreserveUnixModeTo(target);
         if (!await target.MatchesAsync(
                 sourceProof.Length,
                 sourceProof.Sha256,
