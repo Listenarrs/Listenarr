@@ -296,7 +296,7 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             Assert.Contains(Uri.EscapeDataString("tor[srchIn][filenames]") + "=true", q);
             // browse_lang uses [] notation; provider currently uses the default '1' value unless overridden by request processing - assert presence
             Assert.Contains(Uri.EscapeDataString("tor[browse_lang][]") + "=1", q);
-            Assert.Contains(Uri.EscapeDataString("tor[onlyFreeleech]") + "=1", q);
+            Assert.Contains(Uri.EscapeDataString("tor[searchType]") + "=fl", q);
             Assert.Contains(Uri.EscapeDataString("tor[freeleechWedge]") + "=required", q);
         }
 
