@@ -285,6 +285,40 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
         Assert.Null((await ReloadFileAsync(fixture.File.Id)).PhysicalObjectIdentity);
     }
 
+    [Fact]
+    public async Task RefreshMetadataAsync_InPlaceOverwriteDuringExtraction_RejectsStaleReadAndDoesNotAdvanceSizeGate()
+    {
+        // Given the leased file's bytes are overwritten in place (same pathname and
+        // inode) while extraction reads it. Nothing about the path, ownership or
+        // publication changes, so every existing guard passes — only a before/after
+        // fingerprint of the leased object can tell that the extracted metadata
+        // describes an earlier, now-replaced view of the file.
+        string? path = null;
+        var fixture = await CreateFixtureAsync(null, async () =>
+        {
+            await File.WriteAllTextAsync(
+                path!, "metadata test audio, rewritten in place to a different length");
+        });
+        path = fixture.Lease.PublicPath;
+        using (fixture.Lease)
+        {
+            // When the refresh tries to commit metadata read from the earlier bytes.
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            Assert.False(await service.RefreshMetadataAsync(
+                fixture.Audiobook, fixture.File.Id, fixture.Lease));
+
+            // Then nothing is applied, and crucially the size gate is not advanced:
+            // the fixture's sentinel size is preserved, so the next scan re-probes
+            // once the writer settles instead of skipping on a matching size.
+            var persisted = await ReloadFileAsync(fixture.File.Id);
+            Assert.Null(persisted.DurationSeconds);
+            Assert.Null(persisted.Format);
+            Assert.Null(persisted.SampleRate);
+            Assert.Equal(AudiobookFile.ProcLinkLstatSize, persisted.Size);
+            Assert.Equal("existing-codec", persisted.Codec);
+        }
+    }
+
     private async Task<(Audiobook Audiobook, AudiobookFile File, IAudiobookFileRegistrationLease Lease)>
         CreateFixtureAsync(string? physicalIdentity, Func<Task>? duringExtraction = null, Func<bool>? publicationMatches = null)
     {

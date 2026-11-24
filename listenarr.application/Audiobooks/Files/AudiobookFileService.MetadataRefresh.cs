@@ -90,6 +90,10 @@ public partial class AudiobookFileService
             return false;
         }
 
+        // Fingerprint the leased object immediately before extraction so a concurrent
+        // in-place overwrite can be detected after it (see the post-extraction guard).
+        var preExtractionState = TryCaptureRegisteredFileState(lease.MetadataPath);
+
         // Operation-local cache identity prevents a path-only read from inheriting
         // cached metadata for a previously visible object at the same pathname.
         var metadata = await ExtractMetadataAsync(
@@ -103,18 +107,35 @@ public partial class AudiobookFileService
             return false;
         }
 
+        // Guard against a concurrent in-place overwrite of the leased bytes during extraction.
+        // The ownership/identity/publication checks above catch an atomic pathname replacement,
+        // but an in-place rewrite keeps the same pathname and inode, so they pass while ffprobe
+        // may have decoded an earlier view of the file. Recording the final size next to metadata
+        // extracted from the earlier bytes would advance the scan's size gate and strand the stale
+        // metadata (it would never be re-probed because the size already matches). Require the
+        // leased object's length and write-time to be identical before and after extraction;
+        // discard the whole refresh otherwise — both the metadata and the size are untrustworthy
+        // (#1084 review).
+        var postExtractionState = TryCaptureRegisteredFileState(lease.MetadataPath);
+        if (preExtractionState is null
+            || postExtractionState is null
+            || preExtractionState.Value != postExtractionState.Value)
+        {
+            return false;
+        }
+
         // Only record the new size when real audio metadata was extracted. A path-only read can
         // fall back to filename-derived metadata when ffprobe can't read the file; recording the
         // size for that fallback would advance the scan's size gate and suppress a retry even
         // though the audio metadata is still stale, so the file would never be re-probed after
         // ffprobe recovers (#1084 review). Leaving the size unchanged keeps it eligible for retry.
         //
-        // The size comes from the same lease the metadata was read through — never from an lstat
-        // of the metadata path, which on Linux is the /proc/self/fd link's own size (see
-        // TryGetRegisteredFileLength).
+        // The size is the verified-stable length read through the same lease the metadata came
+        // through — never an lstat of the metadata path, which on Linux is the /proc/self/fd
+        // link's own size (see TryGetRegisteredFileLength).
         var registeredLength = HasExtractedAudioMetadata(metadata)
-            ? TryGetRegisteredFileLength(lease.MetadataPath)
-            : null;
+            ? postExtractionState.Value.Length
+            : (long?)null;
         return await audiobookFileRepository.RefreshMetadataAsync(
             expectedFile,
             metadata,
