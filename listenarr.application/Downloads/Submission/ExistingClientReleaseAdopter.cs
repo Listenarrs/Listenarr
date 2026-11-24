@@ -39,6 +39,8 @@ namespace Listenarr.Application.Downloads.Submission
             int audiobookId,
             IDownloadRepository downloadRepository,
             IAudiobookRepository audiobookRepository,
+            IDownloadProcessingJobService downloadProcessingJobService,
+            IDownloadHistoryService downloadHistoryService,
             ILogger logger)
         {
             if (string.IsNullOrWhiteSpace(infoHash))
@@ -80,6 +82,20 @@ namespace Listenarr.Application.Downloads.Submission
                         audiobookId,
                         held.Id);
                     return null;
+                }
+
+                // The monitor only enqueues an import on a status change, and a Completed record
+                // that stays Completed never produces one, so queue it here.
+                await downloadProcessingJobService.EnqueueAsync(held);
+
+                try
+                {
+                    await downloadHistoryService.RecordGrabbedAsync(
+                        held.Id, downloadClientId, held.Title, DownloadProtocol.Torrent);
+                }
+                catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException)
+                {
+                    logger.LogWarning(histEx, "Failed to record grabbed event in history for adopted download {DownloadId} (non-critical)", held.Id);
                 }
 
                 logger.LogInformation(

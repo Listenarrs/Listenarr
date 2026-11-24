@@ -38,7 +38,8 @@ namespace Listenarr.Application.Downloads.Submission
         DownloadCachedTorrentStore cachedTorrentStore,
         IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
-        DownloadRemovalWorkflow downloadRemovalWorkflow) : IDownloadService
+        DownloadRemovalWorkflow downloadRemovalWorkflow,
+        IDownloadProcessingJobService downloadProcessingJobService) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
@@ -249,7 +250,8 @@ namespace Listenarr.Application.Downloads.Submission
                 {
                     var adopted = await ExistingClientReleaseAdopter.TryAdoptAsync(
                         downloadClientIdForModel, torrent.InfoHash, adoptingAudiobookId,
-                        downloadRepository, audiobookRepository, logger);
+                        downloadRepository, audiobookRepository, downloadProcessingJobService,
+                        downloadHistoryService, logger);
                     if (adopted != null)
                     {
                         return adopted.Id;

@@ -60,6 +60,36 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         }
 
         [Fact]
+        public async Task RejectedRelease_HeldForADeletedBook_QueuesAnImportJobForTheAdoptedRecord()
+        {
+            var book = await CreateAudiobook();
+            var held = await AddHeldDownloadAsync(DeletedAudiobookId, Hash);
+
+            await Send(book.Id, Hash);
+
+            // The monitor only enqueues on a status change, so adoption has to queue the import itself.
+            var job = await _provider.GetRequiredService<IDownloadProcessingJobService>().GetNextJobAsync();
+            Assert.NotNull(job);
+            Assert.Equal(held.Id, job!.DownloadId);
+        }
+
+        [Fact]
+        public async Task RejectedRelease_HeldForADeletedBook_RecordsGrabbedAndNoRejection()
+        {
+            var book = await CreateAudiobook();
+            var held = await AddHeldDownloadAsync(DeletedAudiobookId, Hash);
+
+            await Send(book.Id, Hash);
+
+            var events = (await _historyRepository.GetPagedAsync(100, 0))
+                .Where(h => string.Equals(h.DownloadId, held.Id, StringComparison.OrdinalIgnoreCase))
+                .Select(h => h.EventType)
+                .ToList();
+            Assert.Contains(HistoryEvents.Grabbed, events);
+            Assert.DoesNotContain(HistoryEvents.DownloadFailed, events);
+        }
+
+        [Fact]
         public async Task RejectedRelease_HeldForALiveBook_StillThrowsAndLeavesTheRecordAlone()
         {
             var book = await CreateAudiobook();
