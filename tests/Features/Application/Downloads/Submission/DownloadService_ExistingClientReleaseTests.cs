@@ -17,6 +17,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         private const string OtherHash = "1234567890ABCDEF1234567890ABCDEF12345678";
         private const int DeletedAudiobookId = 987654;
 
+        private readonly Mock<IDownloadHistoryService> _history = new();
+
         public override async Task InitializeAsync()
         {
             var gateway = new Mock<IDownloadClientGateway>();
@@ -24,6 +26,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 .Setup(g => g.AddAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<PreparedDownloadSubmission>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new DownloadClientRejectedReleaseException("qBittorrent already holds this release."));
             _services.AddSingleton(gateway.Object);
+            _services.AddSingleton(_history.Object);
             Init();
 
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
@@ -81,12 +84,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
 
             await Send(book.Id, Hash);
 
-            var events = (await _historyRepository.GetPagedAsync(100, 0))
-                .Where(h => string.Equals(h.DownloadId, held.Id, StringComparison.OrdinalIgnoreCase))
-                .Select(h => h.EventType)
-                .ToList();
-            Assert.Contains(HistoryEvents.Grabbed, events);
-            Assert.DoesNotContain(HistoryEvents.DownloadFailed, events);
+            _history.Verify(h => h.RecordGrabbedAsync(held.Id, ClientId, held.Title, DownloadProtocol.Torrent, null), Times.Once);
+            _history.Verify(h => h.RecordDownloadFailedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         }
 
         [Fact]
