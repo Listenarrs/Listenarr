@@ -332,6 +332,13 @@ public partial class ManualImportController : ControllerBase
                                 result.Success,
                                 result.DestinationPath,
                                 result.Error);
+                            if (!result.Success)
+                            {
+                                _logger.LogWarning(
+                                    "Manual import item failed for {Source}: {Error}",
+                                    LogRedaction.SanitizeFilePath(item.FullPath),
+                                    LogRedaction.SanitizeText(result.Error));
+                            }
                             results.Add(result);
                             freshResults.Add(result);
                         }

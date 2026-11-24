@@ -221,11 +221,7 @@ namespace Listenarr.Application.Metadata.Extraction
 
         private static AudioMetadata CreateFilenameFallback(string publicPath)
         {
-            return new AudioMetadata
-            {
-                Title = Path.GetFileNameWithoutExtension(publicPath),
-                Format = Path.GetExtension(publicPath).TrimStart('.').ToUpperInvariant()
-            };
+            return AudioMetadata.FromFileName(publicPath);
         }
 
         public async Task ApplyMetadataAsync(string filePath, AudioMetadata metadata)

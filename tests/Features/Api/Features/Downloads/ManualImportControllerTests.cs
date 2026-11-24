@@ -966,6 +966,113 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Assert.True(FileUtils.IsPathSameOrInside(book.BasePath, outputRoot));
         }
 
+        // The real MetadataService returns null for every file while metadata processing is off,
+        // so the mock does the same. The import must still run on the filename alone.
+        [Theory]
+        [InlineData(FileAction.Copy)]
+        [InlineData(FileAction.Move)]
+        public async Task InteractiveManualImport_MetadataProcessingOff_ImportsFromFilename(FileAction action)
+        {
+            var outputRoot = CreateTempDirectory("listenarr-manual-metadata-off-destination");
+            var sourceRoot = CreateTempDirectory("listenarr-manual-metadata-off-source");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var book = new Audiobook
+            {
+                Id = 422,
+                Title = "Metadata Off",
+                Authors = ["Author"]
+            };
+            var metadataMock = new Mock<IMetadataService>();
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = outputRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}",
+                    EnableMetadataProcessing = false
+                },
+                metadataMock: metadataMock);
+            metadataMock
+                .Setup(service => service.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync((AudioMetadata?)null);
+
+            var result = await controller.Start(new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = action,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            });
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result.Result);
+            Assert.Equal(1, ImportedCount(ok));
+            var importedFiles = Directory.GetFiles(
+                outputRoot,
+                "*.mp3",
+                SearchOption.AllDirectories);
+            Assert.Single(importedFiles);
+            Assert.Equal(action == FileAction.Move, !File.Exists(sourceFile));
+        }
+
+        // The control. With metadata processing on, a null result still means the extraction
+        // failed, so the item is refused; the fallback must not hide a real failure.
+        [Fact]
+        public async Task InteractiveManualImport_MetadataProcessingOnAndExtractionFails_RefusesTheItem()
+        {
+            var outputRoot = CreateTempDirectory("listenarr-manual-metadata-on-destination");
+            var sourceRoot = CreateTempDirectory("listenarr-manual-metadata-on-source");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var book = new Audiobook
+            {
+                Id = 423,
+                Title = "Metadata On",
+                Authors = ["Author"]
+            };
+            var metadataMock = new Mock<IMetadataService>();
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = outputRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}",
+                    EnableMetadataProcessing = true
+                },
+                metadataMock: metadataMock);
+            metadataMock
+                .Setup(service => service.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync((AudioMetadata?)null);
+
+            var result = await controller.Start(new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            });
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result.Result);
+            Assert.Equal(0, ImportedCount(ok));
+            Assert.Empty(Directory.GetFiles(outputRoot, "*", SearchOption.AllDirectories));
+        }
+
         [Fact]
         public async Task InteractiveManualImport_ExistingBasePathOutsideConfiguredRoots_IsRejected()
         {

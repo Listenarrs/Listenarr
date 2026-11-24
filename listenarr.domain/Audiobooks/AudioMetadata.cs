@@ -60,6 +60,19 @@ namespace Listenarr.Domain.Audiobooks
         public Dictionary<string, object> AdditionalData { get; set; } = [];
 
         /// <summary>
+        /// Minimal metadata for a file whose tags were not read: the title is the file name
+        /// and the format is the extension.
+        /// </summary>
+        public static AudioMetadata FromFileName(string path)
+        {
+            return new AudioMetadata
+            {
+                Title = Path.GetFileNameWithoutExtension(path),
+                Format = Path.GetExtension(path).TrimStart('.').ToUpperInvariant()
+            };
+        }
+
+        /// <summary>
         /// Update empty attributes with the given metadata
         /// </summary>
         /// <param name="value">New data to complete the current one</param>
