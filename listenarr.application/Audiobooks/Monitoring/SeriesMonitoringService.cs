@@ -269,7 +269,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
                     var addResult = await _libraryAddService.AddToLibraryAsync(
                         new LibraryAddOperationRequest
                         {
-                            Metadata = MapToMetadata(book),
+                            Metadata = MapToMetadata(book, monitoredSeries.Region),
                             Monitored = true,
                             QualityProfileId = monitoredSeries.QualityProfileId,
                             AutoSearch = false,
