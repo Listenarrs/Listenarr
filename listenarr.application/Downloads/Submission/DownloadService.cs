@@ -241,6 +241,21 @@ namespace Listenarr.Application.Downloads.Submission
                     downloadId, downloadClientIdForModel, candidate.Title, exception, downloadHistoryService, logger);
                 await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
 
+                // The provisional row is gone first: it holds the book's active-download slot,
+                // which the adopted record is about to take.
+                if (exception is DownloadClientRejectedReleaseException
+                    && prepared is PreparedTorrentSubmission torrent
+                    && audiobookId is int adoptingAudiobookId && adoptingAudiobookId > 0)
+                {
+                    var adopted = await ExistingClientReleaseAdopter.TryAdoptAsync(
+                        downloadClientIdForModel, torrent.InfoHash, adoptingAudiobookId,
+                        downloadRepository, audiobookRepository, logger);
+                    if (adopted != null)
+                    {
+                        return adopted.Id;
+                    }
+                }
+
                 if (exception is DownloadClientSubmissionException)
                 {
                     throw;
