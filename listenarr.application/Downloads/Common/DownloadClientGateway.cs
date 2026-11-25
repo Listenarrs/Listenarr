@@ -183,7 +183,7 @@ namespace Listenarr.Application.Downloads.Common
                 }
             }
 
-            return RecoverRemovedTorrentPayload(client, download, await TranslateQueueItemPathsAsync(client, item));
+            return RecoverRemovedTorrentPayload(download, await TranslateQueueItemPathsAsync(client, item));
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default, DownloadPollReport? pollReport = null)
@@ -211,6 +211,12 @@ namespace Listenarr.Application.Downloads.Common
                     ex);
             }
 
+            // Translation fills an unlisted item's files from its content path, which may also
+            // hold files the torrent does not list, so note which files the client listed first.
+            var clientListedIds = items
+                .Where(item => item.SourceFiles is { Count: > 0 })
+                .Select(item => item.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
             items = [.. await Task.WhenAll(tasks)];
 
@@ -253,6 +259,7 @@ namespace Listenarr.Application.Downloads.Common
                     item.Status);
 
                 QueueItemConverter.UpdateFromQueueItem(download, item);
+                RecordedTorrentContent.Record(download, item, clientListedIds.Contains(item.Id));
                 updatedIds.Add(download.Id);
             }
 
@@ -341,17 +348,19 @@ namespace Listenarr.Application.Downloads.Common
         }
 
         /// <summary>
-        /// Restores the payload of a torrent the client no longer lists, from the content path
-        /// the monitor last recorded for it.
+        /// Restores the payload of a torrent the client no longer lists, from the files the
+        /// monitor last recorded for it.
         /// </summary>
         /// <remarks>
         /// The import resolvers read a torrent's file list from the client, so an item the client
         /// removed after reporting it complete leaves nothing to import even though its payload
         /// is still on disk. The recorded content path is that torrent's own file or top-level
-        /// folder, already mapped to a local path. The download's save folder is not used: it is
-        /// shared with every other torrent saved there.
+        /// folder, already mapped to a local path. A folder can also hold files the torrent never
+        /// listed, so only the files recorded from the client's list are imported from it; a
+        /// folder recorded without that list stays blocked. The download's save folder is not
+        /// used: it is shared with every other torrent saved there.
         /// </remarks>
-        private QueueItem RecoverRemovedTorrentPayload(DownloadClientConfiguration client, Download download, QueueItem item)
+        private QueueItem RecoverRemovedTorrentPayload(Download download, QueueItem item)
         {
             if (item.SourceFiles is { Count: > 0 } || !string.IsNullOrEmpty(item.ContentPath)
                 || string.IsNullOrEmpty(download.GetMetadataString("TorrentHash")))
@@ -360,33 +369,29 @@ namespace Listenarr.Application.Downloads.Common
             }
 
             var recordedPath = download.GetMetadataString("ClientContentPath");
-            if (string.IsNullOrWhiteSpace(recordedPath) || ContainsSaveFolder(recordedPath, download.DownloadPath))
+            if (string.IsNullOrWhiteSpace(recordedPath) || RecordedTorrentContent.ContainsSaveFolder(recordedPath, download.DownloadPath))
             {
                 return item;
             }
 
+            var files = fileSystem.FileExists(recordedPath)
+                ? [recordedPath]
+                : RecordedTorrentContent.ResolveFiles(download, recordedPath, fileSystem);
+            if (files == null)
+            {
+                logger.LogWarning(
+                    "Download {DownloadId} is no longer listed by its client and its recorded file list is missing or no longer matches the disk; its import needs manual review",
+                    download.Id);
+                return item;
+            }
+
             item.ContentPath = recordedPath;
-            item.SourceFiles = ListContentPathFiles(client, item);
+            item.SourceFiles = files;
             logger.LogInformation(
-                "Download {DownloadId} is no longer listed by its client; importing {FileCount} file(s) from its recorded content path",
+                "Download {DownloadId} is no longer listed by its client; importing {FileCount} file(s) recorded from its file list",
                 download.Id,
                 item.SourceFiles.Count);
             return item;
-        }
-
-        // A multi-file torrent without a common root reports its save folder as its content
-        // path, which also holds other torrents' files, so such a path identifies no payload.
-        private static bool ContainsSaveFolder(string contentPath, string? saveFolder)
-        {
-            if (string.IsNullOrWhiteSpace(saveFolder))
-            {
-                return false;
-            }
-
-            var content = Path.TrimEndingDirectorySeparator(Path.GetFullPath(contentPath));
-            var save = Path.TrimEndingDirectorySeparator(Path.GetFullPath(saveFolder));
-            return string.Equals(content, save, StringComparison.OrdinalIgnoreCase)
-                || save.StartsWith(content + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private List<string> ListContentPathFiles(DownloadClientConfiguration client, QueueItem item)
