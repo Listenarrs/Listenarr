@@ -18,6 +18,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Listenarr.Api.Startup;
 using Listenarr.Application.Configuration.Contracts;
 using Listenarr.Application.SystemDiagnostics.Contracts;
 using Listenarr.Domain.Configuration;
@@ -55,6 +56,7 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
             "Elizabeth Bennet navigates family, manners, and first impressions.", ["Classics", "Romance"], 660),
     ];
 
+    private readonly string _root;
     private readonly string _databasePath;
     private Factory _factory;
     private string? _xsrfToken;
@@ -65,8 +67,9 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
         LibraryPath = Path.Join(root, "library");
         Directory.CreateDirectory(ImportPath);
         Directory.CreateDirectory(LibraryPath);
+        _root = root;
         _databasePath = Path.Join(root, "config", "listenarr.db");
-        _factory = new Factory(_databasePath);
+        _factory = new Factory(_root, _databasePath);
         Client = _factory.CreateClient();
     }
 
@@ -77,6 +80,9 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
 
     /// <summary>The folder of the "Backend Integration Library" root folder.</summary>
     public string LibraryPath { get; }
+
+    /// <summary>The content root of the running app (its config folder, keys and caches).</summary>
+    public string ContentRootPath => _factory.Services.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
 
     /// <summary>
     /// Starts a host in <paramref name="root"/>; <paramref name="prepareFiles"/> writes the files the
@@ -164,7 +170,7 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
     {
         Client.Dispose();
         await _factory.DisposeAsync();
-        _factory = new Factory(_databasePath);
+        _factory = new Factory(_root, _databasePath);
         Client = _factory.CreateClient();
         _xsrfToken = null;
         return this;
@@ -251,17 +257,31 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
         int Runtime);
 
     /// <summary>
-    /// The application on its own SQLite file, the unmatched scan worker running (the other hosted services
+    /// The application on its own content root and SQLite file, the unmatched scan worker running (the other hosted services
     /// off), no authentication, external APIs answered by the Listenarr.FakeProviders stub, and the ffprobe on PATH.
     /// </summary>
-    private sealed class Factory(string databasePath) : WebApplicationFactory<Program>
+    private sealed class Factory : WebApplicationFactory<Program>
     {
+        private readonly string _contentRoot;
+        private readonly string _databasePath;
+
+        public Factory(string contentRoot, string databasePath)
+        {
+            // Program picks its environment before the host settings apply, so UseEnvironment("Test")
+            // alone does not reach it: this makes it take the Test path (and the content root below).
+            Environment.SetEnvironmentVariable("LISTENARR_TEST_MODE", "true");
+            _contentRoot = contentRoot;
+            _databasePath = databasePath;
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Test");
+            // The test's own content root: hosts sharing one race on its appsettings.json.
+            builder.UseSetting(ListenarrBuilderFactory.TestContentRootKey, _contentRoot);
             // Host settings, not app configuration: Program reads them while it composes the services,
             // before ConfigureAppConfiguration callbacks apply.
-            builder.UseSetting("Listenarr:SqliteDbPath", databasePath);
+            builder.UseSetting("Listenarr:SqliteDbPath", _databasePath);
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services =>
             {

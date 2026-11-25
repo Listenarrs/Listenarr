@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Api.Startup;
 using Listenarr.FakeProviders;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -46,16 +47,20 @@ namespace Listenarr.Tests.Mocks.Hosting
             // Use "Test" environment (matches GitHub Actions ASPNETCORE_ENVIRONMENT=Test)
             builder.UseEnvironment("Test");
 
+            if (string.IsNullOrWhiteSpace(_sqliteDbPath))
+            {
+                _sqliteDbRootDir = Path.Join(Path.GetTempPath(), "listenarr-tests", $"host-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(_sqliteDbRootDir);
+                _sqliteDbPath = Path.Join(_sqliteDbRootDir, "listenarr.db");
+                RegisterDbPathForCleanup(_sqliteDbPath);
+            }
+
+            // The host's own content root (config, keys, caches), deleted with it: hosts sharing one
+            // race on its appsettings.json. A host setting, read before the app is built.
+            builder.UseSetting(ListenarrBuilderFactory.TestContentRootKey, _sqliteDbRootDir);
+
             builder.ConfigureAppConfiguration((context, config) =>
             {
-                if (string.IsNullOrWhiteSpace(_sqliteDbPath))
-                {
-                    _sqliteDbRootDir = Path.Join(Path.GetTempPath(), "listenarr-tests", $"host-{Guid.NewGuid():N}");
-                    Directory.CreateDirectory(_sqliteDbRootDir);
-                    _sqliteDbPath = Path.Join(_sqliteDbRootDir, "listenarr.db");
-                    RegisterDbPathForCleanup(_sqliteDbPath);
-                }
-
                 var overrides = new Dictionary<string, string?>
                 {
                     ["Listenarr:SqliteDbPath"] = _sqliteDbPath,
