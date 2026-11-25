@@ -171,11 +171,12 @@ public static class ReleaseNameInterpreter
         return prefix.Contains("narrated by ", StringComparison.OrdinalIgnoreCase)
             || prefix.Contains("read by ", StringComparison.OrdinalIgnoreCase)
             || prefix.Contains("narrator ", StringComparison.OrdinalIgnoreCase)
-            || prefix.Contains("narrator:", StringComparison.OrdinalIgnoreCase);
+            || prefix.Contains("narrator:", StringComparison.OrdinalIgnoreCase)
+            || prefix.Contains("narrator :", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsNarratorColon(string text, int index) => text[index] == ':'
-        && text.AsSpan(0, index).EndsWith("narrator", StringComparison.OrdinalIgnoreCase);
+        && text.AsSpan(0, index).TrimEnd().EndsWith("narrator", StringComparison.OrdinalIgnoreCase);
 
     private static bool Boundary(string value, int index)
     {

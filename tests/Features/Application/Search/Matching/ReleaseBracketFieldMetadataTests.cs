@@ -29,6 +29,8 @@ public sealed class ReleaseBracketFieldMetadataTests : BaseTests
     [InlineData("DC by Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", true)]
     [InlineData("Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", false)]
     [InlineData("Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", null, false)]
+    [InlineData("DC by Bram Stoker - Narrator : AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", true)]
+    [InlineData("Bram Stoker - Narrator : AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", false)]
     [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / Frankenstein by Mary Shelley [M4B]", "Dracula", "Bram Stoker", "Bob Thomley", false)]
     [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / Mary Shelley [M4B]", "Dracula", "Bram Stoker", "Bob Thomley", false)]
     public void ATitleInsideASlashContainingNarratorCreditIsNotAnAnchor(string release, string title, string author, string? narrator, bool expected)
@@ -104,5 +106,16 @@ public sealed class ReleaseBracketFieldMetadataTests : BaseTests
     {
         var score = await Score(Book(narrators: ["Bob Thomley"]), release);
         Assert.False(score.Identity.IsConfirmed && !score.IsRejected);
+    }
+
+    [Theory]
+    [InlineData("Dracula by Bram Stoker [Narrated by Bob Thomley / FRE]", "French")]
+    [InlineData("Dracula by Bram Stoker [Read by Bob Thomley / GER]", "German")]
+    public async Task ABracketedNarratorCreditWithASlashLanguageStillDeclaresTheLanguage(string release, string language)
+    {
+        var score = await Score(Book(narrators: ["Bob Thomley"]), release);
+        Assert.Equal(language, Assert.Single(score.Identity.Languages).Language);
+        Assert.True(score.IsRejected);
+        Assert.Contains("language_mismatch", score.RejectionReasons);
     }
 }
