@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.DownloadClients;
@@ -70,6 +71,28 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
 
             Assert.Equal(contentDir, polled.Single().GetMetadataString("ClientContentPath"));
             Assert.Equal("""["book.m4b"]""", polled.Single().GetMetadataString("ClientContentFiles"));
+        }
+
+        [Theory]
+        [InlineData(new[] { "book.m4b" }, new[] { "book.m4b" })]
+        [InlineData(new[] { "book.m4b", "part2.m4b" }, new string[0])]
+        public async Task GetQueueItemAsync_RemovedTorrent_ReturnsOnlyRecordedFilesThatAreAllOnDisk(
+            string[] recordedFiles,
+            string[] expectedFiles)
+        {
+            // The client no longer lists the torrent, so it reports neither files nor a content path.
+            adapter.QueueItemMock = new QueueItem { SourceFiles = [] };
+            var download = new DownloadBuilder()
+                .WithExternalId(TorrentHash)
+                .WithTorrentHash(TorrentHash)
+                .WithPath(Path.GetDirectoryName(contentDir)!)
+                .Build();
+            download.SetMetadata("ClientContentPath", contentDir);
+            download.SetMetadata("ClientContentFiles", JsonSerializer.Serialize(recordedFiles));
+
+            var item = await gateway.GetQueueItemAsync(client, download, new QueueItem());
+
+            Assert.Equal(expectedFiles.Select(name => Path.Join(contentDir, name)), item.SourceFiles);
         }
 
         private QueueItem PolledItem(params string[] listedFiles)
