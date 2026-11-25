@@ -25,6 +25,12 @@ public sealed class ReleaseBracketFieldMetadataTests : BaseTests
     [InlineData("DC by Bram Stoker - Read by AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", true)]
     [InlineData("Bram Stoker - Narrated by AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", false)]
     [InlineData("Bram Stoker - Narrated by AC/DC [M4B]", "DC", "Bram Stoker", null, false)]
+    [InlineData("DC by Bram Stoker - Narrated by AC/DC [M4B]", "DC", "Bram Stoker", null, false)]
+    [InlineData("DC by Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", true)]
+    [InlineData("Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", "AC/DC", false)]
+    [InlineData("Bram Stoker - Narrator: AC/DC [M4B]", "DC", "Bram Stoker", null, false)]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / Frankenstein by Mary Shelley [M4B]", "Dracula", "Bram Stoker", "Bob Thomley", false)]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / Mary Shelley [M4B]", "Dracula", "Bram Stoker", "Bob Thomley", false)]
     public void ATitleInsideASlashContainingNarratorCreditIsNotAnAnchor(string release, string title, string author, string? narrator, bool expected)
     {
         var book = Book(title, [author], narrator is null ? null : [narrator]);
@@ -85,5 +91,18 @@ public sealed class ReleaseBracketFieldMetadataTests : BaseTests
         var score = await Score(Book(authors: ["Bram Stoker", "Dan"]), "Dracula by Bram Stoker [Dan / FRE]");
         Assert.Equal("French", Assert.Single(score.Identity.Languages).Language);
         Assert.Contains("language_mismatch", score.RejectionReasons);
+    }
+
+    [Theory]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley [FRE / M4B]")]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / FRE [M4B]")]
+    [InlineData("Dracula by Bram Stoker - Read by Bob Thomley / GER [M4B]")]
+    [InlineData("Dracula by Bram Stoker - Narrator: Bob Thomley / GER [M4B]")]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley/FRE [M4B]")]
+    [InlineData("Dracula by Bram Stoker - Narrated by Bob Thomley / French [M4B]")]
+    public async Task ASlashAfterAnExplicitNarratorDoesNotSwallowADeclaredLanguage(string release)
+    {
+        var score = await Score(Book(narrators: ["Bob Thomley"]), release);
+        Assert.False(score.Identity.IsConfirmed && !score.IsRejected);
     }
 }

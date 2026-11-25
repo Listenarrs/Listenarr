@@ -24,13 +24,21 @@ internal static class ReleaseNarratorRule
     private static readonly Regex Narrator = new(
         @"^(?:(?:narrated|read)\s+by|narrator\s*:)\s*(?<name>[\p{L}\p{M}][\p{L}\p{M}\s.'’,/-]{0,199})$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    public static bool Match(string value) => (value.StartsWith("narrat", StringComparison.OrdinalIgnoreCase)
-        || value.StartsWith("read ", StringComparison.OrdinalIgnoreCase)) && Narrator.IsMatch(value);
+    // A slash is part of an explicit narrator name only when the whole name is a known narrator.
+    public static bool Match(string value, IReadOnlyList<string> narrators)
+    {
+        if (!value.StartsWith("narrat", StringComparison.OrdinalIgnoreCase)
+            && !value.StartsWith("read ", StringComparison.OrdinalIgnoreCase)) return false;
+        var match = Narrator.Match(value);
+        if (!match.Success) return false;
+        var name = match.Groups["name"].Value;
+        return !name.Contains('/') || narrators.Any(n => IdentityText.PersonEqual(n, name.Trim()));
+    }
 
     public static ReleaseAnnotationResult Recognize(string value, ReadOnlySpan<char> tail, BookMatchContext context,
         bool scene, bool beforeTitle, bool technical, ReleaseAssessmentBudget budget)
     {
-        if (Match(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.NarratorCredit, "narrator.explicit");
+        if (Match(value, context.Narrators)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.NarratorCredit, "narrator.explicit");
         if (!scene || beforeTitle || !technical || tail.Length > 64 || value.Length is 0 or > 200
             || !value.All(c => char.IsLetter(c) || char.IsWhiteSpace(c) || ".'’,-".Contains(c)
                 || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)) return default;
