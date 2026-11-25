@@ -166,12 +166,16 @@ public static class ReleaseNameInterpreter
     private static bool InExplicitNarrator(string text, int at)
     {
         var boundary = at - 1;
-        while (boundary >= 0 && (text[boundary] == '/' || !ReleaseAnnotationGrammar.Separator(text[boundary]))) boundary--;
+        while (boundary >= 0 && (text[boundary] == '/' || IsNarratorColon(text, boundary) || !ReleaseAnnotationGrammar.Separator(text[boundary]))) boundary--;
         var prefix = text[(boundary + 1)..at];
         return prefix.Contains("narrated by ", StringComparison.OrdinalIgnoreCase)
             || prefix.Contains("read by ", StringComparison.OrdinalIgnoreCase)
-            || prefix.Contains("narrator ", StringComparison.OrdinalIgnoreCase);
+            || prefix.Contains("narrator ", StringComparison.OrdinalIgnoreCase)
+            || prefix.Contains("narrator:", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsNarratorColon(string text, int index) => text[index] == ':'
+        && text.AsSpan(0, index).EndsWith("narrator", StringComparison.OrdinalIgnoreCase);
 
     private static bool Boundary(string value, int index)
     {
