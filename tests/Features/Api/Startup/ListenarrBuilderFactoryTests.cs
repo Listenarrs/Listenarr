@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Api.Startup;
-using Microsoft.Extensions.Configuration;
 using Listenarr.Tests.Common;
 using Serilog.Events;
 
@@ -67,7 +66,7 @@ public sealed class ListenarrBuilderFactoryTests
 
         ListenarrBuilderFactory.EnsureExternalConfiguration(contentRoot, fileSystem.Object);
 
-        fileSystem.Verify(fs => fs.CreateFileAtomically(safePath, It.IsAny<string>()), Times.Once);
+        fileSystem.Verify(fs => fs.WriteAllText(safePath, It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -95,68 +94,6 @@ public sealed class ListenarrBuilderFactoryTests
         fileSystem.Verify(
             fs => fs.WriteAllText(It.IsAny<string>(), It.IsAny<string>()),
             Times.Never);
-        fileSystem.Verify(
-            fs => fs.CreateFileAtomically(It.IsAny<string>(), It.IsAny<string>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task EnsureExternalConfiguration_ConfigurationLoadedWhileTheDefaultIsWritten_NeverSeesAPartialFile()
-    {
-        // Parallel test hosts share one content root: one host can load appsettings.json while another
-        // is still writing the default. A write to the final path is made slow here, as a real one is
-        // when the race is lost; the load must still succeed.
-        var contentRoot = CreateTemporaryDirectory();
-        var configDirectory = Path.Join(contentRoot, "config", "appsettings");
-        var expectedPath = Path.Join(configDirectory, "appsettings.json");
-        var safePath = Path.GetFullPath(expectedPath);
-        var reason = string.Empty;
-        var localFileSystem = new LocalFileSystem();
-        using var writeStarted = new ManualResetEventSlim();
-        using var releaseWrite = new ManualResetEventSlim();
-        var fileSystem = new Mock<IFileSystem>();
-        fileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns((string path) => Directory.Exists(path));
-        fileSystem.Setup(fs => fs.CreateDirectory(It.IsAny<string>())).Callback((string path) => Directory.CreateDirectory(path));
-        fileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns((string path) => File.Exists(path));
-        fileSystem
-            .Setup(fs => fs.TryValidateMutationTarget(expectedPath, It.IsAny<IEnumerable<string?>>(), out safePath, out reason))
-            .Returns(true);
-        fileSystem
-            .Setup(fs => fs.WriteAllText(It.IsAny<string>(), It.IsAny<string>()))
-            .Callback((string path, string contents) =>
-            {
-                using (File.Create(path))
-                {
-                }
-
-                writeStarted.Set();
-                releaseWrite.Wait(TimeSpan.FromSeconds(10));
-                File.WriteAllText(path, contents);
-            });
-        fileSystem
-            .Setup(fs => fs.CreateFileAtomically(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns((string path, string contents) => localFileSystem.CreateFileAtomically(path, contents));
-
-        try
-        {
-            var writer = Task.Run(() => ListenarrBuilderFactory.EnsureExternalConfiguration(contentRoot, fileSystem.Object));
-            SpinWait.SpinUntil(() => writeStarted.IsSet || writer.IsCompleted, TimeSpan.FromSeconds(10));
-
-            var load = Record.Exception(() => new ConfigurationBuilder()
-                .SetBasePath(contentRoot)
-                .AddJsonFile(Path.Join("config", "appsettings", "appsettings.json"), optional: true)
-                .Build());
-            releaseWrite.Set();
-            await writer;
-
-            Assert.Null(load);
-            Assert.Contains("\"Serilog\"", File.ReadAllText(expectedPath), StringComparison.Ordinal);
-        }
-        finally
-        {
-            releaseWrite.Set();
-            DeleteDirectory(contentRoot);
-        }
     }
 
     [DirectoryLinkFact]

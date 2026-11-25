@@ -25,15 +25,6 @@ public interface IFileSystem
     string ReadAllText(string path);
     byte[] ReadAllBytes(string path);
     void WriteAllText(string path, string contents);
-
-    /// <summary>
-    /// Creates <paramref name="path"/> with <paramref name="contents"/> through a temporary file beside it
-    /// and a rename, so a concurrent reader sees no file or the complete file, never a partly written one.
-    /// Returns false when the file already exists; a file that existed when the call started is never
-    /// replaced. Two calls racing to create the same file may both return true: the existence check and
-    /// the rename are not one step on every platform, so either content can remain.
-    /// </summary>
-    bool CreateFileAtomically(string path, string contents);
     void DeleteFile(string path);
     void CreateDirectory(string path);
     void DeleteDirectory(string path, bool recursive);
