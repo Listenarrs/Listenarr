@@ -172,6 +172,49 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task AddAsync_WithUrlBase_KeepsPrefixOnLoginAndAddRequests()
+        {
+            // Test Connection only exercises the version request. Adding a torrent goes through
+            // two other call sites, the shared login in QbittorrentAuthSession and the add
+            // workflow itself, and each builds its own URL. If either dropped the prefix, a
+            // reverse-proxied instance would pass Test Connection and then fail every grab.
+            var mock = _provider.GetRequiredService<QbittorrentApiMock>();
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("192.168.50.111")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithType("qbittorrent")
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithUrlBase("/qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12"
+            };
+
+            mock.ResetRequestHistory();
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var submissionResult = await adapter.AddAsync(
+                client,
+                PreparedSubmissionTestFactory.Torrent(searchResult));
+
+            // The mock refuses an add that was not preceded by a successful login, so a result
+            // here means the login was accepted and the add ran in that authenticated session.
+            Assert.True(mock.Authenticated);
+            Assert.Equal("ABCDEF1234567890ABCDEF1234567890ABCDEF12", submissionResult.ExternalId);
+
+            var paths = mock.RequestHistory.Select(request => request.RequestUri.AbsolutePath).ToList();
+            Assert.Contains("/qbittorrent/api/v2/auth/login", paths);
+            Assert.Contains("/qbittorrent/api/v2/torrents/add", paths);
+            // Nothing in the flow may reach the client at its bare root.
+            Assert.All(paths, path => Assert.StartsWith("/qbittorrent/api/v2/", path, StringComparison.Ordinal));
+        }
+
+        [Fact]
         public async Task AddAsync_WhenMagnetAndTorrentUrlAreProvided_UsesVerifiedMagnetHashWithoutDownloading()
         {
             var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);

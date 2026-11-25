@@ -319,4 +319,90 @@ describe('DownloadClientFormModal', () => {
     const calledWith = (api.testDownloadClient as unknown).mock.calls[0][0]
     expect(calledWith.settings.urlBase).toBe('/qbittorrent')
   })
+
+  describe('URL Base persistence for qbittorrent', () => {
+    const storedClient = (settings: Record<string, unknown>) =>
+      ({
+        id: '6',
+        name: 'qbt',
+        type: 'qbittorrent',
+        host: 'qbittorrent.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+        downloadPath: '',
+        username: '',
+        password: '',
+        settings,
+      }) as unknown as import('@/types').DownloadClientConfiguration
+
+    // Mounts the form with a save spy in place of the store action, so a submit records the
+    // configuration the form would persist without calling the API.
+    const mountWithSaveSpy = async (
+      editingClient: import('@/types').DownloadClientConfiguration,
+    ) => {
+      const pinia = createPinia()
+      const { useConfigurationStore } = await import('@/stores/configuration')
+      const store = useConfigurationStore(pinia)
+      const save = vi.fn(async (config: import('@/types').DownloadClientConfiguration) => {
+        void config
+      })
+      store.saveDownloadClientConfiguration = save
+
+      const wrapper = mount(DownloadClientFormModal, {
+        global: { plugins: [pinia] },
+        props: { visible: true, editingClient: null },
+      })
+      await wrapper.setProps({ editingClient })
+      await nextTick()
+
+      const submit = async () => {
+        await wrapper.find('form').trigger('submit')
+        await nextTick()
+        expect(save).toHaveBeenCalledTimes(1)
+        return save.mock.calls[0]![0]
+      }
+
+      return { wrapper, submit }
+    }
+
+    it('saves the entered URL Base and restores it when the saved client is reopened', async () => {
+      const first = await mountWithSaveSpy(storedClient({}))
+      await first.wrapper.find('input[id="urlBase"]').setValue('/qbittorrent')
+      const saved = await first.submit()
+
+      expect(saved.id).toBe('6')
+      expect(saved.settings.urlBase).toBe('/qbittorrent')
+      first.wrapper.unmount()
+
+      // Reopen the form on exactly what was saved, the way the settings list hands a stored
+      // client back, so the round trip is the thing under test and not a hand-written fixture.
+      const reopened = await mountWithSaveSpy(saved)
+      const input = reopened.wrapper.find('input[id="urlBase"]').element as HTMLInputElement
+      expect(input.value).toBe('/qbittorrent')
+
+      // Saving again without touching the field must not lose it.
+      const resaved = await reopened.submit()
+      expect(resaved.settings.urlBase).toBe('/qbittorrent')
+      reopened.wrapper.unmount()
+    })
+
+    it('removes URL Base from the saved settings when the field is cleared', async () => {
+      const { wrapper, submit } = await mountWithSaveSpy(
+        storedClient({ urlBase: '/qbittorrent', category: 'listenarr' }),
+      )
+
+      const input = wrapper.find('input[id="urlBase"]')
+      expect((input.element as HTMLInputElement).value).toBe('/qbittorrent')
+      await input.setValue('')
+      const saved = await submit()
+
+      // Removed outright, not saved as an empty string: an empty prefix and no prefix must not
+      // be two different stored states.
+      expect(saved.settings).not.toHaveProperty('urlBase')
+      // The control: clearing one setting leaves the others alone.
+      expect(saved.settings.category).toBe('listenarr')
+      wrapper.unmount()
+    })
+  })
 })
