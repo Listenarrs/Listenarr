@@ -184,6 +184,27 @@ public sealed class ReadOnlyBindMountFactAttribute : FactAttribute
     }
 }
 
+public sealed class ForeignOwnedSourceTheoryAttribute : TheoryAttribute
+{
+    public const string PathEnvironmentVariable =
+        "LISTENARR_FOREIGN_OWNED_SOURCE_PATH";
+
+    public ForeignOwnedSourceTheoryAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires native Linux file ownership.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide source files owned by another user.";
+        }
+    }
+}
+
 public sealed class CrossVolumeFactAttribute : FactAttribute
 {
     public const string DestinationPathEnvironmentVariable =

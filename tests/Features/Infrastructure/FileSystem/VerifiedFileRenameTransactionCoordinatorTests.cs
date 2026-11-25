@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
@@ -135,6 +136,71 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         await using var lease = result.Lease!;
         Assert.Equal(sourceMode, File.GetUnixFileMode(scenario.Destination));
         Assert.Equal(sourceMode, File.GetUnixFileMode(scenario.Source));
+    }
+
+    [Theory]
+    [InlineData(UnixFileMode.GroupRead, UnixFileMode.UserRead | UnixFileMode.GroupRead)]
+    [InlineData(UnixFileMode.OtherRead, UnixFileMode.UserRead | UnixFileMode.OtherRead)]
+    [InlineData(UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+        UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead)]
+    [InlineData(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead,
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead)]
+    [InlineData(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead,
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead)]
+    public void ResolveCopyUnixMode_CopyOwnedByThisProcess_GrantsOnlyOwnerRead(
+        UnixFileMode sourceMode, UnixFileMode expectedMode)
+    {
+        Assert.Equal(expectedMode, PinnedDirectoryCreation.PinnedFileEntry.ResolveCopyUnixMode(sourceMode));
+    }
+
+    [ForeignOwnedSourceTheory]
+    [InlineData("group-read.m4b", UnixFileMode.GroupRead, UnixFileMode.UserRead | UnixFileMode.GroupRead)]
+    [InlineData("other-read.m4b", UnixFileMode.OtherRead, UnixFileMode.UserRead | UnixFileMode.OtherRead)]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task OrganizeVerifiedRename_SourceOwnedByAnotherUser_PublishesCopyThisProcessCanRead(
+        string fixtureName, UnixFileMode sourceMode, UnixFileMode expectedDestinationMode)
+    {
+        Assert.NotEqual(0u, GetEffectiveUserId());
+        var scenario = await CreateScenarioAsync();
+        var expectedBytes = await File.ReadAllBytesAsync(scenario.Source);
+        File.Move(
+            Path.Join(Environment.GetEnvironmentVariable(ForeignOwnedSourceTheoryAttribute.PathEnvironmentVariable)!, fixtureName),
+            scenario.Source,
+            overwrite: true);
+        // A non-root reader that succeeds without the owner read bit is not the
+        // owner; a group-only grant proves a shared group and an other-only
+        // grant proves the file's group is not one this process holds.
+        Assert.Equal(sourceMode, File.GetUnixFileMode(scenario.Source));
+        Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(scenario.Source));
+
+        var prepared = await CreateCoordinator().PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+        Assert.True(prepared.Success,
+            $"{prepared.Error} Journal: {(await GetJournalAsync(scenario.OperationId)).State}. "
+                + $"Staging file left: {File.Exists(scenario.StagingPath)}. Source kept: {File.Exists(scenario.Source)}.");
+        await using var lease = prepared.Lease!;
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var tracked = await db.AudiobookFiles.SingleAsync(file => file.Id == scenario.AudiobookFile.Id);
+            tracked.Path = scenario.Destination;
+            await new FileRenameCommitStore(db, TimeProvider.System)
+                .CommitOwnerMetadataAsync(scenario.Audiobook.Id, [lease.OperationId]);
+        }
+        Assert.Equal(VerifiedFileRenameRetirementOutcome.Completed, await lease.CompleteSourceRetirementAsync());
+
+        Assert.Equal(expectedDestinationMode, File.GetUnixFileMode(scenario.Destination));
+        Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(scenario.Destination));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.False(File.Exists(scenario.StagingPath));
+        Assert.False(File.Exists(scenario.RetirementPath));
+        Assert.Equal(VerifiedFileRenameState.Completed, (await GetJournalAsync(scenario.OperationId)).State);
+        await using var verifyDb = await factory.CreateDbContextAsync();
+        Assert.Equal(scenario.Destination, (await verifyDb.AudiobookFiles.AsNoTracking()
+            .SingleAsync(file => file.Id == scenario.AudiobookFile.Id)).Path);
+        Assert.False(await verifyDb.VerifiedFileRenameJournals.AnyAsync(
+            journal => journal.State == VerifiedFileRenameState.NeedsAttention));
     }
 
     [LinuxTheory]
@@ -744,4 +810,7 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Guid BatchId,
         VerifiedFileRenameBatchManifest Manifest,
         FilePublicationSourceProof SourceProof);
+
+    [DllImport("libc", EntryPoint = "geteuid")]
+    private static extern uint GetEffectiveUserId();
 }
