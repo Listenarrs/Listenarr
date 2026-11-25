@@ -22,6 +22,7 @@ Write-Host "Runner image: $env:ImageOS $env:ImageVersion"
 $readOnlySourceRoot = $null
 $readOnlyMountRoot = $null
 $readOnlyMountActive = $false
+$foreignSourceRoot = $null
 $exitCode = 0
 
 try {
@@ -54,6 +55,31 @@ try {
 
         $env:LISTENARR_READONLY_LIBRARY_PATH = $readOnlyMountRoot
         Write-Host "Read-only scan validation mount: $readOnlyMountRoot"
+
+        # Organize sources owned by another user: one readable only through the
+        # runner's group (0040), one readable only as other (0004). The content
+        # matches the verified organize coordinator test scenario.
+        $foreignSourceRoot = Join-Path ([IO.Path]::GetTempPath()) "listenarr-foreign-source-$mountId"
+        New-Item -ItemType Directory -Path $foreignSourceRoot -Force | Out-Null
+        $runnerGroup = (& id -g | Out-String).Trim()
+        $foreignSources = @(
+            @{ Name = 'group-read.m4b'; Mode = '0040'; Owner = "65534:$runnerGroup" },
+            @{ Name = 'other-read.m4b'; Mode = '0004'; Owner = '65534:65534' })
+        foreach ($foreignSource in $foreignSources) {
+            $foreignSourcePath = Join-Path $foreignSourceRoot $foreignSource.Name
+            [IO.File]::WriteAllText($foreignSourcePath, 'verified-organize-audio')
+            & chmod $foreignSource.Mode $foreignSourcePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not set the mode of the foreign-owned organize source $($foreignSource.Name)."
+            }
+            & sudo chown $foreignSource.Owner $foreignSourcePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not give the organize source $($foreignSource.Name) to another user."
+            }
+        }
+
+        $env:LISTENARR_FOREIGN_OWNED_SOURCE_PATH = $foreignSourceRoot
+        Write-Host "Foreign-owned organize sources: $foreignSourceRoot"
     }
 
     $preflightFilter = 'FullyQualifiedName=Listenarr.Tests.Features.Architecture.NativeTestCapabilityContractTests.RequiredNativeTestCapabilities_AreAvailable'
@@ -89,6 +115,7 @@ try {
 }
 finally {
     Remove-Item Env:LISTENARR_READONLY_LIBRARY_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:LISTENARR_FOREIGN_OWNED_SOURCE_PATH -ErrorAction SilentlyContinue
     if ($readOnlyMountActive -and $readOnlyMountRoot) {
         & sudo umount $readOnlyMountRoot
         if ($LASTEXITCODE -ne 0) {
@@ -100,6 +127,9 @@ finally {
     }
     if ($readOnlySourceRoot) {
         Remove-Item -LiteralPath $readOnlySourceRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($foreignSourceRoot) {
+        Remove-Item -LiteralPath $foreignSourceRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
