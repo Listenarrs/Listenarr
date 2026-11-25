@@ -57,16 +57,22 @@ public static class AudibleRequestHelper
 
     public static string BuildApiBaseUrl(string region)
     {
-        var normalizedRegion = NormalizeRegion(region);
-        return $"https://{(AudibleApiDomainMap.TryGetValue(normalizedRegion, out var domain) ? domain : AudibleApiDomainMap["us"])}";
+        return $"https://{AudibleApiDomainMap[ResolveSupportedRegion(region)]}";
     }
 
     public static string GetLocale(string region)
     {
-        var normalizedRegion = NormalizeRegion(region);
-        return AudibleLocaleMap.TryGetValue(normalizedRegion, out var locale)
-            ? locale
-            : AudibleLocaleMap["us"];
+        return AudibleLocaleMap[ResolveSupportedRegion(region)];
+    }
+
+    /// <summary>
+    /// Returns the region whose Audible catalogue is actually used for the given value:
+    /// the value itself when Audible has an endpoint for it, otherwise "us".
+    /// </summary>
+    public static string ResolveSupportedRegion(string? region)
+    {
+        var normalizedRegion = NormalizeRegion(region ?? string.Empty);
+        return AudibleApiDomainMap.ContainsKey(normalizedRegion) ? normalizedRegion.ToLowerInvariant() : "us";
     }
 
     public static string NormalizeRegion(string region)

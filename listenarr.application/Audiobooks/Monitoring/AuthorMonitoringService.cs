@@ -229,9 +229,10 @@ namespace Listenarr.Application.Audiobooks.Monitoring
 
             try
             {
+                var region = NormalizeRegion(monitoredAuthor.Region);
                 var catalog = await _authorCatalogService.GetCatalogAsync(
                     monitoredAuthor.AuthorName,
-                    monitoredAuthor.Region,
+                    region,
                     limit: 500,
                     language: null,
                     forceRefresh: forceRefresh,
@@ -270,7 +271,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
                     var addResult = await _libraryAddService.AddToLibraryAsync(
                         new LibraryAddOperationRequest
                         {
-                            Metadata = MapToMetadata(book, monitoredAuthor.Region),
+                            Metadata = MapToMetadata(book, region),
                             Monitored = true,
                             QualityProfileId = monitoredAuthor.QualityProfileId,
                             AutoSearch = false,

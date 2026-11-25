@@ -1,0 +1,10 @@
+{
+  "product": {
+    "asin": "B0C6PELLUC",
+    "title": "Pellucidar",
+    "content_delivery_type": "BookSeries",
+    "relationships": [
+      { "asin": "B0C6B525PQ", "relationship_to_product": "child", "relationship_type": "series", "sequence": "3", "sort": "3" }
+    ]
+  }
+}
