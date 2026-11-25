@@ -22,7 +22,7 @@ namespace Listenarr.Application.Search.Matching;
 internal static class ReleaseNarratorRule
 {
     private static readonly Regex Narrator = new(
-        @"^(?:(?:narrated|read)\s+by|narrator\s*:)\s*(?<name>[\p{L}\p{M}][\p{L}\p{M}\s.'’,-]{0,199})$",
+        @"^(?:(?:narrated|read)\s+by|narrator\s*:)\s*(?<name>[\p{L}\p{M}][\p{L}\p{M}\s.'’,/-]{0,199})$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     public static bool Match(string value) => (value.StartsWith("narrat", StringComparison.OrdinalIgnoreCase)
         || value.StartsWith("read ", StringComparison.OrdinalIgnoreCase)) && Narrator.IsMatch(value);
