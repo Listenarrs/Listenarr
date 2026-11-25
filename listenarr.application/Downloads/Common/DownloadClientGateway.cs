@@ -388,7 +388,7 @@ namespace Listenarr.Application.Downloads.Common
             item.ContentPath = recordedPath;
             item.SourceFiles = files;
             logger.LogInformation(
-                "Download {DownloadId} is no longer listed by its client; importing {FileCount} file(s) recorded from its file list",
+                "Download {DownloadId} is no longer listed by its client; importing its {FileCount} recorded file(s)",
                 download.Id,
                 item.SourceFiles.Count);
             return item;
