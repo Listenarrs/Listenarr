@@ -82,52 +82,6 @@ export async function removeImages(appImage, hostImage) {
   await waitForExit(child, 'Listenarr image cleanup')
 }
 
-/** The local images of these repositories, as { repository, tag, createdAt } (`docker image ls`). */
-export function listImages(repositories) {
-  const output = execFileSync(
-    'docker',
-    ['image', 'ls', '--format', '{{json .}}', ...repositories.flatMap((repository) => ['--filter', `reference=${repository}`])],
-    { encoding: 'utf8' },
-  )
-  return output
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .map(({ Repository, Tag, CreatedAt }) => ({ repository: Repository, tag: Tag, createdAt: CreatedAt }))
-}
-
-/**
- * Removes old reusable images. Without --force: an image a container still uses (another run on the
- * same daemon) stays, and Docker reports it.
- */
-export async function pruneImages(images) {
-  if (!images.length) return
-  console.log(`Removing ${images.length} older Listenarr E2E image(s): ${images.join(', ')}`)
-  const child = start('docker', ['rmi', ...images], { cwd: repositoryRoot })
-  await waitForExit(child, 'Listenarr image prune')
-}
-
-/**
- * Every container of the daemon, as { name, state, createdAt } (`docker ps -a`). `--format '{{json .}}'`
- * alone makes Docker compute every container's filesystem size, seconds on a busy daemon: --size=false.
- */
-export function listContainers(exec = execFileSync) {
-  const output = exec('docker', ['ps', '--all', '--size=false', '--format', '{{json .}}'], { encoding: 'utf8' })
-  return output
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .map(({ Names, State, CreatedAt }) => ({ name: Names, state: State, createdAt: CreatedAt }))
-}
-
-/** Removes the stack containers earlier runs left behind, with their anonymous volumes. */
-export async function removeContainers(names) {
-  if (!names.length) return
-  console.log(`Removing ${names.length} leftover Listenarr E2E container(s): ${names.join(', ')}`)
-  const child = start('docker', ['rm', '--volumes', ...names], { cwd: repositoryRoot })
-  await waitForExit(child, 'Listenarr container leftover cleanup')
-}
-
 /** A hash of every row of every table: equal hashes mean an unchanged database. */
 export function databaseSnapshot(path) {
   const database = new DatabaseSync(path, { readOnly: true })

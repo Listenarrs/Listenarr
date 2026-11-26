@@ -24,7 +24,7 @@
     "validate:repository-paths": "node scripts/validate-repository-paths.mjs",
     "test:repository-paths": "node --test scripts/validate-repository-paths.test.mjs",
     "test:e2e-gif": "node --test scripts/e2e/webm-to-gif.test.mjs",
-    "test:e2e-plan": "node --test scripts/lib/e2e-plan.test.mjs scripts/lib/listenarr-stack.test.mjs",
+    "test:e2e-plan": "node --test scripts/lib/e2e-plan.test.mjs",
     "test:e2e-import-folders": "node --test scripts/e2e/import-folders.test.mjs scripts/e2e/regenerate-fixtures.test.mjs",
     "e2e:regenerate-fixtures": "node scripts/e2e/regenerate-fixtures.mjs",
     "ci:fork": "node scripts/ci/run-tests.mjs",
