@@ -21,6 +21,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Http;
 
 namespace Listenarr.Tests.Features.Api.Features.Library
@@ -89,6 +90,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var status = await client.GetFromJsonAsync<JsonElement>(
                 $"{monitoringRoute}/status?name={Uri.EscapeDataString(name)}&region=zz&language=english");
             Assert.True(status.GetProperty("isMonitored").GetBoolean());
+
+            using var verifyScope = factory.Services.CreateScope();
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var storedRegions = monitoringRoute.Contains("authors", StringComparison.Ordinal)
+                ? await verifyDb.MonitoredAuthors.Select(a => a.Region).ToListAsync()
+                : await verifyDb.MonitoredSeries.Select(s => s.Region).ToListAsync();
+            Assert.Equal("zz", Assert.Single(storedRegions));
 
             // And the library lists the added book with region us and nothing broken
             var library = await client.GetFromJsonAsync<JsonElement>("api/v1/library");
