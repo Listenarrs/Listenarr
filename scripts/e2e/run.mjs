@@ -20,7 +20,8 @@
 //   node scripts/e2e/run.mjs [--coverage] [--stacks=N] [--serve] [-- <playwright test arguments>]
 //
 // --serve keeps one stack up (no sharding): run Playwright yourself with the variables it prints.
-// Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on to every shard.
+// Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on to every shard; with any, the
+// run uses one stack unless --stacks=N says otherwise (a filter can leave a shard without tests).
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
@@ -38,7 +39,7 @@ import {
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
 import { writeImportFolders } from './import-folders.mjs'
-import { stackPlan } from '../lib/e2e-plan.mjs'
+import { stackCount, stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -53,13 +54,13 @@ for (const option of flags) {
 }
 const coverage = flags.includes('--coverage')
 const serve = flags.includes('--serve')
-// --serve is a single-stack debugging mode; sharding only makes sense for the full suite.
-const count = stacksOption
-  ? Number(stacksOption.slice('--stacks='.length))
-  : serve
-    ? 1
-    : Number(process.env.LISTENARR_E2E_STACKS ?? 3)
-if (serve && count !== 1) throw new Error('--serve works with one stack only (use --stacks=1).')
+const count = stackCount({
+  stacks: stacksOption?.slice('--stacks='.length),
+  environmentStacks: process.env.LISTENARR_E2E_STACKS,
+  serve,
+  coverage,
+  playwrightArguments,
+})
 
 if (!existsSync(playwrightCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')

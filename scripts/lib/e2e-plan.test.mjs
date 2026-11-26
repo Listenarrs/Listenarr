@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { imageTags, stackPlan } from './e2e-plan.mjs'
+import { imageTags, stackCount, stackPlan } from './e2e-plan.mjs'
 
 test('imageTags reuses a stable tag for a clean checkout', () => {
   assert.deepEqual(imageTags({ head: 'ad49a3446eecef', dirty: false, runId: '123-xyz' }), {
@@ -81,3 +81,36 @@ const pair = (tag, createdAt) => [
   image('listenarr-e2e-host', tag, createdAt),
 ]
 const tags = ['aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'eeeeeeeeeeee']
+
+test('stackCount runs the full suite on three stacks by default', () => {
+  assert.equal(stackCount({ playwrightArguments: [] }), 3)
+})
+
+test('stackCount reads LISTENARR_E2E_STACKS for the full suite', () => {
+  assert.equal(stackCount({ playwrightArguments: [], environmentStacks: '2' }), 2)
+})
+
+test('stackCount runs one stack when Playwright arguments select tests', () => {
+  // A filter can select fewer tests than there are shards; an empty shard fails its coverage teardown.
+  assert.equal(stackCount({ playwrightArguments: ['--grep', 'a link from Settings'] }), 1)
+  assert.equal(stackCount({ playwrightArguments: ['library-import-scan.spec.ts'], environmentStacks: '3' }), 1)
+})
+
+test('stackCount keeps an explicit --stacks, with or without Playwright arguments', () => {
+  assert.equal(stackCount({ stacks: '2', playwrightArguments: [] }), 2)
+  assert.equal(stackCount({ stacks: '3', playwrightArguments: ['--repeat-each', '3'] }), 3)
+})
+
+test('stackCount refuses explicit shards for a coverage run given Playwright arguments', () => {
+  assert.throws(
+    () => stackCount({ stacks: '3', coverage: true, playwrightArguments: ['--grep', 'a link from Settings'] }),
+    /--stacks=1/,
+  )
+  assert.equal(stackCount({ stacks: '1', coverage: true, playwrightArguments: ['--grep', 'x'] }), 1)
+  assert.equal(stackCount({ stacks: '3', coverage: true, playwrightArguments: [] }), 3)
+})
+
+test('stackCount serves one stack only', () => {
+  assert.equal(stackCount({ serve: true, playwrightArguments: [] }), 1)
+  assert.throws(() => stackCount({ serve: true, stacks: '2', playwrightArguments: [] }), /--serve/)
+})
