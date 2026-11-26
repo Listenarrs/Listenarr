@@ -77,7 +77,7 @@ The specs live under `playwright/e2e/` and run with `playwright.e2e.config.ts`, 
 - Frontend: V8 coverage from Chromium, mapped to the sources, one report per shard in `test-results/e2e-coverage/frontend/<n>/` (`index.html`, `lcov.info`).
 - Backend: each host runs under `dotnet-coverage`. The merged Cobertura report goes to `test-results/e2e-coverage-backend/cobertura.xml`, with a summary of the library import code in `summary.md`.
 
-`node ../scripts/e2e/run.mjs -- <playwright arguments>` runs a subset in every shard, such as a spec or `--repeat-each`. `--coverage` collects coverage (off by default). `--serve` starts a single stack (no sharding) and prints the variables to run Playwright against it repeatedly.
+`node ../scripts/e2e/run.mjs -- <playwright arguments>` runs a subset, such as a spec, `--grep` or `--repeat-each`, on one stack, since a filter can leave a shard without tests (`--stacks=N` still shards it, except with `--coverage`, where an empty shard fails its report). `--coverage` collects coverage (off by default). `--serve` starts a single stack (no sharding) and prints the variables to run Playwright against it repeatedly.
 
 ### Test Coverage
 

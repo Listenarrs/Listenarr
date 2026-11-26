@@ -40,3 +40,26 @@ export function stackPlan({
     })),
   }
 }
+
+/**
+ * How many stacks (Playwright shards) a run starts. The full suite runs on three, or
+ * LISTENARR_E2E_STACKS. Playwright arguments (a spec, --grep) can select fewer tests than there are
+ * shards, and an empty shard fails its coverage teardown, so with any the default is one stack. An
+ * explicit --stacks=N wins, except for a coverage run given Playwright arguments, which must use one.
+ * --serve keeps one stack up.
+ */
+export function stackCount({ stacks, environmentStacks, serve = false, coverage = false, playwrightArguments = [] }) {
+  if (serve) {
+    if (stacks !== undefined && Number(stacks) !== 1) throw new Error('--serve works with one stack only (use --stacks=1).')
+    return 1
+  }
+  if (stacks !== undefined) {
+    const count = Number(stacks)
+    if (coverage && playwrightArguments.length && count !== 1) {
+      throw new Error('A coverage run given Playwright arguments can leave a shard without tests: use --stacks=1.')
+    }
+    return count
+  }
+  if (playwrightArguments.length) return 1
+  return Number(environmentStacks ?? 3)
+}
