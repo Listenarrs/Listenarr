@@ -1,0 +1,17 @@
+{
+  "products": [
+    {
+      "asin": "B002V8OEG0",
+      "title": "The Voyages of Doctor Dolittle",
+      "language": "english",
+      "authors": [{ "name": "Hugh Lofting" }],
+      "narrators": [{ "name": "William Sutherland" }],
+      "series": [{ "asin": "B07MFMHNHV", "title": "Doctor Dolittle", "sequence": "2" }],
+      "content_type": "Product",
+      "content_delivery_type": "SinglePartBook",
+      "release_date": "2004-10-04",
+      "runtime_length_min": 540
+    }
+  ],
+  "total_results": 1
+}

@@ -1,0 +1,10 @@
+{
+  "product": {
+    "asin": "B07MFMHNHV",
+    "title": "Doctor Dolittle",
+    "content_delivery_type": "BookSeries",
+    "relationships": [
+      { "asin": "B002V8OEG0", "relationship_to_product": "child", "relationship_type": "series", "sequence": "2", "sort": "2" }
+    ]
+  }
+}

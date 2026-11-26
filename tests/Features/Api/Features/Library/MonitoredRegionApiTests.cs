@@ -47,7 +47,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Theory]
         [InlineData("api/v1/authors/monitoring", "Edgar Rice Burroughs", "B0C6B525PQ")]
-        [InlineData("api/v1/series/monitoring", "Pellucidar", "B0C6B525PQ")]
+        [InlineData("api/v1/series/monitoring", "Doctor Dolittle", "B002V8OEG0")]
         public async Task MonitorWithUnsupportedRegion_UsesTheUsCatalogueAndSavesTheBookWithRegionUs(
             string monitoringRoute,
             string name,

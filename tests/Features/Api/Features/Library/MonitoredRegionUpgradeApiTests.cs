@@ -31,8 +31,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         {
             { "authors", "Edgar Rice Burroughs", "zz", "english", true },
             { "authors", "Edgar Rice Burroughs", "ca", "english", true },
-            { "series", "Pellucidar", "zz", "english", false },
-            { "series", "Pellucidar", "ca", "english", false }
+            { "series", "Doctor Dolittle", "zz", "english", false },
+            { "series", "Doctor Dolittle", "ca", "english", false }
         };
 
         [Theory]
