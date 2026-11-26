@@ -138,7 +138,12 @@ namespace Listenarr.Application.Audiobooks.Monitoring
 
         private static string NormalizeRegion(string? region)
         {
-            return AudibleRequestHelper.ResolveSupportedRegion(AudiobookIdentifierNormalizer.NormalizeRegion(region));
+            return AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
+        }
+
+        private static string ResolveEffectiveRegion(string? storedRegion)
+        {
+            return AudibleRequestHelper.ResolveSupportedRegion(NormalizeRegion(storedRegion));
         }
 
         private static string NormalizeLanguage(string? language, bool fallbackToEnglish)

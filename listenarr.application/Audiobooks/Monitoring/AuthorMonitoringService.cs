@@ -229,7 +229,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
 
             try
             {
-                var region = NormalizeRegion(monitoredAuthor.Region);
+                var region = ResolveEffectiveRegion(monitoredAuthor.Region);
                 var catalog = await _authorCatalogService.GetCatalogAsync(
                     monitoredAuthor.AuthorName,
                     region,

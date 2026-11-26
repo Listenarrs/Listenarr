@@ -85,6 +85,11 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.NotEmpty(audibleHosts);
             Assert.All(audibleHosts, host => Assert.Equal("api.audible.com", host));
 
+            // And the monitor is stored and found under the submitted region
+            var status = await client.GetFromJsonAsync<JsonElement>(
+                $"{monitoringRoute}/status?name={Uri.EscapeDataString(name)}&region=zz&language=english");
+            Assert.True(status.GetProperty("isMonitored").GetBoolean());
+
             // And the library lists the added book with region us and nothing broken
             var library = await client.GetFromJsonAsync<JsonElement>("api/v1/library");
             var book = Assert.Single(
