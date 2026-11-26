@@ -87,6 +87,17 @@ public sealed class ReleaseBracketFieldMetadataTests : BaseTests
         Assert.Contains("language_mismatch", score.RejectionReasons);
     }
 
+    [Theory]
+    [InlineData("Dracula by Bram Stoker [German]", "German", "German")]
+    [InlineData("Dracula by Bram Stoker [French]", "The French", "French")]
+    public async Task AFullLanguageNameThatMatchesASeriesStillDeclaresItsLanguage(string release, string series, string language)
+    {
+        var score = await Score(Book(series: series), release);
+        Assert.Equal(language, Assert.Single(score.Identity.Languages).Language);
+        Assert.True(score.IsRejected);
+        Assert.Contains("language_mismatch", score.RejectionReasons);
+    }
+
     [Fact]
     public async Task AMetadataMatchDoesNotHideADifferentLanguageInTheSameBracket()
     {
