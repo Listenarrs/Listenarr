@@ -1,6 +1,6 @@
 {
   "name": "listenarr-fe",
-  "version": "1.10.10",
+  "version": "1.10.11",
   "private": true,
   "type": "module",
   "engines": {
