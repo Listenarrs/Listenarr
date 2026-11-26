@@ -107,9 +107,12 @@ export async function pruneImages(images) {
   await waitForExit(child, 'Listenarr image prune')
 }
 
-/** Every container of the daemon, as { name, state, createdAt } (`docker ps -a`). */
-export function listContainers() {
-  const output = execFileSync('docker', ['ps', '--all', '--format', '{{json .}}'], { encoding: 'utf8' })
+/**
+ * Every container of the daemon, as { name, state, createdAt } (`docker ps -a`). `--format '{{json .}}'`
+ * alone makes Docker compute every container's filesystem size, seconds on a busy daemon: --size=false.
+ */
+export function listContainers(exec = execFileSync) {
+  const output = exec('docker', ['ps', '--all', '--size=false', '--format', '{{json .}}'], { encoding: 'utf8' })
   return output
     .split('\n')
     .filter(Boolean)
