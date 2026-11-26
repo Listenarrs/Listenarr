@@ -14,8 +14,8 @@
 //   fe/test-results/e2e-coverage-backend/, with summary.md for the library import code.
 // Both are reported, not gated; a CI run with the coverage input merges them with the other test jobs'
 // (scripts/test-coverage/aggregate.mjs).
-// The containers, the images of a dirty checkout and the temporary data are removed at the end; of the
-// reusable (commit-tagged) images, only the newest 3 commits' are kept (LISTENARR_E2E_KEEP_IMAGES, 0 keeps all).
+// The containers, the images of a dirty checkout and the temporary data are removed at the end; the
+// images of a clean checkout are tagged with its commit and kept for the next run on it.
 //
 //   node scripts/e2e/run.mjs [--coverage] [--stacks=N] [--serve] [-- <playwright test arguments>]
 //
@@ -30,11 +30,7 @@ import {
   availablePort,
   ensureImages,
   frontendDirectory,
-  listContainers,
-  listImages,
   playwrightCli,
-  pruneImages,
-  removeContainers,
   removeImages,
   repositoryRoot,
   start,
@@ -42,7 +38,7 @@ import {
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
 import { writeImportFolders } from './import-folders.mjs'
-import { containersToRemove, imagesToPrune, stackPlan } from '../lib/e2e-plan.mjs'
+import { stackPlan } from '../lib/e2e-plan.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
 import { convertVideos } from './webm-to-gif.mjs'
 
@@ -273,24 +269,6 @@ try {
       } catch (error) {
         console.error(`Could not clean up the Listenarr images: ${error.message}`)
       }
-    }
-    // Reusable images are kept for the next run on the same commit; only the newest few commits'
-    // are, so a long-lived Docker daemon (a self-hosted runner) does not fill up.
-    const keep = Number(process.env.LISTENARR_E2E_KEEP_IMAGES ?? 3)
-    // Stack containers a crashed run left behind pin their images, so they go first (never running ones,
-    // nor recent ones, which a live run on the same daemon may own).
-    if (Number.isInteger(keep) && keep > 0) {
-      try {
-        await removeContainers(containersToRemove(listContainers(), { now: Date.now() }))
-      } catch (error) {
-        console.error(`Could not remove the leftover Listenarr containers: ${error.message}`)
-      }
-    }
-    try {
-      const current = plan.reusable ? plan.appImage.split(':')[1] : ''
-      await pruneImages(imagesToPrune(listImages(['listenarr-e2e-app', 'listenarr-e2e-host']), { current, keep }))
-    } catch (error) {
-      console.error(`Could not prune the older Listenarr images: ${error.message}`)
     }
   }
 }
