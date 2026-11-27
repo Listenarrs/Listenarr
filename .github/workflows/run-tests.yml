@@ -4,7 +4,7 @@ on:
   push:
     branches: [ beta, main, canary, feature/* ]
   pull_request:
-    branches: [ beta, main, canary ]
+    # Include stacked PRs targeting fix/*, feature/*, and other working branches.
     types: [ opened, synchronize, reopened ]
   workflow_dispatch:
     inputs:

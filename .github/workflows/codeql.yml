@@ -3,8 +3,8 @@ name: "CodeQL Analysis"
 on:
   push:
     branches: [ "canary", "main", "feature/*" ]
+  # Include stacked PRs targeting fix/*, feature/*, and other working branches.
   pull_request:
-    branches: [ "canary", "main" ]
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sundays
 
