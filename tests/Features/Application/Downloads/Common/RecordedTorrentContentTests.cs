@@ -95,6 +95,59 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
             Assert.Equal(expectedFiles.Select(name => Path.Join(contentDir, name)), item.SourceFiles);
         }
 
+        [Fact]
+        public async Task GetQueueItemAsync_RemovedTorrentWithRecordedList_DoesNotImportAFileReplacingItsFolder()
+        {
+            // The recorded folder was removed with its torrent and a regular audio file now sits at
+            // the folder's path. The recorded list names a file under that folder, so it decides.
+            var replacedPath = Path.Join(Path.GetDirectoryName(contentDir)!, "Replaced.m4b");
+            await FileService.GetFileAsync(Path.GetDirectoryName(replacedPath)!, "Replaced.m4b");
+
+            var item = await GetRemovedItemAsync(replacedPath, """["Chapter.m4b"]""");
+
+            Assert.Empty(item.SourceFiles);
+            Assert.Null(item.ContentPath);
+        }
+
+        [Fact]
+        public async Task GetQueueItemAsync_RemovedTorrentRecordedAsSingleFile_ReturnsThatFile()
+        {
+            // A single-file torrent is recorded without a list; its content path is the file.
+            var singleFile = Path.Join(contentDir, "book.m4b");
+
+            var item = await GetRemovedItemAsync(singleFile, null);
+
+            Assert.Equal([singleFile], item.SourceFiles);
+        }
+
+        [Fact]
+        public async Task GetQueueItemAsync_RemovedTorrentWithNestedRecordedFile_ReturnsIt()
+        {
+            var discDir = Directory.CreateDirectory(Path.Join(contentDir, "Disc 1")).FullName;
+            await FileService.GetFileAsync(discDir, "track.m4b");
+
+            var item = await GetRemovedItemAsync(contentDir, """["Disc 1/track.m4b"]""");
+
+            Assert.Equal([Path.Join(contentDir, "Disc 1", "track.m4b")], item.SourceFiles);
+        }
+
+        private async Task<QueueItem> GetRemovedItemAsync(string recordedPath, string? recordedFilesJson)
+        {
+            adapter.QueueItemMock = new QueueItem { SourceFiles = [] };
+            var download = new DownloadBuilder()
+                .WithExternalId(TorrentHash)
+                .WithTorrentHash(TorrentHash)
+                .WithPath(Path.GetDirectoryName(contentDir)!)
+                .Build();
+            download.SetMetadata("ClientContentPath", recordedPath);
+            if (recordedFilesJson != null)
+            {
+                download.SetMetadata("ClientContentFiles", recordedFilesJson);
+            }
+
+            return await gateway.GetQueueItemAsync(client, download, new QueueItem());
+        }
+
         private QueueItem PolledItem(params string[] listedFiles)
         {
             var builder = new QueueItemBuilder()

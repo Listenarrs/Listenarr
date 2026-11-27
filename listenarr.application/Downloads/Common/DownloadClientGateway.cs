@@ -374,9 +374,7 @@ namespace Listenarr.Application.Downloads.Common
                 return item;
             }
 
-            var files = fileSystem.FileExists(recordedPath)
-                ? [recordedPath]
-                : RecordedTorrentContent.ResolveFiles(download, recordedPath, fileSystem);
+            var files = RecordedTorrentContent.ResolveFiles(download, recordedPath, fileSystem);
             if (files == null)
             {
                 logger.LogWarning(

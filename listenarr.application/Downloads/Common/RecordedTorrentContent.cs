@@ -61,14 +61,16 @@ namespace Listenarr.Application.Downloads.Common
 
         /// <summary>
         /// Returns the recorded files under the content path, or null unless every recorded name
-        /// stays inside it and still exists.
+        /// stays inside it and still exists. A torrent recorded without a list is a single file at
+        /// the content path, which is returned when it still exists; a recorded list is never
+        /// bypassed, so a file that replaced the recorded folder is not mistaken for the torrent.
         /// </summary>
         public static List<string>? ResolveFiles(Download download, string contentPath, IFileSystem fileSystem)
         {
             var names = ReadNames(download);
             if (names is not { Count: > 0 })
             {
-                return null;
+                return fileSystem.FileExists(contentPath) ? [contentPath] : null;
             }
 
             var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(contentPath));
