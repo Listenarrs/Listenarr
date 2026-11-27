@@ -66,18 +66,16 @@ namespace Listenarr.Application.Downloads.Submission
 
             // Author-free fallback, as in the automatic sweep: release names often omit the author,
             // so a title+author query can return nothing even when the book is available. Retried
-            // once, and only when the first search returned nothing. At this tag that includes
-            // indexer timeouts and errors, which SearchAsync swallows (it takes no cancellation token).
-            if (searchResults == null || !searchResults.Any())
+            // at most once: when the first search returned nothing, or (below) when scoring rejects
+            // everything it returned. At this tag "returned nothing" includes indexer timeouts and
+            // errors, which SearchAsync swallows (it takes no cancellation token).
+            var fallbackQuery = DownloadSearchQueryBuilder.BuildTitleFallback(audiobook);
+            var canRetryWithoutAuthor = !string.IsNullOrWhiteSpace(fallbackQuery)
+                && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase);
+            if ((searchResults == null || !searchResults.Any()) && canRetryWithoutAuthor)
             {
-                var fallbackQuery = DownloadSearchQueryBuilder.BuildTitleFallback(audiobook);
-                if (!string.IsNullOrWhiteSpace(fallbackQuery)
-                    && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
-                        LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(fallbackQuery));
-                    searchResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
-                }
+                searchResults = await SearchWithoutAuthorAsync(audiobook, fallbackQuery);
+                canRetryWithoutAuthor = false;
             }
 
             if (searchResults == null || !searchResults.Any())
@@ -85,29 +83,19 @@ namespace Listenarr.Application.Downloads.Submission
                 return new SearchAndDownloadResult { Success = false, Message = "No search results found" };
             }
 
-            // Drop releases already blocked for this book before they are assessed, so a blocked
-            // release can never be the one selected.
-            searchResults = await BlockedReleaseFilter.ExcludeAsync(blocklistService, audiobookId, searchResults, logger);
+            var (assessment, topResult) = await AssessAsync(audiobook, searchResults);
 
-            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile);
-            var scoredResults = assessment.Candidates;
-
-            // Log all scored results for debugging
-            logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, LogRedaction.SanitizeText(audiobook.Title));
-            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
+            // The raw results can all be junk that scoring rejects (a title match under the wrong
+            // author), which would end the search here although the author-free query was never
+            // tried. Retry once, with the same identity and quality policy.
+            if (topResult == null && canRetryWithoutAuthor)
             {
-                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
-                logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
-                    status, scoredResult.TotalScore, LogRedaction.SanitizeText(scoredResult.SearchResult.Title), LogRedaction.SanitizeText(scoredResult.SearchResult.Source),
-                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
-                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
+                var fallbackResults = await SearchWithoutAuthorAsync(audiobook, fallbackQuery);
+                if (fallbackResults.Any())
                 {
-                    logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
+                    (assessment, topResult) = await AssessAsync(audiobook, fallbackResults);
                 }
             }
-
-            // Only consider non-rejected, score > 0 results
-            var topResult = automaticScoring.SelectBest(assessment);
 
             if (topResult == null)
             {
@@ -152,6 +140,41 @@ namespace Listenarr.Application.Downloads.Submission
                 DownloadClientUsed = downloadClientId,
                 SearchResult = topResult.SearchResult
             };
+        }
+
+        private async Task<List<SearchResult>> SearchWithoutAuthorAsync(Audiobook audiobook, string fallbackQuery)
+        {
+            logger.LogInformation("Retrying '{Title}' without the author: {Query}",
+                LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(fallbackQuery));
+            return await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true) ?? new List<SearchResult>();
+        }
+
+        private async Task<(AutomaticSearchAssessment Assessment, AutomaticCandidateScore? Best)> AssessAsync(
+            Audiobook audiobook, List<SearchResult> searchResults)
+        {
+            // Drop releases already blocked for this book before they are assessed, so a blocked
+            // release can never be the one selected.
+            searchResults = await BlockedReleaseFilter.ExcludeAsync(blocklistService, audiobook.Id, searchResults, logger);
+
+            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile!);
+            var scoredResults = assessment.Candidates;
+
+            // Log all scored results for debugging
+            logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, LogRedaction.SanitizeText(audiobook.Title));
+            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
+            {
+                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
+                logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
+                    status, scoredResult.TotalScore, LogRedaction.SanitizeText(scoredResult.SearchResult.Title), LogRedaction.SanitizeText(scoredResult.SearchResult.Source),
+                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
+                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
+                {
+                    logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
+                }
+            }
+
+            // Only consider non-rejected, score > 0 results
+            return (assessment, automaticScoring.SelectBest(assessment));
         }
     }
 }
