@@ -116,8 +116,6 @@ try {
         apiPort: apiPorts[index],
         appImage: plan.appImage,
         hostImage: plan.hostImage,
-        buildImages: false,
-        reuseImages: plan.reusable,
         seedFile: join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'),
         rootFolders: [
           { name: 'E2E Import', path: '/e2e/import', isDefault: true },
