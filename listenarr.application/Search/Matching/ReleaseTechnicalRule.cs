@@ -33,6 +33,10 @@ internal static class ReleaseTechnicalRule
     private static readonly Regex Size = new(
         @"^(?<size>\d{1,9}(?:\.\d{1,3})?)\s*(?:KB|MB|GB|KiB|MiB|GiB)$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    public static bool UnitField(string value) => Bitrate.IsMatch(value) || PositiveSize(value);
+    private static bool PositiveSize(string value) => Size.Match(value) is { Success: true } size
+        && decimal.TryParse(size.Groups["size"].Value, System.Globalization.NumberStyles.AllowDecimalPoint,
+            System.Globalization.CultureInfo.InvariantCulture, out var amount) && amount > 0;
     private static readonly Regex SceneSuffix = new(
         @"^WEB[- ](?<language>SE|EN|DE|FR|ES|IT|NL)[- ]\d{4}[- ](?<group>[a-z0-9]{2,32}) iNT$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -47,9 +51,7 @@ internal static class ReleaseTechnicalRule
         if (value.Length == 4 && value.All(char.IsAsciiDigit))
             return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.year");
         if (Match(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.tokens");
-        var size = !signed && value.Length > 0 && char.IsAsciiDigit(value[0]) ? Size.Match(value) : null;
-        if (size?.Success == true && decimal.TryParse(size.Groups["size"].Value,
-            System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var amount) && amount > 0)
+        if (!signed && value.Length > 0 && char.IsAsciiDigit(value[0]) && PositiveSize(value))
             return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.size");
         var scene = value.StartsWith("WEB", StringComparison.OrdinalIgnoreCase) ? SceneSuffix.Match(value) : null;
         if (scene?.Success == true && ReleaseGroupRule.Match(scene.Groups["group"].Value, catalog))

@@ -65,6 +65,85 @@ public sealed class ReleaseRecallRuleTests : BaseTests
     }
 
     [Theory]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1984 (Unabridged)")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2000")]
+    [InlineData("The Quiet Orchard 2000 by Marisol Vega")]
+    [InlineData("Marisol Vega - The Quiet Orchard 9999 [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 Unabridged MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 - Unabridged")]
+    [InlineData("Marisol Vega - The Quiet Orchard  2049, Unabridged MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard.2049 [M4B]")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.2049.Unabr-M4B-NMR")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 M4B")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 1000 MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2049 MBA")]
+    [InlineData("Marisol Vega - The Quiet Orchard 0000 MB")]
+    public void NumberAdjacentToTheTitleIsNotReadAsAYear(string release)
+    {
+        var result = Match(Book(), release);
+        Assert.False(result.IsConfirmed);
+        Assert.Equal("numeric_annotation_ambiguous", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("Marisol Vega - The Quiet Orchard 204 [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 2 [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 20491 Unabridged MP3")]
+    public void OtherNumbersAdjacentToTheTitleStayUnexplained(string release) =>
+        Assert.False(Match(Book(), release).IsConfirmed);
+
+    [Theory]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kb/s")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 k")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 GB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MiB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 mb")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000  MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps Unabridged MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB - Unabridged")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024 kbps, MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000 MB 2010")]
+    [InlineData("The Quiet Orchard 1000 MB by Marisol Vega")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.1024.kbps-NMR")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.1000.MB.Unabr-M4B-NMR")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1000MB")]
+    [InlineData("Marisol Vega - The Quiet Orchard 1024kbps")]
+    public void UnitBearingSizeAndBitrateFieldsAfterTheTitleStayExplained(string release) =>
+        Assert.True(Match(Book(), release).IsConfirmed);
+
+    [Theory]
+    [InlineData("Marisol Vega - The Quiet Orchard (2010) [M4B]")]
+    [InlineData("Marisol Vega - The Quiet Orchard [2010]")]
+    [InlineData("Marisol Vega - The Quiet Orchard - 2010 - Unabridged")]
+    [InlineData("Marisol Vega - The Quiet Orchard, 2010 Unabridged MP3")]
+    [InlineData("Marisol Vega - The Quiet Orchard Unabridged 2010")]
+    [InlineData("Marisol Vega - The Quiet Orchard [M4B] 2010")]
+    [InlineData("Marisol Vega - 2010 - The Quiet Orchard [M4B]")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard-2010-Unabr-M4B-NMR")]
+    [InlineData("Marisol.Vega-The.Quiet.Orchard.Unabr-M4B-de.Ocampo.2010.NMR")]
+    public void DelimitedYearsAndSceneFieldsStayExplained(string release) =>
+        Assert.True(Match(Book(), release).IsConfirmed);
+
+    [Theory]
+    [InlineData("1984", "Marisol Vega - 1984 [M4B]", true)]
+    [InlineData("1984", "Marisol Vega - 1984 (2010) [M4B]", true)]
+    [InlineData("1984", "Marisol Vega - 1984 2010 [M4B]", false)]
+    [InlineData("The Quiet Orchard 2049", "Marisol Vega - The Quiet Orchard 2049 [M4B]", true)]
+    [InlineData("The Quiet Orchard 2049", "Marisol Vega - The Quiet Orchard 2049 Unabridged MP3", true)]
+    [InlineData("The Quiet Orchard 2049", "Marisol.Vega-The.Quiet.Orchard.2049.Unabr-M4B-NMR", true)]
+    [InlineData("2001: A Space Orchard", "Marisol Vega - 2001: A Space Orchard [M4B]", true)]
+    public void CompleteNumericTitlesStillConfirm(string title, string release, bool expected)
+    {
+        var book = Book();
+        book.Title = title;
+        Assert.Equal(expected, Match(book, release).IsConfirmed);
+    }
+
+    [Theory]
     [InlineData("Ramon de Ocampo", "de.Ocampo", true)]
     [InlineData("Ramon de Ocampo", "Ocampo", false)]
     [InlineData("Grover Gardner Jr.", "Gardner", true)]

@@ -60,6 +60,13 @@ internal sealed class ReleaseSpanInterpreter(
                 conflict ??= "numeric_annotation_ambiguous";
                 continue;
             }
+            // A number that follows the title without a metadata boundary may belong
+            // to the title of another work; it is never read as a year.
+            if (!beforeTitle && state.Path == null && TitleAdjacentNumber(start, state.At, end))
+            {
+                conflict ??= "numeric_annotation_ambiguous";
+                continue;
+            }
             // Reference-backed numbered series fields own their role before broader
             // annotation rules. Missing positions still carry release-side claims.
             if (ReserveSeries(state.At, out var reservedLength, out var reserved))
@@ -296,6 +303,31 @@ internal sealed class ReleaseSpanInterpreter(
         var span = view.Span(start, 1, ReleaseSpanRole.Unknown);
         var before = view.Original[..span.Start].TrimEnd();
         return before.Length > 0 && "([{ ".Contains(before[^1]);
+    }
+
+    private bool TitleAdjacentNumber(int titleEnd, int at, int end)
+    {
+        if (titleEnd == 0 || at >= end) return false;
+        var digits = at;
+        while (digits < end && view.Text[digits] == '.') digits++;
+        var after = digits + 4;
+        if (after > end || view.Text.AsSpan(digits, 4).IndexOfAnyExceptInRange('0', '9') >= 0) return false;
+        if (after < end && !char.IsWhiteSpace(view.Text[after]) && !ReleaseAnnotationGrammar.Separator(view.Text[after])
+            && view.Text[after] is not ('.' or '!' or '。')) return false;
+        // A number completed by its unit is a size or bitrate field, not a bare number.
+        var unit = after;
+        while (unit < end && char.IsWhiteSpace(view.Text[unit])) unit++;
+        var unitEnd = unit;
+        while (unitEnd < end && !char.IsWhiteSpace(view.Text[unitEnd]) && !ReleaseAnnotationGrammar.Separator(view.Text[unitEnd])) unitEnd++;
+        if (unit > after && unitEnd > unit
+            && ReleaseTechnicalRule.UnitField(view.Text[digits..unitEnd].TrimEnd('.', '!', '。'))) return false;
+        // Only whitespace (or a scene dot) may separate the number from the title in
+        // the original text; brackets, dashes and other delimiters are boundaries.
+        var title = view.Span(titleEnd - 1, 1, ReleaseSpanRole.Unknown);
+        var number = view.Span(digits, 1, ReleaseSpanRole.Unknown);
+        foreach (var c in view.Original.AsSpan(title.Start + title.Length, number.Start - title.Start - title.Length))
+            if (!char.IsWhiteSpace(c) && c != '.') return false;
+        return true;
     }
 
     private bool FollowedByCreditedAuthor(int end)
