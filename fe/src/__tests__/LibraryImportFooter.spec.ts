@@ -348,4 +348,190 @@ describe('LibraryImportFooter', () => {
     await profileSelect.setValue('3')
     expect(store.qualityProfileId).toBe(3)
   })
+
+  describe('when root folders or quality profiles changed since the choice was made', () => {
+    // A store with one book ready to import, files moved, as left by an earlier visit
+    function storeWithChoices(choices: {
+      destinationFolderId?: number | null
+      qualityProfileId?: number | null
+    }) {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const store = useLibraryImportStore()
+      useFilesystemReadinessStore().readiness = {
+        isReady: true,
+        status: 'ready',
+        databaseConnected: true,
+        migrationsCurrent: true,
+        errorCode: null,
+        filesystemReady: true,
+        filesystemStatus: 'Ready',
+        filesystemPhase: null,
+        filesystemErrorCode: null,
+        filesystemErrorMessage: null,
+      }
+      store.action = 'move'
+      store.destinationFolderId = choices.destinationFolderId ?? null
+      store.qualityProfileId = choices.qualityProfileId ?? null
+      store.items = {
+        '/incoming/Book.mp3': {
+          id: '/incoming/Book.mp3',
+          fullPath: '/incoming/Book.mp3',
+          sourceFiles: ['/incoming/Book.mp3'],
+          folderPath: '/incoming',
+          relativePath: 'Book',
+          folderName: 'Book',
+          format: 'MP3',
+          fileCount: 1,
+          selectedMatch: { title: 'Book', authors: [] } as unknown as SearchResult,
+          hasSearched: true,
+          isSearching: false,
+          selected: true,
+        },
+      }
+      const importSelected = vi
+        .spyOn(store, 'importSelected')
+        .mockResolvedValue({ imported: 1, errors: [] })
+      return { pinia, store, importSelected }
+    }
+
+    async function mountFooter(pinia: ReturnType<typeof createPinia>, folders: object[]) {
+      const wrapper = mount(LibraryImportFooter, {
+        props: { folders: folders as unknown as RootFolder[] },
+        global: { plugins: [pinia] },
+      })
+      await flushPromises()
+      return wrapper
+    }
+
+    function selectedText(wrapper: Awaited<ReturnType<typeof mountFooter>>, selector: string) {
+      return (wrapper.get(selector).element as HTMLSelectElement).selectedOptions[0]?.text.trim()
+    }
+
+    const profileSelector = 'select:has(option[value="3"])'
+
+    it('keeps the chosen folder when a folder was added', async () => {
+      const { pinia, importSelected } = storeWithChoices({ destinationFolderId: 2 })
+
+      const wrapper = await mountFooter(pinia, [
+        { id: 4, name: 'New', path: '/new' },
+        { id: 1, name: 'Incoming', path: '/incoming' },
+        { id: 2, name: 'Library', path: '/library' },
+      ])
+
+      expect(selectedText(wrapper, 'select.destination-select')).toBe('/library')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/library', 2)
+    })
+
+    it('keeps the first folder when a folder was added after it and none was chosen', async () => {
+      const { pinia, importSelected } = storeWithChoices({})
+
+      const wrapper = await mountFooter(pinia, [
+        { id: 1, name: 'Incoming', path: '/incoming' },
+        { id: 2, name: 'Library', path: '/library' },
+        { id: 4, name: 'New', path: '/new' },
+      ])
+
+      expect(selectedText(wrapper, 'select.destination-select')).toBe('/incoming')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/incoming', 2)
+    })
+
+    it('keeps the chosen folder when it was renamed', async () => {
+      const { pinia, importSelected } = storeWithChoices({ destinationFolderId: 2 })
+
+      const wrapper = await mountFooter(pinia, [
+        { id: 1, name: 'Incoming', path: '/incoming' },
+        { id: 2, name: 'Main library', path: '/library' },
+      ])
+
+      expect(selectedText(wrapper, 'select.destination-select')).toBe('/library')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/library', 2)
+    })
+
+    it('imports into the new path of the chosen folder when its path changed', async () => {
+      const { pinia, importSelected } = storeWithChoices({ destinationFolderId: 2 })
+
+      const wrapper = await mountFooter(pinia, [
+        { id: 1, name: 'Incoming', path: '/incoming' },
+        { id: 2, name: 'Library', path: '/mnt/library' },
+      ])
+
+      expect(selectedText(wrapper, 'select.destination-select')).toBe('/mnt/library')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/mnt/library', 2)
+    })
+
+    it('follows a change of the folder list while the page is open', async () => {
+      const { pinia, importSelected } = storeWithChoices({ destinationFolderId: 2 })
+      const wrapper = await mountFooter(pinia, [
+        { id: 1, name: 'Incoming', path: '/incoming' },
+        { id: 2, name: 'Library', path: '/library' },
+      ])
+
+      await wrapper.setProps({
+        folders: [
+          { id: 4, name: 'New', path: '/new' },
+          { id: 1, name: 'Incoming', path: '/incoming' },
+          { id: 2, name: 'Renamed', path: '/mnt/library' },
+        ] as unknown as RootFolder[],
+      })
+
+      expect(selectedText(wrapper, 'select.destination-select')).toBe('/mnt/library')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/mnt/library', 2)
+    })
+
+    it('keeps the chosen quality profile when a profile was added', async () => {
+      vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([
+        { id: 4, name: 'Archive', isDefault: false },
+        { id: 2, name: 'Standard', isDefault: true },
+        { id: 3, name: 'Lossless', isDefault: false },
+      ] as QualityProfile[])
+      const { pinia, importSelected } = storeWithChoices({
+        destinationFolderId: 1,
+        qualityProfileId: 3,
+      })
+
+      const wrapper = await mountFooter(pinia, [{ id: 1, name: 'Library', path: '/library' }])
+
+      expect(selectedText(wrapper, profileSelector)).toBe('Lossless')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/library', 3)
+    })
+
+    it('uses the new default quality profile when none was chosen', async () => {
+      vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([
+        { id: 2, name: 'Standard', isDefault: false },
+        { id: 3, name: 'Lossless', isDefault: false },
+        { id: 4, name: 'Archive', isDefault: true },
+      ] as QualityProfile[])
+      const { pinia, importSelected } = storeWithChoices({ destinationFolderId: 1 })
+
+      const wrapper = await mountFooter(pinia, [{ id: 1, name: 'Library', path: '/library' }])
+
+      expect(selectedText(wrapper, profileSelector)).toBe('Archive (Default)')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/library', 4)
+    })
+
+    it('keeps the chosen quality profile, under its new name, when it was renamed', async () => {
+      vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([
+        { id: 2, name: 'Standard', isDefault: true },
+        { id: 3, name: 'Lossless FLAC', isDefault: false },
+      ] as QualityProfile[])
+      const { pinia, importSelected } = storeWithChoices({
+        destinationFolderId: 1,
+        qualityProfileId: 3,
+      })
+
+      const wrapper = await mountFooter(pinia, [{ id: 1, name: 'Library', path: '/library' }])
+
+      expect(selectedText(wrapper, profileSelector)).toBe('Lossless FLAC')
+      await wrapper.get('button.btn.btn-primary').trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('/library', 3)
+    })
+  })
 })
