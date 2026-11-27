@@ -75,13 +75,6 @@ test('stackPlan rejects a shard count below one', () => {
   assert.throws(() => stackPlan({ head: 'abc', dirty: false, runId: 'x', count: 0 }), /count/)
 })
 
-const image = (repository, tag, createdAt) => ({ repository, tag, createdAt })
-const pair = (tag, createdAt) => [
-  image('listenarr-e2e-app', tag, createdAt),
-  image('listenarr-e2e-host', tag, createdAt),
-]
-const tags = ['aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'eeeeeeeeeeee']
-
 test('stackCount runs the full suite on three stacks by default', () => {
   assert.equal(stackCount({ playwrightArguments: [] }), 3)
 })

@@ -174,19 +174,18 @@ async function seedLibrary(apiUrl, seedFile, rootFolders) {
 }
 
 /**
- * Builds the images, starts the container and seeds it.
+ * Starts the container from images the caller built (ensureImages) and seeds it.
  *
- * - `name`: prefix of the container, image and temporary directory names.
+ * - `name`: prefix of the container and temporary directory names.
  * - `generateFixtures(seedFilesystemDirectory)`: writes the files the container sees under /e2e.
  * - `seedFile`: JSON array of books added to the library.
  * - `rootFolders`: root folders created after the books ({ name, path, isDefault? }).
  * - `environment`: extra container environment variables.
  * - `volumes`: extra `host:container` volume mounts.
  * - `dockerRunArguments`: extra `docker run` options.
- * - `appImage` / `hostImage`: image tags shared by all stacks of one run.
- * - `buildImages`: false when the caller already built the shared images.
- * - `reuseImages`: skip the build when both shared tags are already present.
- * - `apiPort`: caller-provided host port, so parallel stacks can allocate distinct ports up front.
+ * - `appImage` / `hostImage`: image tags shared by all stacks of one run; the caller builds them, and
+ *   removes them when they are run-specific.
+ * - `apiPort`: host port, so parallel stacks get distinct ports chosen up front.
  *
  * Returns the stack: its URL and directories, `run(args, label)` for docker commands, `restart()`
  * (stop then start, waiting for readiness) and `dispose()`, which removes everything.
@@ -199,11 +198,9 @@ export async function startListenarrStack({
   environment = {},
   volumes = [],
   dockerRunArguments = [],
-  appImage: appImageArgument,
-  hostImage: hostImageArgument,
-  buildImages = true,
-  reuseImages = false,
-  apiPort: apiPortArgument,
+  appImage,
+  hostImage,
+  apiPort,
 }) {
   const contentRoot = await mkdtemp(join(tmpdir(), `${name}-`))
   const configDirectory = join(contentRoot, 'config')
@@ -213,9 +210,6 @@ export async function startListenarrStack({
   const databasePath = join(configDirectory, 'database', 'listenarr.db')
   const runId = `${process.pid}-${Date.now().toString(36)}`
   const containerName = `${name}-${runId}`
-  const appImage = appImageArgument ?? `${name}-app:${runId}`
-  const hostImage = hostImageArgument ?? `${name}-host:${runId}`
-  const apiPort = apiPortArgument ?? (await availablePort())
   const apiUrl = `http://127.0.0.1:${apiPort}`
   const run = async (args, label) => {
     const child = start('docker', args, { cwd: repositoryRoot })
@@ -248,7 +242,6 @@ export async function startListenarrStack({
     await cp(seedFilesystemDirectory, filesystemDirectory, { recursive: true })
 
     dockerStarted = true
-    if (buildImages) await ensureImages({ appImage, hostImage, reuse: reuseImages })
     await run(
       [
         'run',
