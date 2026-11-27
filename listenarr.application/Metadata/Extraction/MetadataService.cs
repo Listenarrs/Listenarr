@@ -28,15 +28,17 @@ namespace Listenarr.Application.Metadata.Extraction
         private readonly IFfmpegService _ffmpegService;
         private readonly IAudioTagWriter _audioTagWriter;
         private readonly IFileSystem _fileSystem;
+        private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<MetadataService> _logger;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter, IFileSystem fileSystem)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter, IFileSystem fileSystem, IImageCacheService imageCacheService)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _ffmpegService = ffmpegService;
             _audioTagWriter = audioTagWriter;
             _fileSystem = fileSystem;
+            _imageCacheService = imageCacheService;
             _logger = logger;
         }
 
@@ -256,16 +258,97 @@ namespace Listenarr.Application.Metadata.Extraction
                 asin);
         }
 
+        public async Task WriteImportTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string? asin,
+            string? coverArtUrl)
+        {
+            ArgumentNullException.ThrowIfNull(registrationLease);
+
+            var coverArt = await ResolveCoverArtAsync(coverArtUrl);
+            await _audioTagWriter.WriteTagsAsync(registrationLease, asin, coverArt);
+        }
+
+        /// <summary>
+        /// Load and identify cover artwork, but only when the setting asks for it.
+        ///
+        /// The stored value is either a content-root-relative cache path (what a library add
+        /// leaves behind) or an absolute URL. Both go through the image cache, which validates
+        /// the URL, refuses redirects it has not revalidated and bounds the size.
+        /// The setting is read first so that an instance with embedding off never makes the
+        /// request at all: this runs on the import path, and a network round trip per file
+        /// is not something to spend when the result would be discarded. Any failure to
+        /// resolve artwork returns null rather than throwing, because a missing cover must
+        /// not fail an import that has otherwise succeeded.
+        /// </summary>
+        private async Task<AudioCoverArt?> ResolveCoverArtAsync(string? coverArtUrl)
+        {
+            if (string.IsNullOrWhiteSpace(coverArtUrl))
+            {
+                return null;
+            }
+
+            var settings = await _configurationService.GetApplicationSettingsAsync();
+            if (settings?.EmbedCoverArtInAudioFiles != true)
+            {
+                return null;
+            }
+
+            var bytes = await _imageCacheService.GetImageBytesAsync(coverArtUrl);
+            var coverArt = AudioCoverArt.FromBytes(bytes);
+            if (coverArt is null && bytes is not null)
+            {
+                _logger.LogDebug(
+                    "Cover art from {Url} was not a recognised image, so nothing was embedded",
+                    LogRedaction.SanitizeUrl(coverArtUrl));
+            }
+
+            return coverArt;
+        }
+
+        /// <summary>
+        /// Upper bound on cover artwork fetched for embedding. A real cover is a few hundred
+        /// kilobytes; the bound exists so a hostile or misconfigured image host cannot make an
+        /// import buffer an arbitrary body in memory and then write it into the audio file.
+        /// </summary>
+        internal const int MaxCoverArtBytes = 10 * 1024 * 1024;
+
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)
         {
             try
             {
-                var response = await _httpClient.GetAsync(coverArtUrl);
-                if (response.IsSuccessStatusCode)
+                using var response = await _httpClient.GetAsync(
+                    coverArtUrl,
+                    HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
                 {
-                    return await response.Content.ReadAsByteArrayAsync();
+                    return null;
                 }
-                return null;
+
+                if (response.Content.Headers.ContentLength > MaxCoverArtBytes)
+                {
+                    LogCoverArtTooLarge(coverArtUrl);
+                    return null;
+                }
+
+                // The header is advisory and absent on chunked responses, so the read is
+                // bounded as well.
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var buffer = new MemoryStream();
+                var chunk = new byte[81920];
+                int read;
+                while ((read = await stream.ReadAsync(chunk)) > 0)
+                {
+                    if (buffer.Length + read > MaxCoverArtBytes)
+                    {
+                        LogCoverArtTooLarge(coverArtUrl);
+                        return null;
+                    }
+
+                    buffer.Write(chunk, 0, read);
+                }
+
+                return buffer.ToArray();
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -273,6 +356,12 @@ namespace Listenarr.Application.Metadata.Extraction
                 return null;
             }
         }
+
+        private void LogCoverArtTooLarge(string coverArtUrl) =>
+            _logger.LogDebug(
+                "Cover art from {Url} is larger than {Limit} bytes, so nothing was embedded",
+                LogRedaction.SanitizeUrl(coverArtUrl),
+                MaxCoverArtBytes);
 
         private AudioMetadata? ParseAudnexusResponse(JsonElement audnexusData)
         {
