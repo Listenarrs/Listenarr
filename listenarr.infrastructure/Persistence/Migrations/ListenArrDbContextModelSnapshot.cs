@@ -273,6 +273,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSearchTime")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("MetadataBackfillAttemptedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
 
@@ -1917,6 +1920,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("MaxConcurrentDownloads")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MetadataAutoBackfillEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("MissingSourceMaxRetries")
