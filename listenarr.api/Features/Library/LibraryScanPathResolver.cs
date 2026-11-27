@@ -61,7 +61,8 @@ public sealed class LibraryScanPathResolver(
                 audiobook.Id,
                 LogRedaction.SanitizeText(authorization.Error));
             return LibraryScanPathResolution.Failure(
-                MapFailure(authorization, explicitRequest));
+                MapFailure(authorization, explicitRequest),
+                authorization.Failure);
         }
 
         return LibraryScanPathResolution.Success(
@@ -118,7 +119,8 @@ public sealed record LibraryScanPathResolution(
     string? ScanRoot,
     PathIdentitySnapshot? PathIdentity,
     ScanPathPhysicalIdentity? PhysicalIdentity,
-    IActionResult? ErrorResult)
+    IActionResult? ErrorResult,
+    ScanPathAuthorizationFailure AuthorizationFailure = ScanPathAuthorizationFailure.None)
 {
     public static LibraryScanPathResolution Success(
         string scanRoot,
@@ -126,6 +128,8 @@ public sealed record LibraryScanPathResolution(
         ScanPathPhysicalIdentity physicalIdentity) =>
         new(scanRoot, pathIdentity, physicalIdentity, null);
 
-    public static LibraryScanPathResolution Failure(IActionResult errorResult) =>
-        new(null, null, null, errorResult);
+    public static LibraryScanPathResolution Failure(
+        IActionResult errorResult,
+        ScanPathAuthorizationFailure authorizationFailure = ScanPathAuthorizationFailure.None) =>
+        new(null, null, null, errorResult, authorizationFailure);
 }
