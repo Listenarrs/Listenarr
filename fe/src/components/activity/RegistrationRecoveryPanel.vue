@@ -133,13 +133,37 @@ async function loadMore() {
   try {
     const list = await apiService.getRegistrationReviews(reviews.value.length)
     const known = new Set(reviews.value.map((r) => r.operationId))
-    reviews.value = [...reviews.value, ...list.reviews.filter((r) => !known.has(r.operationId))]
-    total.value = list.total
+    const fresh = list.reviews.filter((r) => !known.has(r.operationId))
+    if (fresh.length || reviews.value.length >= list.total) {
+      reviews.value = [...reviews.value, ...fresh]
+      total.value = list.total
+    } else {
+      // Rows moved between pages (another client resolved or added operations), so the offset no
+      // longer lines up with the list. Re-read from the start instead of asking for it again.
+      await reloadFromStart(reviews.value.length + 1)
+    }
   } catch {
     error.value = 'Could not load more recovery operations. Try again.'
   } finally {
     busy.value = false
   }
+}
+
+// Pages by the number of rows the server returned, not by the number of distinct rows held,
+// because a row listed twice must not shift the next offset.
+async function reloadFromStart(minimum: number) {
+  const reloaded: RegistrationReview[] = []
+  const known = new Set<string>()
+  let offset = 0
+  let list = await apiService.getRegistrationReviews()
+  for (;;) {
+    appendNew(reloaded, known, list.reviews)
+    offset += list.reviews.length
+    if (reloaded.length >= minimum || !list.reviews.length || offset >= list.total) break
+    list = await apiService.getRegistrationReviews(offset)
+  }
+  reviews.value = reloaded
+  total.value = list.total
 }
 
 async function inspect(id: string) {
@@ -175,17 +199,7 @@ async function resolve() {
     return
   }
   try {
-    const loaded = reviews.value.length
-    const reloaded: RegistrationReview[] = []
-    const known = new Set<string>()
-    let list = await apiService.getRegistrationReviews()
-    let added = appendNew(reloaded, known, list.reviews)
-    while (reloaded.length < loaded && added) {
-      list = await apiService.getRegistrationReviews(reloaded.length)
-      added = appendNew(reloaded, known, list.reviews)
-    }
-    reviews.value = reloaded
-    total.value = list.total
+    await reloadFromStart(reviews.value.length)
   } catch {
     error.value = 'Resolved, but the list could not be refreshed.'
   } finally {
@@ -194,10 +208,11 @@ async function resolve() {
 }
 
 function appendNew(target: RegistrationReview[], known: Set<string>, rows: RegistrationReview[]) {
-  const fresh = rows.filter((r) => !known.has(r.operationId))
-  fresh.forEach((r) => known.add(r.operationId))
-  target.push(...fresh)
-  return fresh.length
+  for (const r of rows) {
+    if (known.has(r.operationId)) continue
+    known.add(r.operationId)
+    target.push(r)
+  }
 }
 
 onMounted(refresh)
