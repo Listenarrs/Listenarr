@@ -129,11 +129,11 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                 // Also set Quality from format where possible
                                 if (string.IsNullOrEmpty(result.Quality))
                                 {
-                                    if (normalizedFmt.Contains("320")) result.Quality = "MP3 320kbps";
-                                    else if (normalizedFmt.Contains("256")) result.Quality = "MP3 256kbps";
-                                    else if (normalizedFmt.Contains("192")) result.Quality = "MP3 192kbps";
-                                    else if (normalizedFmt.Contains("128")) result.Quality = "MP3 128kbps";
-                                    else if (normalizedFmt.Contains("m4b")) result.Quality = "M4B";
+                                    // The same bitrate test the description branch uses, so a filetype of
+                                    // "1920x1080" is not read as 192kbps. This attribute outranks the text
+                                    // below, so it has to be at least as careful.
+                                    result.Quality = SearchResultAttributeParser.DetectBitrateQuality(normalizedFmt, result.Format)
+                                        ?? (normalizedFmt.Contains("m4b") ? "M4B" : null);
                                 }
                                 break;
                             case "lang_code":
@@ -340,34 +340,41 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         // Try to extract quality/format from description or title
                         var titleAndDesc = $"{result.Title} {description}".ToLower();
 
-                        if (titleAndDesc.Contains("flac"))
-                            result.Quality = "FLAC";
-                        else if (titleAndDesc.Contains("320") || titleAndDesc.Contains("320kbps"))
-                            result.Quality = "MP3 320kbps";
-                        else if (titleAndDesc.Contains("256") || titleAndDesc.Contains("256kbps"))
-                            result.Quality = "MP3 256kbps";
-                        else if (titleAndDesc.Contains("192") || titleAndDesc.Contains("192kbps"))
-                            result.Quality = "MP3 192kbps";
-                        else if (titleAndDesc.Contains("128") || titleAndDesc.Contains("128kbps"))
-                            result.Quality = "MP3 128kbps";
-                        else if (titleAndDesc.Contains("64") || titleAndDesc.Contains("64kbps"))
-                            result.Quality = "MP3 64kbps";
-                        else if (titleAndDesc.Contains("m4b"))
-                            result.Quality = "M4B";
-                        else
-                            result.Quality = "Unknown";
+                        // A filetype/format attribute is the indexer stating what the release
+                        // is; the title and description are free text we are guessing from. The text
+                        // fills Format and Quality only where the attributes left them empty, so the
+                        // guess cannot overwrite a value the indexer declared: a book called "Magnum
+                        // Opus" with format=mp3 is an MP3, not an OPUS release.
+                        var formatDeclared = !string.IsNullOrEmpty(result.Format);
+                        if (!formatDeclared)
+                        {
+                            if (titleAndDesc.Contains("m4b"))
+                                result.Format = "M4B";
+                            else if (titleAndDesc.Contains("flac"))
+                                result.Format = "FLAC";
+                            else if (titleAndDesc.Contains("mp3"))
+                                result.Format = "MP3";
+                            else if (titleAndDesc.Contains("opus"))
+                                result.Format = "OPUS";
+                            else if (titleAndDesc.Contains("aac"))
+                                result.Format = "AAC";
+                        }
 
-                        // Detect format
-                        if (titleAndDesc.Contains("m4b"))
-                            result.Format = "M4B";
-                        else if (titleAndDesc.Contains("flac"))
-                            result.Format = "FLAC";
-                        else if (titleAndDesc.Contains("mp3"))
-                            result.Format = "MP3";
-                        else if (titleAndDesc.Contains("opus"))
-                            result.Format = "OPUS";
-                        else if (titleAndDesc.Contains("aac"))
-                            result.Format = "AAC";
+                        // The bitrate in the text is a rate, not a codec: the label takes its codec from the
+                        // Format settled above, so a declared AAC release is not relabelled MP3. Once the
+                        // indexer has declared the format, a "flac" or "m4b" in the text only counts when it
+                        // agrees with that format; otherwise the text may supply the rate and nothing else, so
+                        // a stray word cannot become the quality of a declared MP3.
+                        if (string.IsNullOrEmpty(result.Quality))
+                        {
+                            var guessedQuality = SearchResultAttributeParser.DetectQualityFromTags(titleAndDesc, result.Format);
+                            var contradictsDeclaredFormat = formatDeclared
+                                && (guessedQuality == "FLAC" || guessedQuality == "M4B")
+                                && !string.Equals(guessedQuality, result.Format, StringComparison.OrdinalIgnoreCase);
+                            result.Quality = contradictsDeclaredFormat
+                                ? SearchResultAttributeParser.DetectBitrateQuality(titleAndDesc, result.Format)
+                                : guessedQuality;
+                        }
 
                         // Detect language codes present in title or description (e.g. [ENG / M4B])
                         try

@@ -189,6 +189,7 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
         {
             name = "Integration Default",
             isDefault = true,
+            upgradeAllowed = false,
         }, HttpStatusCode.Created);
 
         foreach (var book in SeedBooks)

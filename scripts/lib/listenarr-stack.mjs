@@ -133,7 +133,7 @@ async function seedLibrary(apiUrl, seedFile, rootFolders) {
   const profileResponse = await fetch(`${apiUrl}/api/v1/qualityprofile`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ name: 'E2E Default', isDefault: true }),
+    body: JSON.stringify({ name: 'E2E Default', isDefault: true, upgradeAllowed: false }),
   })
   if (!profileResponse.ok) {
     throw new Error(`Could not create the E2E quality profile: ${await profileResponse.text()}`)

@@ -37,6 +37,7 @@ public sealed class LibraryPersistenceTests : BackendIntegrationTests
         {
             name = "Replacement Profile",
             isDefault = false,
+            upgradeAllowed = false,
         }, HttpStatusCode.Created);
         var profileId = (int)profile["id"]!;
         var request = new { name, region = "us", language = "english" };
@@ -115,6 +116,7 @@ public sealed class LibraryPersistenceTests : BackendIntegrationTests
         {
             name = "Backend Integration Persistence Profile",
             isDefault = true,
+            upgradeAllowed = false,
         }, HttpStatusCode.Created);
         var profileId = (int)profile["id"]!;
 

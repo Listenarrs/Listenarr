@@ -258,6 +258,53 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.Equal("256kbps", QualityMatcher.Match(file, profile).Rung!.Quality);
         }
 
+        // ---- Audible containers map to AAC ------------------------------------------------
+
+        [Fact]
+        public void AnAaxFile_MatchesTheAacRungs_AndCanMeetCutoff()
+        {
+            // A declared consequence of teaching MapCodec the AAX containers. Before, an .aax or
+            // .aaxc file produced no codec group at all, fell through to the codec-less wildcard
+            // rungs, found none and came back CodecMismatch, so it never met cutoff and was
+            // flagged for upgrade forever. That is the same re-grab loop this class was written to
+            // fix for M4B (see the QualityMatcher header comment).
+            var profile = StructuredProfile().WithCutoff("AAC 64kbps").Build();
+
+            foreach (var container in new[] { "aax", "aaxc", "mp4" })
+            {
+                var file = new AudioQualityInput { Container = container, BitrateBitsPerSecond = 128_000 };
+
+                Assert.Equal("AAC 128kbps", QualityMatcher.MatchLabel(file, profile));
+                Assert.True(QualityMatcher.MeetsCutoff(file, profile), $"{container} must meet the cutoff");
+            }
+
+            // The control that must come out differently: a container nothing maps still misses,
+            // so this is the AAC mapping doing the work rather than the matcher having gone
+            // permissive about unknown containers.
+            var unknown = new AudioQualityInput { Container = "wma", BitrateBitsPerSecond = 128_000 };
+            Assert.Equal(QualityMatchKind.CodecMismatch, QualityMatcher.Match(unknown, profile).Kind);
+            Assert.False(QualityMatcher.MeetsCutoff(unknown, profile));
+        }
+
+        [Fact]
+        public void ARungNamedForAnMpeg4Container_IsAacRatherThanAWildcard()
+        {
+            // The second declared consequence. A hand-made rung called "AAX" or "MP4" used to parse
+            // to a null codec, which made it a codec-agnostic wildcard that any lossy file could
+            // land on. It is an AAC rung now, so a file of another codec misses it.
+            var profile = new QualityProfileBuilder()
+                .WithName("Aax")
+                .WithCutoff("AAX")
+                .WithQuality("AAX", 0)
+                .Build();
+
+            var opus = new AudioQualityInput { Codec = "opus", BitrateBitsPerSecond = 128_000 };
+            var aac = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 128_000 };
+
+            Assert.Equal(QualityMatchKind.CodecMismatch, QualityMatcher.Match(opus, profile).Kind);
+            Assert.Equal("AAX", QualityMatcher.MatchLabel(aac, profile));
+        }
+
         // ---- MeetsCutoff direction (lower priority = higher quality) ----------------------
 
         [Fact]
@@ -308,6 +355,57 @@ namespace Listenarr.Tests.Features.Domain.Utils
             var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 64_000 };
 
             Assert.True(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        /// <summary>
+        /// A profile with upgrades off answers the same way it did when the only way to say that
+        /// was to blank the cutoff, whether or not it still names one. Nothing is going to be
+        /// upgraded, so nothing is short of the cutoff, and every caller that already short-circuits
+        /// on a blank cutoff keeps the answer it had.
+        /// </summary>
+        [Fact]
+        public void MeetsCutoff_UpgradesOff_IsTrue_EvenWellBelowTheNamedCutoff()
+        {
+            var profile = StructuredProfile()
+                .WithCutoff("AAC 256kbps")
+                .WithUpgradesDisabled()
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 64_000 };
+
+            Assert.True(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        /// <summary>
+        /// The control: the identical profile and file with upgrades on is short of the cutoff, so
+        /// the answer above comes from the flag rather than from the file.
+        /// </summary>
+        [Fact]
+        public void MeetsCutoff_UpgradesOn_SameProfileAndFile_IsFalse()
+        {
+            var profile = StructuredProfile().WithCutoff("AAC 256kbps").Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 64_000 };
+
+            Assert.True(profile.UpgradeAllowed);
+            Assert.False(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        [Fact]
+        public void LabelMeetsCutoff_UpgradesOff_IsTrue_EvenForALabelBelowTheCutoff()
+        {
+            var profile = StructuredProfile()
+                .WithCutoff("AAC 256kbps")
+                .WithUpgradesDisabled()
+                .Build();
+
+            Assert.True(QualityMatcher.LabelMeetsCutoff("MP3 128kbps", profile));
+        }
+
+        [Fact]
+        public void LabelMeetsCutoff_UpgradesOn_SameProfileAndLabel_IsFalse()
+        {
+            var profile = StructuredProfile().WithCutoff("AAC 256kbps").Build();
+
+            Assert.False(QualityMatcher.LabelMeetsCutoff("MP3 128kbps", profile));
         }
 
         [Fact]
@@ -401,6 +499,86 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 .Build();
 
             Assert.True(QualityMatcher.IsLabelBetter("AAC 320kbps", "AAC 256kbps", profile));
+        }
+
+        // ---- real encoder bitrates, which are never exactly the nominal tier ----------------
+
+        [Fact]
+        public void Match_FileJustUnderItsNominalTier_StillMatchesThatTier()
+        {
+            // A file encoded at "128kbps" AAC reports something like 127241 bps. NormalizeKbps
+            // rounds that to 127, and rung eligibility is `rung.BitrateKbps <= fileKbps`, so the
+            // 128 rung is excluded and the file drops to the tier below. Real encoders essentially
+            // never hit the nominal value exactly, so this affects almost every lossy file.
+            var profile = new QualityProfileBuilder()
+                .WithName("Standard")
+                .WithQuality("AAC 128kbps", 0, codec: "AAC", bitrate: 128)
+                .WithQuality("AAC 64kbps", 1, codec: "AAC", bitrate: 64)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 127_241 };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal("AAC 128kbps", result.Rung!.Quality);
+        }
+
+        [Fact]
+        public void Match_FileWellBelowATier_DoesNotGetPromotedToIt()
+        {
+            // The tolerance must not swallow a genuine tier gap: a 96kbps file is not 128kbps.
+            var profile = new QualityProfileBuilder()
+                .WithName("Standard")
+                .WithQuality("AAC 128kbps", 0, codec: "AAC", bitrate: 128)
+                .WithQuality("AAC 64kbps", 1, codec: "AAC", bitrate: 64)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 96_000 };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal("AAC 64kbps", result.Rung!.Quality);
+        }
+
+        // The two tests above are both satisfied by the one-kbps floor alone, so neither of them
+        // says anything about the size of the tolerance. These three pin it. Without them the
+        // percentage can be set to zero and the whole suite still passes, which is the same shape
+        // of gap that let the original mismatch through.
+
+        [Theory]
+        [InlineData(122_000, "AAC 128kbps")]  // six kbps short of 128, inside the tolerance
+        [InlineData(121_000, "AAC 64kbps")]   // seven kbps short, outside it
+        public void Match_ReachesARungOnlyWithinTheTolerance(int bitsPerSecond, string expectedRung)
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("Standard")
+                .WithQuality("AAC 128kbps", 0, codec: "AAC", bitrate: 128)
+                .WithQuality("AAC 64kbps", 1, codec: "AAC", bitrate: 64)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = bitsPerSecond };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal(expectedRung, result.Rung!.Quality);
+        }
+
+        [Theory]
+        [InlineData(15_000, "16kbps")]  // five percent of 16 rounds away, so the floor carries this
+        [InlineData(14_000, "8kbps")]   // two kbps short is outside the floor
+        public void Match_KeepsAWholeKbpsOfSlackOnASmallRung(int bitsPerSecond, string expectedRung)
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("Tiny")
+                .WithQuality("16kbps", 0, codec: "AAC", bitrate: 16)
+                .WithQuality("8kbps", 1, codec: "AAC", bitrate: 8)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = bitsPerSecond };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal(expectedRung, result.Rung!.Quality);
         }
     }
 }
