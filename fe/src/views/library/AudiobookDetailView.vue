@@ -685,6 +685,16 @@
     @done="handleRepairDone"
     @organize="organizeAfterRepair"
   />
+
+  <!-- Move files to another EXISTING library record (e.g. tracks imported onto
+       the wrong book, or a collection being split into its real books). -->
+  <TransferFilesModal
+    :visible="showTransferModal"
+    :audiobook="audiobook"
+    :initial-query="audiobook?.title || ''"
+    @close="showTransferModal = false"
+    @done="onTransferDone"
+  />
 </template>
 
 <script setup lang="ts">
@@ -718,6 +728,7 @@ import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
+import TransferFilesModal from '@/components/domain/audiobook/TransferFilesModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
@@ -760,6 +771,7 @@ import {
   PhFileMinus,
   PhCircle,
   PhDiscordLogo,
+  PhArrowsLeftRight,
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
@@ -819,6 +831,7 @@ const isOrganizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 // Repair shown again by Back from its step 3 (Organize): as it was left
 const isRepairResumed = ref(false)
+const showTransferModal = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -937,6 +950,18 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'transfer-files',
+    label: 'Move Files to Another Book',
+    title: 'Move files to the existing library record they actually belong to',
+    ariaLabel: 'Move Files to Another Book',
+    icon: PhArrowsLeftRight,
+    disabled: !audiobook.value?.files?.length,
+    desktopGroup: 'secondary',
+    onClick: () => {
+      showTransferModal.value = true
+    },
+  },
+  {
     key: 'delete',
     label: 'Delete',
     title: 'Delete',
@@ -982,6 +1007,7 @@ type DetailTopAction = {
     | 'rescan-metadata'
     | 'repair'
     | 'organize'
+    | 'transfer-files'
     | 'delete'
   label: string
   title: string
@@ -1871,6 +1897,14 @@ function backToRepair() {
 async function handleOrganizeDone() {
   showOrganizeModal.value = false
   await loadAudiobook()
+}
+
+async function onTransferDone() {
+  showTransferModal.value = false
+  // Files left this record — reload it, and refresh the library list so the
+  // destination's file counts are current too.
+  await loadAudiobook()
+  void libraryStore.fetchLibrary()
 }
 
 function formatRuntime(minutes: number): string {
