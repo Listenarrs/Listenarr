@@ -72,6 +72,50 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SupersedeStaleFailuresAsync_RetiresEarlierFailuresForTheSameAudiobookOnly()
+    {
+        var persistence = CreatePersistence();
+        var needsAttention = CreateJob("42:/LIBRARY/OLD-A");
+        needsAttention.Status = MoveJobStatus.NeedsAttention;
+        needsAttention.Error = "A directory beneath the authorized source boundary changed";
+        needsAttention.ActiveDeduplicationKey = null;
+        var failed = CreateJob("42:/LIBRARY/OLD-B");
+        failed.Status = MoveJobStatus.Failed;
+        failed.ActiveDeduplicationKey = null;
+        var stillQueued = CreateJob("42:/LIBRARY/NEXT");
+        var completed = CreateJob("42:/LIBRARY/BOOK");
+        completed.Status = MoveJobStatus.Completed;
+        completed.ActiveDeduplicationKey = null;
+        var otherBook = CreateJob("43:/LIBRARY/OTHER");
+        otherBook.AudiobookId = 43;
+        otherBook.Status = MoveJobStatus.NeedsAttention;
+        otherBook.ActiveDeduplicationKey = null;
+        foreach (var job in new[] { needsAttention, failed, stillQueued, completed, otherBook })
+        {
+            await persistence.AddAsync(job);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var retired = await persistence.SupersedeStaleFailuresAsync(42, completed.Id, "Superseded by a later completed move.", now);
+
+        Assert.Equal(
+            new[] { failed.Id, needsAttention.Id }.OrderBy(id => id),
+            retired.OrderBy(id => id));
+        var reloadedNeedsAttention = await persistence.GetByIdAsync(needsAttention.Id);
+        Assert.Equal(MoveJobStatus.Superseded, reloadedNeedsAttention!.Status);
+        Assert.StartsWith("Superseded by a later completed move.", reloadedNeedsAttention.Error);
+        Assert.Contains("Original: A directory beneath", reloadedNeedsAttention.Error);
+        Assert.Equal(MoveJobStatus.Superseded, (await persistence.GetByIdAsync(failed.Id))!.Status);
+        // Active work, the completed job itself, and other books are untouched.
+        Assert.Equal(MoveJobStatus.Queued, (await persistence.GetByIdAsync(stillQueued.Id))!.Status);
+        Assert.Equal(MoveJobStatus.Completed, (await persistence.GetByIdAsync(completed.Id))!.Status);
+        Assert.Equal(MoveJobStatus.NeedsAttention, (await persistence.GetByIdAsync(otherBook.Id))!.Status);
+
+        // Idempotent: a second pass finds nothing left to retire.
+        Assert.Empty(await persistence.SupersedeStaleFailuresAsync(42, completed.Id, "again", now));
+    }
+
+    [Fact]
     public async Task SourceCleanupBoundary_RoundTripsWithMoveJob()
     {
         var persistence = CreatePersistence();
