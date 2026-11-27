@@ -6,7 +6,7 @@
 // in one place. The manifest is checked before anything is written: a listed fixture without its file,
 // an audio file or a book's fixture not listed, a listed fixture no book uses, two books in one folder
 // or a path leaving its root fails with the fixture's or the book's name.
-import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readdir, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -57,9 +57,13 @@ export async function readImportFolders(manifestPath = defaultManifestPath) {
   return manifest
 }
 
-/** Writes <outputDirectory>/<root>/<book folder>/<file> for every book, and every root, even empty. */
+/**
+ * Writes <outputDirectory>/<root>/<book folder>/<file> for every book, and every root, even empty.
+ * The output folder is made 0755: it is copied as the container's /e2e, and a mkdtemp folder is 0700.
+ */
 export async function writeImportFolders(outputDirectory, { manifestPath = defaultManifestPath } = {}) {
   const manifest = await readImportFolders(manifestPath)
+  await chmod(outputDirectory, 0o755)
   for (const [root, books] of Object.entries(manifest.roots)) {
     await mkdir(join(outputDirectory, root), { recursive: true })
     for (const book of Object.values(books)) {

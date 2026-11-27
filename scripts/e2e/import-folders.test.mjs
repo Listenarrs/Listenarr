@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -68,6 +68,17 @@ test('writeImportFolders copies each fixture to its book folder, one folder per 
       await rm(output, { recursive: true, force: true })
     }
   })
+})
+
+test('writeImportFolders leaves its folder readable by other users, as a mkdtemp folder is not', async () => {
+  // The folder becomes the container's /e2e (copied with fs.cp, which keeps its mode); mkdtemp makes 0700.
+  const output = await mkdtemp(join(tmpdir(), 'import-folders-mode-'))
+  try {
+    await writeImportFolders(output)
+    assert.equal((await stat(output)).mode & 0o777, 0o755)
+  } finally {
+    await rm(output, { recursive: true, force: true })
+  }
 })
 
 test('readImportFolders names a listed fixture whose file is missing', async () => {
