@@ -119,4 +119,33 @@ public partial class AudiobookFileService
             return null;
         }
     }
+
+    // A stability fingerprint of the exact object the lease holds open, used to
+    // detect a concurrent in-place overwrite across an extraction. Length comes
+    // from opening the pinned path (follows the /proc/self/fd link to the real
+    // file); the write-time ticks are read the same way the extraction cache key
+    // reads them (above), so a same-length overwrite that still bumps mtime is
+    // caught too.
+    private readonly record struct RegisteredFileState(long Length, long LastWriteTicks);
+
+    private static RegisteredFileState? TryCaptureRegisteredFileState(string metadataPath)
+    {
+        var length = TryGetRegisteredFileLength(metadataPath);
+        if (length is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var fileInfo = new FileInfo(metadataPath);
+            var ticks = fileInfo.Exists ? fileInfo.LastWriteTimeUtc.Ticks : 0L;
+            return new RegisteredFileState(length.Value, ticks);
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 }
