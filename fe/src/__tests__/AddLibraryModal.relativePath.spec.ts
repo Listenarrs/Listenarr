@@ -636,7 +636,7 @@ describe('AddLibraryModal relative path derivation', () => {
     })
   })
 
-  it('honors a user root change made while seed metadata is still loading', async () => {
+  it('shows only a spinner while seed metadata is loading, then a root change drives the destination', async () => {
     const { apiService } = await import('@/services/api')
     const metadata = deferred<Record<string, unknown>>()
     vi.mocked(apiService.getRootFolders).mockResolvedValue([
@@ -659,9 +659,16 @@ describe('AddLibraryModal relative path derivation', () => {
 
     await wrapper.setProps({ visible: true })
     await new Promise((resolve) => setTimeout(resolve, 10))
-    await wrapper.get('.root-folder-select select').setValue('2')
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    // Loading: nothing of the book or its options can be used yet
+    expect(wrapper.find('[data-testid="metadata-loading"]').exists()).toBe(true)
+    expect(wrapper.find('.root-folder-select select').exists()).toBe(false)
+    const addButton = wrapper.get('button.btn-primary')
+    expect(addButton.attributes('disabled')).toBeDefined()
+    expect(addButton.find('.ph-spin').exists()).toBe(true)
     metadata.resolve({})
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(wrapper.find('[data-testid="metadata-loading"]').exists()).toBe(false)
+    await wrapper.get('.root-folder-select select').setValue('2')
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect((wrapper.get('input.relative-input').element as HTMLInputElement).value).toBe(
@@ -679,7 +686,7 @@ describe('AddLibraryModal relative path derivation', () => {
     })
   })
 
-  it('preserves user metadata edits made while seed enrichment is still loading', async () => {
+  it('shows the Audible record once loaded, never the search data before it, and lets it be edited then', async () => {
     const { apiService } = await import('@/services/api')
     const metadata = deferred<Record<string, unknown>>()
     vi.mocked(apiService.getAudibleMetadata).mockReturnValue(metadata.promise)
@@ -691,9 +698,10 @@ describe('AddLibraryModal relative path derivation', () => {
 
     await wrapper.setProps({ visible: true })
     await new Promise((resolve) => setTimeout(resolve, 10))
-    await wrapper.get('.metadata-toggle-btn').trigger('click')
-    const titleInput = wrapper.get('.metadata-editor input.form-input')
-    await titleInput.setValue('User Edited Title')
+    // Loading: the search's data isn't shown and can't be edited
+    expect(wrapper.find('[data-testid="metadata-loading"]').exists()).toBe(true)
+    expect(wrapper.find('.metadata-toggle-btn').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(fakeBook.title)
     metadata.resolve({
       metadata: {
         asin: fakeBook.asin,
@@ -703,11 +711,39 @@ describe('AddLibraryModal relative path derivation', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    expect(
-      (wrapper.get('.metadata-editor input.form-input').element as HTMLInputElement).value,
-    ).toBe('User Edited Title')
+    expect(wrapper.get('.detail-header h3').text()).toBe('Late Enriched Title')
+    await wrapper.get('.metadata-toggle-btn').trigger('click')
+    const titleInput = wrapper.get('.metadata-editor input.form-input')
+    expect((titleInput.element as HTMLInputElement).value).toBe('Late Enriched Title')
+    await titleInput.setValue('User Edited Title')
     const vm = wrapper.vm as unknown as { editableMetadata: { title?: string } }
     expect(vm.editableMetadata.title).toBe('User Edited Title')
+    wrapper.unmount()
+    vi.mocked(apiService.getAudibleMetadata).mockResolvedValue({})
+  })
+
+  it('does not keep edits once the modal is closed: reopening loads the Audible record again', async () => {
+    const { apiService } = await import('@/services/api')
+    vi.mocked(apiService.getAudibleMetadata).mockResolvedValue({
+      metadata: { asin: fakeBook.asin, title: 'Audible Title', authors: [{ name: 'Author' }] },
+    })
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: false, book: fakeBook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await wrapper.get('.metadata-toggle-btn').trigger('click')
+    await wrapper.get('.metadata-editor input.form-input').setValue('Edited, then cancelled')
+
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(wrapper.get('.detail-header h3').text()).toBe('Audible Title')
+    const vm = wrapper.vm as unknown as { editableMetadata: { title?: string } }
+    expect(vm.editableMetadata.title).toBe('Audible Title')
     wrapper.unmount()
     vi.mocked(apiService.getAudibleMetadata).mockResolvedValue({})
   })
