@@ -240,4 +240,119 @@ describe('RegistrationRecoveryPanel', () => {
     await flushPromises()
     expect(wrapper.findAll('li code').map((c) => c.text())).toEqual(['op-1', 'op-2', 'op-3'])
   })
+
+  describe('against a list that other clients change between page requests', () => {
+    // Mirrors the server contract: pending rows first, resolved rows after them with the most
+    // recently resolved first, 200 rows per page, X-Total-Count counting both groups.
+    const pageSize = 200
+    let pending: string[]
+    let resolved: string[]
+    const listed = () => [...pending, ...resolved]
+    const resolveElsewhere = (id: string) => {
+      pending = pending.filter((p) => p !== id)
+      resolved = [id, ...resolved]
+    }
+
+    beforeEach(() => {
+      pending = []
+      resolved = []
+      api.getRegistrationReviews.mockImplementation(async (skip = 0) => ({
+        reviews: listed()
+          .slice(skip, skip + pageSize)
+          .map((id) => ({
+            ...row(id),
+            state: resolved.includes(id) ? 'OperatorResolved' : 'NeedsAttention',
+          })),
+        total: listed().length,
+      }))
+    })
+
+    const names = (count: number) => Array.from({ length: count }, (_, i) => `op-${i + 1}`)
+    const shown = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.findAll('li code').map((c) => c.text())
+    const loadMoreUntilGone = async (wrapper: ReturnType<typeof mount>) => {
+      for (let i = 0; i < 5 && buttonByText(wrapper, 'Load more'); i++) {
+        await buttonByText(wrapper, 'Load more')!.trigger('click')
+        await flushPromises()
+      }
+    }
+
+    it('lists every operation when a loaded one is resolved by another client before Load more', async () => {
+      pending = names(300)
+      const wrapper = mount(RegistrationRecoveryPanel)
+      await flushPromises()
+      expect(wrapper.text()).toContain('Showing 200 of 300 operations.')
+      resolveElsewhere('op-7')
+      api.getRegistrationReviews.mockClear()
+      await loadMoreUntilGone(wrapper)
+      expect(wrapper.text()).toContain('Showing 300 of 300 operations.')
+      expect(new Set(shown(wrapper))).toEqual(new Set(listed()))
+      expect(shown(wrapper)).toHaveLength(300)
+      expect(api.getRegistrationReviews.mock.calls.filter(([skip]) => skip === 299)).toHaveLength(0)
+    })
+
+    it('lists every operation when several loaded ones are resolved before Load more', async () => {
+      pending = names(300)
+      const wrapper = mount(RegistrationRecoveryPanel)
+      await flushPromises()
+      resolveElsewhere('op-3')
+      resolveElsewhere('op-200')
+      resolveElsewhere('op-100')
+      await loadMoreUntilGone(wrapper)
+      expect(new Set(shown(wrapper))).toEqual(new Set(listed()))
+      expect(wrapper.text()).toContain('Showing 300 of 300 operations.')
+    })
+
+    it('lists every operation when another client adds operations before Load more', async () => {
+      pending = names(300)
+      const wrapper = mount(RegistrationRecoveryPanel)
+      await flushPromises()
+      pending = ['op-new-1', 'op-new-2', ...pending]
+      await loadMoreUntilGone(wrapper)
+      expect(new Set(shown(wrapper))).toEqual(new Set(listed()))
+      expect(shown(wrapper)).toHaveLength(302)
+      expect(wrapper.text()).toContain('Showing 302 of 302 operations.')
+    })
+
+    it('stops cleanly when a page legitimately returns no rows at the end', async () => {
+      pending = names(250)
+      const wrapper = mount(RegistrationRecoveryPanel)
+      await flushPromises()
+      api.getRegistrationReviews.mockImplementation(async (skip = 0) => ({
+        reviews:
+          skip >= 250
+            ? []
+            : listed()
+                .slice(skip, skip + pageSize)
+                .map((id) => row(id)),
+        total: 251,
+      }))
+      await buttonByText(wrapper, 'Load more')!.trigger('click')
+      await flushPromises()
+      expect(shown(wrapper)).toHaveLength(250)
+      expect(wrapper.text()).not.toContain('Could not')
+      expect(buttonByText(wrapper, 'Load more')!.attributes('disabled')).toBeUndefined()
+      expect(api.getRegistrationReviews.mock.calls.length).toBeLessThan(10)
+    })
+
+    it('reloads every loaded row after a resolve even when a loaded row moved behind the pending rows', async () => {
+      pending = names(300)
+      const wrapper = mount(RegistrationRecoveryPanel)
+      await flushPromises()
+      await buttonByText(wrapper, 'Inspect operation')!.trigger('click')
+      await flushPromises()
+      await wrapper.get('textarea').setValue('reviewed')
+      await wrapper.get('input[type=checkbox]').setValue(true)
+      api.resolveRegistration.mockImplementation(async () => {
+        resolveElsewhere('op-1')
+        resolveElsewhere('op-9')
+        return { ...review, canResolve: false }
+      })
+      await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+      await flushPromises()
+      await loadMoreUntilGone(wrapper)
+      expect(new Set(shown(wrapper))).toEqual(new Set(listed()))
+      expect(wrapper.text()).toContain('Showing 300 of 300 operations.')
+    })
+  })
 })
