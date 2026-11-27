@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -87,6 +88,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             return result;
         }
 
+        // SABnzbd history returns 10 slots by default, so a job that finished a while ago may not be on
+        // the first page. Ask for the job by id first, then fall back to a bounded paged scan.
+        private const int HistoryPageSize = 100;
+        private const int MaxHistoryPages = 10;
+
+        private sealed record HistoryLookup(bool Found, string? Storage, int SlotCount);
+
         private async Task<string?> ResolveHistoryStorageAsync(
             DownloadClientConfiguration client,
             string nzoId,
@@ -101,48 +109,35 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return null;
                 }
 
-                var historyUrl = requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                HistoryLookup? byId = null;
+                try
                 {
-                    ["mode"] = "history",
-                    ["output"] = "json"
-                });
-                var http = httpFactory.CreateClient(clientType);
-                var historyResp = await http.GetAsync(historyUrl, ct);
-
-                if (!historyResp.IsSuccessStatusCode)
-                {
-                    logger.LogWarning("Failed to query SABnzbd history for download {NzoId}", nzoId);
-                    return null;
-                }
-
-                var historyText = await historyResp.Content.ReadAsStringAsync(ct);
-                if (string.IsNullOrWhiteSpace(historyText))
-                {
-                    return null;
-                }
-
-                var doc = JsonDocument.Parse(historyText);
-                if (!doc.RootElement.TryGetProperty("history", out var history) ||
-                    !history.TryGetProperty("slots", out var slots) ||
-                    slots.ValueKind != JsonValueKind.Array)
-                {
-                    logger.LogWarning("Invalid SABnzbd history response format");
-                    return null;
-                }
-
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    var slotNzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
-                    if (!string.Equals(slotNzoId, nzoId, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
-                    if (string.IsNullOrWhiteSpace(storage))
+                    byId = await QueryHistoryAsync(requestContext, nzoId, new Dictionary<string, string>
                     {
-                        logger.LogWarning("No storage path found for SABnzbd download {NzoId}", nzoId);
-                        return null;
-                    }
+                        ["nzo_ids"] = nzoId
+                    }, ct);
+                }
+                catch (JsonException)
+                {
+                    // A malformed targeted response must not skip the paged scan below.
+                    logger.LogWarning("SABnzbd returned malformed JSON for the targeted history lookup of {NzoId}; falling back to the paged scan", nzoId);
+                }
 
-                    return storage;
+                if (byId is { Found: true })
+                {
+                    return byId.Storage;
+                }
+
+                for (var page = 0; page < MaxHistoryPages; page++)
+                {
+                    var lookup = await QueryHistoryAsync(requestContext, nzoId, new Dictionary<string, string>
+                    {
+                        ["start"] = (page * HistoryPageSize).ToString(CultureInfo.InvariantCulture),
+                        ["limit"] = HistoryPageSize.ToString(CultureInfo.InvariantCulture)
+                    }, ct);
+                    if (lookup == null) return null;
+                    if (lookup.Found) return lookup.Storage;
+                    if (lookup.SlotCount < HistoryPageSize) break;
                 }
 
                 logger.LogWarning("Download {NzoId} not found in SABnzbd history", nzoId);
@@ -153,6 +148,57 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 logger.LogWarning(ex, "Error resolving import item for SABnzbd download {NzoId}", nzoId);
                 return null;
             }
+        }
+
+        private async Task<HistoryLookup?> QueryHistoryAsync(
+            SabnzbdRequestContext requestContext,
+            string nzoId,
+            Dictionary<string, string> filter,
+            CancellationToken ct)
+        {
+            filter["mode"] = "history";
+            filter["output"] = "json";
+            var historyUrl = requestBuilder.BuildUrl(requestContext, filter);
+            var http = httpFactory.CreateClient(clientType);
+            var historyResp = await http.GetAsync(historyUrl, ct);
+
+            if (!historyResp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Failed to query SABnzbd history for download {NzoId}", nzoId);
+                return null;
+            }
+
+            var historyText = await historyResp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(historyText))
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(historyText);
+            if (!doc.RootElement.TryGetProperty("history", out var history) ||
+                !history.TryGetProperty("slots", out var slots) ||
+                slots.ValueKind != JsonValueKind.Array)
+            {
+                logger.LogWarning("Invalid SABnzbd history response format");
+                return null;
+            }
+
+            foreach (var slot in slots.EnumerateArray())
+            {
+                var slotNzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
+                if (!string.Equals(slotNzoId, nzoId, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
+                if (string.IsNullOrWhiteSpace(storage))
+                {
+                    logger.LogWarning("No storage path found for SABnzbd download {NzoId}", nzoId);
+                    return new HistoryLookup(true, null, slots.GetArrayLength());
+                }
+
+                return new HistoryLookup(true, storage, slots.GetArrayLength());
+            }
+
+            return new HistoryLookup(false, null, slots.GetArrayLength());
         }
     }
 }
