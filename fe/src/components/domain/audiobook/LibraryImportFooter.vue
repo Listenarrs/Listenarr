@@ -122,7 +122,8 @@
           store.findMatchSearching ||
           isImporting ||
           !filesystemReadinessStore.filesystemReady ||
-          destinationMissing
+          destinationMissing ||
+          qualityProfileMissing
         "
         :title="importDisabledReason"
         @click="handleImport"
@@ -196,11 +197,22 @@ const destinationMissing = computed(
   () => store.action !== 'none' && destinationFolderId.value === null,
 )
 
+// The profile chosen earlier was removed since: importing without one would give new books the
+// server's default profile unnoticed. With no profile left at all, the select is hidden and the
+// server refuses new books itself, so Import stays available for books already in the library.
+const qualityProfileMissing = computed(
+  () =>
+    qualityProfiles.value.length > 0 &&
+    store.qualityProfileId !== null &&
+    qualityProfileId.value === null,
+)
+
 const importDisabledReason = computed(() => {
   if (!filesystemReadinessStore.filesystemReady) {
     return 'Available after library filesystem initialization completes'
   }
-  return destinationMissing.value ? 'Select the folder to import into' : undefined
+  if (destinationMissing.value) return 'Select the folder to import into'
+  return qualityProfileMissing.value ? 'Select the quality profile for new books' : undefined
 })
 
 const destinationPath = computed(() => {
@@ -239,7 +251,8 @@ async function handleImport() {
     isImporting.value ||
     store.selectedCount === 0 ||
     !filesystemReadinessStore.filesystemReady ||
-    destinationMissing.value
+    destinationMissing.value ||
+    qualityProfileMissing.value
   ) {
     return
   }

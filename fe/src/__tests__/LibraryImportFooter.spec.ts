@@ -517,6 +517,47 @@ describe('LibraryImportFooter', () => {
       expect(importSelected).toHaveBeenCalledWith('/library', 4)
     })
 
+    it('waits for a quality profile when the chosen one was removed', async () => {
+      // Sending no profile would make the server give new books its default profile unnoticed
+      const { pinia, store, importSelected } = storeWithChoices({
+        destinationFolderId: 1,
+        qualityProfileId: 9,
+      })
+      store.action = 'none'
+
+      const wrapper = await mountFooter(pinia, [{ id: 1, name: 'Library', path: '/library' }])
+
+      const importButton = wrapper.get('button.btn.btn-primary')
+      expect(importButton.attributes('disabled')).toBeDefined()
+      expect(importButton.attributes('title')).toBe('Select the quality profile for new books')
+      await importButton.trigger('click')
+      expect(importSelected).not.toHaveBeenCalled()
+
+      await wrapper.get(profileSelector).setValue('3')
+      expect(importButton.attributes('disabled')).toBeUndefined()
+      expect(importButton.attributes('title')).toBeUndefined()
+      await importButton.trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('', 3)
+    })
+
+    it('still imports books already in the library when no quality profile is left', async () => {
+      // No select to choose from: the server refuses new books itself, existing ones need none
+      vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([])
+      const { pinia, store, importSelected } = storeWithChoices({
+        destinationFolderId: 1,
+        qualityProfileId: 9,
+      })
+      store.action = 'none'
+
+      const wrapper = await mountFooter(pinia, [{ id: 1, name: 'Library', path: '/library' }])
+
+      expect(wrapper.text()).toContain('To import new books, set up a profile')
+      const importButton = wrapper.get('button.btn.btn-primary')
+      expect(importButton.attributes('disabled')).toBeUndefined()
+      await importButton.trigger('click')
+      expect(importSelected).toHaveBeenCalledWith('', undefined)
+    })
+
     it('keeps the chosen quality profile, under its new name, when it was renamed', async () => {
       vi.spyOn(apiService, 'getQualityProfiles').mockResolvedValue([
         { id: 2, name: 'Standard', isDefault: true },
