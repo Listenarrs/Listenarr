@@ -25,6 +25,51 @@ namespace Listenarr.Tests.Features.Api.Startup;
 public sealed class ListenarrBuilderFactoryTests
 {
     [Fact]
+    public void ResolveContentRootPath_TestEnvironmentWithATestContentRoot_UsesIt()
+    {
+        // Parallel test hosts must not share a content root: one could read appsettings.json while
+        // another is still writing it. Each host passes its own root as a host setting.
+        var contentRoot = Path.GetFullPath(Path.Join(Path.GetTempPath(), $"listenarr-startup-{Guid.NewGuid():N}"));
+
+        try
+        {
+            var resolved = ListenarrBuilderFactory.ResolveContentRootPath(
+                [$"--Listenarr:TestContentRoot={contentRoot}"],
+                "Test",
+                new LocalFileSystem());
+
+            Assert.Equal(contentRoot, resolved);
+            Assert.True(Directory.Exists(contentRoot));
+        }
+        finally
+        {
+            DeleteDirectory(contentRoot);
+        }
+    }
+
+    [Fact]
+    public void ResolveContentRootPath_TestEnvironmentWithoutATestContentRoot_UsesTheSharedTestRoot()
+    {
+        var resolved = ListenarrBuilderFactory.ResolveContentRootPath([], "Test", new LocalFileSystem());
+
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "ListenarrTests"), resolved);
+    }
+
+    [Fact]
+    public void ResolveContentRootPath_ProductionEnvironment_IgnoresTheTestContentRoot()
+    {
+        var contentRoot = Path.GetFullPath(Path.Join(Path.GetTempPath(), $"listenarr-startup-{Guid.NewGuid():N}"));
+
+        var resolved = ListenarrBuilderFactory.ResolveContentRootPath(
+            [$"--Listenarr:TestContentRoot={contentRoot}"],
+            "Production",
+            new LocalFileSystem());
+
+        Assert.NotEqual(contentRoot, resolved);
+        Assert.False(Directory.Exists(contentRoot));
+    }
+
+    [Fact]
     public void EnsureExternalConfiguration_CreatesDefaultConfigurationInsideContentRoot()
     {
         var contentRoot = CreateTemporaryDirectory();

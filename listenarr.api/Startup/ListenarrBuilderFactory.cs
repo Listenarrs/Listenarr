@@ -29,18 +29,8 @@ public static class ListenarrBuilderFactory
         ILogEventSink realtimeLogSink,
         IFileSystem fileSystem)
     {
-        var contentRootPath = ResolveContentRootPath();
         var environmentName = ResolveEnvironmentName();
-
-        if (string.Equals("Test", environmentName, StringComparison.Ordinal))
-        {
-            var testContentRootPath = Path.Combine(Path.GetTempPath(), "ListenarrTests");
-            fileSystem.CreateDirectory(testContentRootPath);
-            Environment.SetEnvironmentVariable("LISTENARR_CONTENT_ROOT", testContentRootPath);
-            contentRootPath = testContentRootPath;
-        }
-
-        contentRootPath = ApplyContentRootOverride(contentRootPath, fileSystem);
+        var contentRootPath = ResolveContentRootPath(args, environmentName, fileSystem);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -87,8 +77,25 @@ public static class ListenarrBuilderFactory
         return environmentName;
     }
 
-    private static string ResolveContentRootPath()
-        => AppContext.BaseDirectory;
+    /// <summary>The host setting a test host sets (UseSetting) to get a content root of its own.</summary>
+    public const string TestContentRootKey = "Listenarr:TestContentRoot";
+
+    internal static string ResolveContentRootPath(string[] args, string environmentName, IFileSystem fileSystem)
+    {
+        if (string.Equals("Test", environmentName, StringComparison.Ordinal))
+        {
+            // Test hosts run in parallel; ones sharing a root could read appsettings.json while another
+            // writes it. Each passes its own root; the shared one is the fallback for the others.
+            var testContentRootPath = new ConfigurationBuilder().AddCommandLine(args).Build()[TestContentRootKey];
+            testContentRootPath = string.IsNullOrWhiteSpace(testContentRootPath)
+                ? Path.Combine(Path.GetTempPath(), "ListenarrTests")
+                : Path.GetFullPath(testContentRootPath);
+            fileSystem.CreateDirectory(testContentRootPath);
+            return testContentRootPath;
+        }
+
+        return ApplyContentRootOverride(AppContext.BaseDirectory, fileSystem);
+    }
 
     private static string ApplyContentRootOverride(string contentRootPath, IFileSystem fileSystem)
     {
