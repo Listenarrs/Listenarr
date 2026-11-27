@@ -38,7 +38,8 @@ namespace Listenarr.Application.Downloads.Submission
         DownloadCachedTorrentStore cachedTorrentStore,
         IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
-        DownloadRemovalWorkflow downloadRemovalWorkflow) : IDownloadService
+        DownloadRemovalWorkflow downloadRemovalWorkflow,
+        IDownloadProcessingJobService downloadProcessingJobService) : IDownloadService
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
@@ -240,6 +241,22 @@ namespace Listenarr.Application.Downloads.Submission
                 await DownloadSubmissionFailureHandler.RecordRejectedSubmissionAsync(
                     downloadId, downloadClientIdForModel, candidate.Title, exception, downloadHistoryService, logger);
                 await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
+
+                // The provisional row is gone first: it holds the book's active-download slot,
+                // which the adopted record is about to take.
+                if (exception is DownloadClientRejectedReleaseException
+                    && prepared is PreparedTorrentSubmission torrent
+                    && audiobookId is int adoptingAudiobookId && adoptingAudiobookId > 0)
+                {
+                    var adopted = await ExistingClientReleaseAdopter.TryAdoptAsync(
+                        downloadClientIdForModel, torrent.InfoHash, adoptingAudiobookId,
+                        downloadRepository, audiobookRepository, downloadProcessingJobService,
+                        downloadHistoryService, logger);
+                    if (adopted != null)
+                    {
+                        return adopted.Id;
+                    }
+                }
 
                 if (exception is DownloadClientSubmissionException)
                 {
