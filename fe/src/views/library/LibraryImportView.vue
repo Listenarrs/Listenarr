@@ -364,8 +364,6 @@ onMounted(async () => {
   requestedFolderMissing.value = route.query.rootFolder !== undefined && !requestedFolder
   const scanRequested = requestedFolder !== null && route.query.scan === '1'
 
-  store.action = 'none'
-
   if (requestedFolderMissing.value) {
     // Nothing left to ask for: a reload opens the page normally
     void router.replace({ query: { ...route.query, rootFolder: undefined, scan: undefined } })

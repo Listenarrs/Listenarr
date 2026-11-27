@@ -55,6 +55,7 @@
               class="mode-select destination-select"
               :disabled="isImporting"
             >
+              <option :value="null" disabled>Select a folder</option>
               <option v-for="f in props.folders" :key="f.id" :value="f.id">
                 {{ f.path }}
               </option>
@@ -120,13 +121,11 @@
           store.isProcessing ||
           store.findMatchSearching ||
           isImporting ||
-          !filesystemReadinessStore.filesystemReady
+          !filesystemReadinessStore.filesystemReady ||
+          destinationMissing ||
+          qualityProfileMissing
         "
-        :title="
-          filesystemReadinessStore.filesystemReady
-            ? undefined
-            : 'Available after library filesystem initialization completes'
-        "
+        :title="importDisabledReason"
         @click="handleImport"
       >
         <PhSpinner v-if="isImporting" class="ph-spin" :size="14" />
@@ -138,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { PhWarning, PhPlay, PhStop, PhSpinner, PhDownload } from '@phosphor-icons/vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -156,26 +155,64 @@ const configStore = useConfigurationStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
 
-const destinationFolderId = ref<number | null>(props.folders[0]?.id ?? null)
+// In the store, so the choice outlives the page: the first folder until one is chosen; none when the
+// chosen one was removed since, so that Move or Copy never goes to another folder unnoticed
+const destinationFolderId = computed({
+  get: () => {
+    if (store.destinationFolderId === null) return props.folders[0]?.id ?? null
+    return props.folders.some((folder) => folder.id === store.destinationFolderId)
+      ? store.destinationFolderId
+      : null
+  },
+  set: (id: number | null) => {
+    store.destinationFolderId = id
+  },
+})
 const isImporting = ref(false)
 const importingCount = ref(0)
 const qualityProfiles = computed(() => configStore.qualityProfiles)
-const qualityProfileId = ref<number | null>(null)
-const qualityProfilesLoaded = ref(false)
-
-watch(
-  qualityProfiles,
-  (profiles) => {
-    if (!profiles.some((profile) => profile.id === qualityProfileId.value)) {
-      qualityProfileId.value = profiles.find((profile) => profile.isDefault)?.id ?? null
+// In the store, like the destination folder: the default profile until one is chosen; none when the
+// chosen one was removed since, so that new books never get another profile unnoticed
+const qualityProfileId = computed({
+  get: () => {
+    if (store.qualityProfileId === null) {
+      return qualityProfiles.value.find((profile) => profile.isDefault)?.id ?? null
     }
+    return qualityProfiles.value.some((profile) => profile.id === store.qualityProfileId)
+      ? store.qualityProfileId
+      : null
   },
-  { immediate: true },
-)
+  set: (id: number | null) => {
+    store.qualityProfileId = id
+  },
+})
+const qualityProfilesLoaded = ref(false)
 
 onMounted(async () => {
   await configStore.loadQualityProfiles()
   qualityProfilesLoaded.value = true
+})
+
+const destinationMissing = computed(
+  () => store.action !== 'none' && destinationFolderId.value === null,
+)
+
+// The profile chosen earlier was removed since: importing without one would give new books the
+// server's default profile unnoticed. With no profile left at all, the select is hidden and the
+// server refuses new books itself, so Import stays available for books already in the library.
+const qualityProfileMissing = computed(
+  () =>
+    qualityProfiles.value.length > 0 &&
+    store.qualityProfileId !== null &&
+    qualityProfileId.value === null,
+)
+
+const importDisabledReason = computed(() => {
+  if (!filesystemReadinessStore.filesystemReady) {
+    return 'Available after library filesystem initialization completes'
+  }
+  if (destinationMissing.value) return 'Select the folder to import into'
+  return qualityProfileMissing.value ? 'Select the quality profile for new books' : undefined
 })
 
 const destinationPath = computed(() => {
@@ -210,7 +247,13 @@ const importButtonLabel = computed(() => {
 })
 
 async function handleImport() {
-  if (isImporting.value || store.selectedCount === 0 || !filesystemReadinessStore.filesystemReady) {
+  if (
+    isImporting.value ||
+    store.selectedCount === 0 ||
+    !filesystemReadinessStore.filesystemReady ||
+    destinationMissing.value ||
+    qualityProfileMissing.value
+  ) {
     return
   }
 

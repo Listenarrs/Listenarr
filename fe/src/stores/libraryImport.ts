@@ -173,6 +173,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const scanWarnings = ref<string[]>([])
   const lastScannedAt = ref<string | null>(null)
   const action = ref<'none' | 'move' | 'hardlink/copy'>('none')
+  // The "to" folder of Move and Hardlink / Copy; null until one is chosen
+  const destinationFolderId = ref<number | null>(null)
+  // The quality profile for new books; null until one is chosen
+  const qualityProfileId = ref<number | null>(null)
   const monitor = ref<'none' | 'all'>('all')
   const metadataFetchCount = ref(0)
   const importErrors = ref<string[]>([])
@@ -710,6 +714,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     scanWarnings,
     lastScannedAt,
     action,
+    destinationFolderId,
+    qualityProfileId,
     monitor,
     metadataFetchCount,
     importErrors,
