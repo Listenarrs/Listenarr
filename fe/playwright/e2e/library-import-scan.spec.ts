@@ -57,12 +57,14 @@ test.describe('Library Import scan', () => {
 
     // The three MP3 parts of one book are one row.
     const allan = importRow(page, folder.Allan)
-    await expect(allan.locator('.file-count')).toHaveText(
-      `${importBook('Allan').files.length} files`,
-    )
+    await expect(allan.locator('.file-count')).toHaveText('3 files')
     await allan.locator('.grouped-files-summary').click()
     await expect(allan.locator('.grouped-files-summary')).toHaveText(/View grouped files \(3\)/)
-    await expect(allan.locator('.grouped-file-label')).toHaveText(importBook('Allan').fileNames)
+    await expect(allan.locator('.grouped-file-label')).toHaveText([
+      'Allan Quatermain - Part 01.mp3',
+      'Allan Quatermain - Part 02.mp3',
+      'Allan Quatermain - Part 03.mp3',
+    ])
     await expect(allan.locator('.grouped-file-badge')).toHaveCount(1)
 
     // The backend keeps the results: the next visit shows them without scanning, also in a browser
