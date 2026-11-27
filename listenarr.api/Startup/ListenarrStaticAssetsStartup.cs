@@ -57,7 +57,25 @@ public static class ListenarrStaticAssetsStartup
         });
 
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = ctx =>
+            {
+                // Vite emits content-hashed filenames under /assets/ — safe to
+                // cache forever; a new build means a new URL. index.html (and
+                // anything un-hashed) must revalidate every load or a deploy
+                // can leave browsers on a stale SPA shell pointing at purged
+                // asset hashes (ETag makes the revalidation a 304).
+                if (ctx.Context.Request.Path.StartsWithSegments("/assets"))
+                {
+                    ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+                }
+                else
+                {
+                    ctx.Context.Response.Headers.CacheControl = "no-cache";
+                }
+            }
+        });
 
         var cacheImagesPath = Path.Join(app.Environment.ContentRootPath, "config", "cache", "images");
         if (fileSystem.DirectoryExists(cacheImagesPath))
@@ -65,7 +83,15 @@ public static class ListenarrStaticAssetsStartup
             app.UseStaticFiles(new StaticFileOptions
             {
                 FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
-                RequestPath = "/config/cache/images"
+                RequestPath = "/config/cache/images",
+                OnPrepareResponse = ctx =>
+                {
+                    // Direct-path consumers of the image cache get the same
+                    // long-lived policy as the /images API (see
+                    // ImageResponseBuilder); the middleware's ETag covers
+                    // post-expiry revalidation.
+                    ctx.Context.Response.Headers.CacheControl = "public, max-age=604800";
+                }
             });
         }
 
