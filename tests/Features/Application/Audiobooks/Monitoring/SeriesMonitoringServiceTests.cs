@@ -189,6 +189,56 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
         }
 
         [Fact]
+        public async Task MonitorSeriesAsync_StoresAddedBookAsinWithTheRegionOfTheMonitor()
+        {
+            // Given
+            Init(services => services
+                .WithSingleton(_seriesCatalogService.Object)
+                .WithSingleton(_imageCacheService.Object));
+            await AddDefaultQualityProfileAsync();
+
+            _seriesCatalogService
+                .Setup(service => service.GetCatalogAsync(
+                    "Barsoom",
+                    "uk",
+                    500,
+                    null,
+                    true,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
+                    .WithSeries("Barsoom", "B007D0J4H0")
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("B01BKS3DPE")
+                        .WithTitle("The Gods of Mars")
+                        .WithAuthor("Edgar Rice Burroughs")
+                        .WithLanguage("english")
+                        .Build())
+                    .Build());
+
+            var service = _provider.GetRequiredService<ISeriesMonitoringService>();
+
+            // When
+            var result = await service.MonitorSeriesAsync(new MonitorSeriesRequest
+            {
+                Name = "Barsoom",
+                Region = "uk",
+                Language = "english"
+            });
+
+            // Then
+            Assert.True(result.SyncResult.Succeeded, result.SyncResult.ErrorMessage);
+            Assert.Equal(1, result.SyncResult.AddedCount);
+
+            var storedAudiobook = await _audiobookRepository.GetByAsinAsync("B01BKS3DPE");
+            Assert.NotNull(storedAudiobook);
+            var asinIdentifier = Assert.Single(
+                storedAudiobook!.ExternalIdentifiers!,
+                identifier => identifier.Type == AudiobookExternalIdentifierType.Asin);
+            Assert.Equal("B01BKS3DPE", asinIdentifier.ValueNormalized);
+            Assert.Equal("uk", asinIdentifier.Region);
+        }
+
+        [Fact]
         public async Task MonitorSeriesAsync_MapsEverySeriesEntryToAMembershipWithItsAsin()
         {
             var metadata = await CaptureAddedBookMetadataAsync("Ayesha", "B01E633FQM", new AudibleSearchResultBuilder()

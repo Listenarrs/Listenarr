@@ -265,6 +265,19 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Assert.Equal("1", metadata.SeriesNumber);
         }
 
+        [Fact]
+        public async Task MonitorAuthorAsync_PassesTheRegionOfTheMonitorToTheAddedBook()
+        {
+            var metadata = await CaptureAddedBookMetadataAsync(new AudibleSearchResultBuilder()
+                .WithAsin("B004YWTD30")
+                .WithTitle("She: A History of Adventure")
+                .WithAuthor("H. Rider Haggard")
+                .WithLanguage("english")
+                .Build());
+
+            Assert.Equal("uk", metadata.Region);
+        }
+
         private static async Task<AudibleBookMetadata> CaptureAddedBookMetadataAsync(AudibleSearchResult catalogBook)
         {
             var dbOptions = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -277,7 +290,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
 
             var authorCatalogService = new Mock<IAuthorCatalogService>();
             authorCatalogService
-                .Setup(service => service.GetCatalogAsync("H. Rider Haggard", "us", 500, null, false, It.IsAny<System.Threading.CancellationToken>()))
+                .Setup(service => service.GetCatalogAsync("H. Rider Haggard", "uk", 500, null, false, It.IsAny<System.Threading.CancellationToken>()))
                 .ReturnsAsync(new AuthorCatalogFetchResult
                 {
                     Author = new AuthorLookupItem
@@ -321,7 +334,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             var result = await service.MonitorAuthorAsync(new MonitorAuthorRequest
             {
                 Name = "H. Rider Haggard",
-                Region = "us",
+                Region = "uk",
                 Language = "english"
             });
 
