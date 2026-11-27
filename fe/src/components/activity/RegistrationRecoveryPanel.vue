@@ -134,13 +134,15 @@ async function loadMore() {
     const list = await apiService.getRegistrationReviews(reviews.value.length)
     const known = new Set(reviews.value.map((r) => r.operationId))
     const fresh = list.reviews.filter((r) => !known.has(r.operationId))
-    if (fresh.length || reviews.value.length >= list.total) {
+    const merged = reviews.value.length + fresh.length
+    const repeated = list.reviews.length > fresh.length
+    if (merged < list.total && (repeated || !fresh.length)) {
+      // Rows moved between pages (another client resolved or added operations), so the offset no
+      // longer lines up with the list. Re-read from the start instead of trusting this page.
+      await reloadFromStart(merged + 1)
+    } else {
       reviews.value = [...reviews.value, ...fresh]
       total.value = list.total
-    } else {
-      // Rows moved between pages (another client resolved or added operations), so the offset no
-      // longer lines up with the list. Re-read from the start instead of asking for it again.
-      await reloadFromStart(reviews.value.length + 1)
     }
   } catch {
     error.value = 'Could not load more recovery operations. Try again.'
