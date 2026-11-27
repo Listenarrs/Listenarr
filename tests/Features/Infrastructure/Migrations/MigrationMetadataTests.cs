@@ -330,6 +330,50 @@ public class MigrationMetadataTests : BaseTests
         Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchBookDelaySeconds"));
     }
 
+    [Fact]
+    public void AddMetadataRescanSchedule_AddsScheduleColumnsAndFilteredIndex()
+    {
+        AssertMigrationId<AddMetadataRescanSchedule>(
+            "20261114004926_AddMetadataRescanSchedule");
+
+        var migration = new AddMetadataRescanSchedule();
+        var up = BuildOperations(migration, "Up").Operations;
+        var down = BuildOperations(migration, "Down").Operations;
+
+        var columns = up.Take(5).Cast<AddColumnOperation>().ToList();
+        Assert.All(columns, column => Assert.Equal("AudiobookFiles", column.Table));
+        Assert.All(
+            columns.Where(column => column.Name.EndsWith("Count", StringComparison.Ordinal)),
+            column => Assert.Equal((false, 0), (column.IsNullable, column.DefaultValue)));
+        Assert.Equal(
+            ["MetadataRescanBlockedCount", "MetadataRescanFailureCount", "MetadataRescanUnavailableCount"],
+            columns.Where(column => column.Name.EndsWith("Count", StringComparison.Ordinal))
+                .Select(column => column.Name));
+        // The scaffolded default is the only due time existing rows get: no data repair runs here.
+        var due = columns.Single(column => column.Name == "MetadataRescanDueUtc");
+        Assert.Equal((false, (object)DateTime.MinValue), (due.IsNullable, due.DefaultValue));
+        var outcome = columns.Single(column => column.Name == "MetadataRescanLastOutcome");
+        Assert.Equal((true, 32), (outcome.IsNullable, outcome.MaxLength));
+
+        var index = Assert.IsType<CreateIndexOperation>(up[5]);
+        Assert.Equal(6, up.Count);
+        Assert.Equal("IX_AudiobookFiles_MetadataRescanDue", index.Name);
+        Assert.Equal(["MetadataRescanDueUtc"], index.Columns);
+        Assert.Equal(
+            "\"DurationSeconds\" IS NULL OR \"Format\" IS NULL OR \"SampleRate\" IS NULL OR \"Size\" IS NULL OR \"Size\" = 64",
+            index.Filter);
+
+        // Down drops the index before the columns it covers.
+        Assert.Equal("IX_AudiobookFiles_MetadataRescanDue", Assert.IsType<DropIndexOperation>(down[0]).Name);
+        Assert.Equal(
+            columns.Select(column => column.Name).Order(),
+            down.Skip(1).Cast<DropColumnOperation>().Select(column => column.Name).Order());
+        Assert.Equal(6, down.Count);
+
+        var file = AssertEntity(migration.TargetModel, "Listenarr.Domain.Audiobooks.AudiobookFile");
+        Assert.All(columns, column => Assert.NotNull(file.FindProperty(column.Name)));
+    }
+
     private static MigrationBuilder BuildOperations(Migration migration, string methodName)
     {
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.Sqlite");

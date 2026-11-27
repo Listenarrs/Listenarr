@@ -81,8 +81,19 @@ namespace Listenarr.Tests.Features.Api.Services
             };
             var fileRepository = new Mock<IAudiobookFileRepository>();
             fileRepository
-                .Setup(r => r.GetMissingMetadataAsync(20, It.IsAny<CancellationToken>()))
-                .ReturnsAsync([file]);
+                .Setup(r => r.GetMetadataRescanDuePageAsync(
+                    It.IsAny<DateTime>(),
+                    It.IsAny<IReadOnlyCollection<int>>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([new AudiobookFileRescanCandidate(file, Path.GetTempPath())]);
+            fileRepository
+                .Setup(r => r.GetDueForeignSyntaxRescanRowsAsync(
+                    It.IsAny<DateTime>(),
+                    It.IsAny<FileSystemPathSyntax>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
             fileRepository
                 .Setup(r => r.GetByIdAsync(file.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(file);
@@ -103,10 +114,16 @@ namespace Listenarr.Tests.Features.Api.Services
             services.AddSingleton(fileRepository.Object);
             services.AddSingleton(audiobookRepository.Object);
             services.AddSingleton(metadataService.Object);
+            var moveQueueService = new Mock<IMoveQueueService>();
+            services.AddLogging();
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton(moveQueueService.Object);
+            services.AddSingleton(Mock.Of<IAudiobookFilePathIdentityResolver>());
+            services.AddSingleton(Mock.Of<IFileSystem>());
+            services.AddScoped<MetadataRescanSelection>();
             using var provider = services.BuildServiceProvider();
 
             using var operationCoordinator = new AudiobookOperationCoordinator();
-            var moveQueueService = new Mock<IMoveQueueService>();
             moveQueueService.Setup(service => service.GetRecoveryStateForAudiobookAsync(
                     It.IsAny<int>(),
                     It.IsAny<CancellationToken>()))

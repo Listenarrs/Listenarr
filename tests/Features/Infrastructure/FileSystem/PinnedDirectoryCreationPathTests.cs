@@ -20,4 +20,20 @@ public sealed class PinnedDirectoryCreationPathTests : BaseTests
                 foreignPath,
                 createMissing: false));
     }
+
+    [Fact]
+    public void OpenPinnedHierarchyNoFollow_MissingExistingChild_DoesNotReportACreatedDirectory()
+    {
+        var missingDirectory = Path.Join(
+            FileService.GetTempDirectory("pinned-missing-existing-child"),
+            "absent");
+
+        var exception = Record.Exception(() =>
+            PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                missingDirectory,
+                createMissing: false));
+
+        Assert.NotNull(exception);
+        Assert.DoesNotContain("newly created", exception.Message, StringComparison.Ordinal);
+    }
 }

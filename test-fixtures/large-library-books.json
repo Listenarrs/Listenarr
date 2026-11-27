@@ -1,0 +1,1648 @@
+{
+  "books": [
+    {
+      "title": "A Princess of Mars",
+      "subtitle": null,
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Bob Thomley"
+      ],
+      "series": "Barsoom",
+      "asin": "B008DFUGCQ"
+    },
+    {
+      "title": "A Princess of Mars",
+      "subtitle": "Barsoom 1",
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Arthur Vincet"
+      ],
+      "series": "Barsoom",
+      "asin": "B071YLS9YL"
+    },
+    {
+      "title": "Twenty Thousand Leagues Under the Sea",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Bill Homewood"
+      ],
+      "series": "Captain Nemo",
+      "asin": "B01FKWL15A"
+    },
+    {
+      "title": "20,000 Leagues Under the Sea",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "David Linski"
+      ],
+      "series": "Captain Nemo",
+      "asin": "B076HSP1FT"
+    },
+    {
+      "title": "The Wonderful Wizard of Oz",
+      "subtitle": null,
+      "authors": [
+        "L. Frank Baum"
+      ],
+      "narrators": [
+        "Anne Hathaway"
+      ],
+      "series": "Oz",
+      "asin": "B007BR5KZA"
+    },
+    {
+      "title": "The Wonderful Wizard of Oz",
+      "subtitle": null,
+      "authors": [
+        "L. Frank Baum"
+      ],
+      "narrators": [
+        "Cindy Hardin Killavey"
+      ],
+      "series": "Oz",
+      "asin": "B002V5CJM4"
+    },
+    {
+      "title": "The Three Musketeers",
+      "subtitle": null,
+      "authors": [
+        "Alexandre Dumas"
+      ],
+      "narrators": [
+        "John Lee"
+      ],
+      "series": "D'Artagnan: The Musketeers Cycle",
+      "asin": "B002UZJF4U"
+    },
+    {
+      "title": "The Three Musketeers",
+      "subtitle": null,
+      "authors": [
+        "Alexandre Dumas"
+      ],
+      "narrators": [
+        "Simon Vance"
+      ],
+      "series": "D'Artagnan: The Musketeers Cycle",
+      "asin": "B002V0RG8G"
+    },
+    {
+      "title": "The Marvelous Land of Oz",
+      "subtitle": "Oz, Book 2",
+      "authors": [
+        "L. Frank Baum"
+      ],
+      "narrators": [
+        "Tara Sands"
+      ],
+      "series": "Oz",
+      "asin": "B00BHPI2TS"
+    },
+    {
+      "title": "She: A History of Adventure",
+      "subtitle": null,
+      "authors": [
+        "H. Rider Haggard"
+      ],
+      "narrators": [
+        "B.J. Harrison"
+      ],
+      "series": "Ayesha",
+      "asin": "B004YWTD30"
+    },
+    {
+      "title": "Allan Quatermain",
+      "subtitle": null,
+      "authors": [
+        "H. Rider Haggard"
+      ],
+      "narrators": [
+        "Bill Homewood"
+      ],
+      "series": "Allan Quatermain",
+      "asin": "B0096QR7Z0"
+    },
+    {
+      "title": "Marie",
+      "subtitle": null,
+      "authors": [
+        "H. Rider Haggard"
+      ],
+      "narrators": [
+        "Shelly Frasier"
+      ],
+      "series": "Allan Quatermain",
+      "asin": "B002UZKHRE"
+    },
+    {
+      "title": "The Jungle Book",
+      "subtitle": null,
+      "authors": [
+        "Rudyard Kipling"
+      ],
+      "narrators": [
+        "Margaret Maynard",
+        "Aarj Jain",
+        "Suyash Mohan",
+        "Asif Ali Beg",
+        "Harish V Nair",
+        "Prerna Chawla",
+        "Seaon Dcosta",
+        "Satyakam Chaudhury"
+      ],
+      "series": "The Jungle Books",
+      "asin": "B00OQQTXE8"
+    },
+    {
+      "title": "The Second Jungle Book",
+      "subtitle": null,
+      "authors": [
+        "Rudyard Kipling"
+      ],
+      "narrators": [
+        "Peter Batchelor"
+      ],
+      "series": "The Jungle Books",
+      "asin": "B01JWOHBEC"
+    },
+    {
+      "title": "Pellucidar",
+      "subtitle": null,
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Patrick Lawlor"
+      ],
+      "series": null,
+      "asin": "B002V1OVFQ"
+    },
+    {
+      "title": "Tanar of Pellucidar",
+      "subtitle": null,
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Rob Vlock"
+      ],
+      "series": null,
+      "asin": "B0C6B525PQ"
+    },
+    {
+      "title": "Tarzan of the Apes",
+      "subtitle": null,
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Shelly Frasier"
+      ],
+      "series": "Tarzan",
+      "asin": "B002V5B7TK"
+    },
+    {
+      "title": "The Return of Tarzan",
+      "subtitle": null,
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Jeff Harding"
+      ],
+      "series": "Tarzan",
+      "asin": "B01GIO3GFW"
+    },
+    {
+      "title": "Little Women",
+      "subtitle": "An Audible Original Drama",
+      "authors": [
+        "Louisa May Alcott"
+      ],
+      "narrators": [
+        "Emily Bauer",
+        "Laura Dern",
+        "Lauren Fortgang",
+        "Allison Hiroto",
+        "Carly Robins",
+        "Suzanne Toren"
+      ],
+      "series": "Little Women",
+      "asin": "B081B7JM9F"
+    },
+    {
+      "title": "Little Men",
+      "subtitle": null,
+      "authors": [
+        "Louisa May Alcott"
+      ],
+      "narrators": [
+        "Justine Eyre"
+      ],
+      "series": "Little Women",
+      "asin": "B003750OH4"
+    },
+    {
+      "title": "The Princess and the Goblin",
+      "subtitle": "Presented by Blackstone",
+      "authors": [
+        "George MacDonald"
+      ],
+      "narrators": [
+        "Frederick Davidson"
+      ],
+      "series": null,
+      "asin": "B002V1CL4E"
+    },
+    {
+      "title": "Phineas Finn",
+      "subtitle": null,
+      "authors": [
+        "Anthony Trollope"
+      ],
+      "narrators": [
+        "Timothy West"
+      ],
+      "series": "The Pallisers",
+      "asin": "B003KS7JYO"
+    },
+    {
+      "title": "Peter Pan in Kensington Gardens",
+      "subtitle": null,
+      "authors": [
+        "James M. Barrie"
+      ],
+      "narrators": [
+        "Robin Nixon"
+      ],
+      "series": null,
+      "asin": "B0C6FJ6L34"
+    },
+    {
+      "title": "Peter and Wendy",
+      "subtitle": null,
+      "authors": [
+        "J.M. Barrie"
+      ],
+      "narrators": [
+        "Laura Eastwood"
+      ],
+      "series": "Peter Pan",
+      "asin": "B084J9S79P"
+    },
+    {
+      "title": "Peter and Wendy (AmazonClassics Edition)",
+      "subtitle": null,
+      "authors": [
+        "J. M. Barrie"
+      ],
+      "narrators": [
+        "Karen Cass"
+      ],
+      "series": "Peter Pan",
+      "asin": "B078X1NX28"
+    },
+    {
+      "title": "Peter Pan",
+      "subtitle": null,
+      "authors": [
+        "J M Barrie"
+      ],
+      "narrators": [
+        "Full Cast",
+        "Toyah Wilcox"
+      ],
+      "series": "Peter Pan",
+      "asin": "B002V1M36U"
+    },
+    {
+      "title": "The Gods of Mars",
+      "subtitle": "Barsoom Series, Book 2",
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Alastair Cameron"
+      ],
+      "series": "Barsoom",
+      "asin": "B01BKS3DPE"
+    },
+    {
+      "title": "The Warlord of Mars",
+      "subtitle": "Barsoom Series, Book 3",
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Alastair Cameron"
+      ],
+      "series": "Barsoom",
+      "asin": "B01DPXZKPI"
+    },
+    {
+      "title": "Sherlock Holmes: A Study in Scarlet",
+      "subtitle": "A Study in Scarlet",
+      "authors": [
+        "Arthur Conan Doyle"
+      ],
+      "narrators": [
+        "Frederick Davidson"
+      ],
+      "series": "Sherlock Holmes",
+      "asin": "B002V59S7S"
+    },
+    {
+      "title": "The Sign of Four",
+      "subtitle": "A Sherlock Holmes Novel",
+      "authors": [
+        "Arthur Conan Doyle"
+      ],
+      "narrators": [
+        "Simon Prebble"
+      ],
+      "series": "Sherlock Holmes",
+      "asin": "B0036I51QQ"
+    },
+    {
+      "title": "The Adventures of Sherlock Holmes",
+      "subtitle": null,
+      "authors": [
+        "Arthur Conan Doyle"
+      ],
+      "narrators": [
+        "Simon Prebble"
+      ],
+      "series": "Sherlock Holmes",
+      "asin": "B0036I522E"
+    },
+    {
+      "title": "The Hound of the Baskervilles",
+      "subtitle": "A Sherlock Holmes Novel",
+      "authors": [
+        "Arthur Conan Doyle"
+      ],
+      "narrators": [
+        "Simon Prebble"
+      ],
+      "series": "Sherlock Holmes",
+      "asin": "B0036HXZCO"
+    },
+    {
+      "title": "The Valley of Fear",
+      "subtitle": null,
+      "authors": [
+        "Arthur Conan Doyle"
+      ],
+      "narrators": [
+        "John Bolen"
+      ],
+      "series": "Sherlock Holmes",
+      "asin": "B002UUFXKU"
+    },
+    {
+      "title": "Uncle Tom's Cabin",
+      "subtitle": null,
+      "authors": [
+        "Harriet Beecher Stowe"
+      ],
+      "narrators": [
+        "Richard Allen"
+      ],
+      "series": null,
+      "asin": "B002VAAA6G"
+    },
+    {
+      "title": "Robinson Crusoe",
+      "subtitle": null,
+      "authors": [
+        "Daniel Defoe"
+      ],
+      "narrators": [
+        "Simon Vance"
+      ],
+      "series": null,
+      "asin": "B002V5CW08"
+    },
+    {
+      "title": "Alice's Adventures in Wonderland",
+      "subtitle": null,
+      "authors": [
+        "Lewis Carroll"
+      ],
+      "narrators": [
+        "Scarlett Johansson"
+      ],
+      "series": "Alice in Wonderland",
+      "asin": "B015D78L0U"
+    },
+    {
+      "title": "Moby Dick",
+      "subtitle": null,
+      "authors": [
+        "Herman Melville"
+      ],
+      "narrators": [
+        "Anthony Heald"
+      ],
+      "series": null,
+      "asin": "B0036N9OKA"
+    },
+    {
+      "title": "Around the World in Eighty Days",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Bill Homewood"
+      ],
+      "series": null,
+      "asin": "B01AGYIKG0"
+    },
+    {
+      "title": "Around the World in 80 Days",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Walter Covell"
+      ],
+      "series": null,
+      "asin": "B002VA3DLK"
+    },
+    {
+      "title": "813",
+      "subtitle": "Arsène Lupin Series, Book 4",
+      "authors": [
+        "Maurice Leblanc"
+      ],
+      "narrators": [
+        "B.J. Harrison"
+      ],
+      "series": "Arsène Lupin",
+      "asin": "B09HJHRGWQ"
+    },
+    {
+      "title": "The Extraordinary Adventures of Arsène Lupin, Gentleman-Burglar",
+      "subtitle": "Further Adventures of Arsène Lupin, Book 1",
+      "authors": [
+        "Maurice Leblanc"
+      ],
+      "narrators": [
+        "Brady Smith"
+      ],
+      "series": "Arsène Lupin",
+      "asin": "B0GLJYD7RL"
+    },
+    {
+      "title": "Pride and Prejudice",
+      "subtitle": null,
+      "authors": [
+        "Jane Austen"
+      ],
+      "narrators": [
+        "Karen Savage"
+      ],
+      "series": null,
+      "asin": "B071S17YLK"
+    },
+    {
+      "title": "Sara Crewe",
+      "subtitle": null,
+      "authors": [
+        "Frances Hodgson Burnett"
+      ],
+      "narrators": [
+        "Bobbie Frohman"
+      ],
+      "series": null,
+      "asin": "B00D52SU5M"
+    },
+    {
+      "title": "A Little Princess",
+      "subtitle": null,
+      "authors": [
+        "Frances Hodgson Burnett"
+      ],
+      "narrators": [
+        "Virginia Leishman"
+      ],
+      "series": null,
+      "asin": "B002UZMQCI"
+    },
+    {
+      "title": "The Man in the Iron Mask",
+      "subtitle": null,
+      "authors": [
+        "Alexandre Dumas"
+      ],
+      "narrators": [
+        "Simon Vance"
+      ],
+      "series": "D'Artagnan: The Musketeers Cycle",
+      "asin": "B0038G2TFW"
+    },
+    {
+      "title": "From the Earth to the Moon",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Bernard Mayes"
+      ],
+      "series": null,
+      "asin": "B002V1CJIW"
+    },
+    {
+      "title": "Around the Moon",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Matthew Llyod Davies"
+      ],
+      "series": null,
+      "asin": "B0DKK1PKN7"
+    },
+    {
+      "title": "Anne of Green Gables",
+      "subtitle": null,
+      "authors": [
+        "L. M. Montgomery"
+      ],
+      "narrators": [
+        "Laurel Schroeder"
+      ],
+      "series": "Anne of Green Gables",
+      "asin": "B073JR7W68"
+    },
+    {
+      "title": "Anne of Avonlea",
+      "subtitle": null,
+      "authors": [
+        "Lucy Maud Montgomery"
+      ],
+      "narrators": [
+        "Shelly Frasier"
+      ],
+      "series": "Anne of Green Gables",
+      "asin": "B002V8L2UQ"
+    },
+    {
+      "title": "The Story of Doctor Dolittle",
+      "subtitle": null,
+      "authors": [
+        "Hugh Lofting"
+      ],
+      "narrators": [
+        "Alice Marti"
+      ],
+      "series": null,
+      "asin": "B07TKCFMD1"
+    },
+    {
+      "title": "The Voyages of Doctor Dolittle",
+      "subtitle": null,
+      "authors": [
+        "Hugh Lofting"
+      ],
+      "narrators": [
+        "William Sutherland"
+      ],
+      "series": "Doctor Dolittle",
+      "asin": "B002V8OEG0"
+    },
+    {
+      "title": "The Hunchback of Notre Dame",
+      "subtitle": null,
+      "authors": [
+        "Victor Hugo"
+      ],
+      "narrators": [
+        "Bill Homewood"
+      ],
+      "series": null,
+      "asin": "B00NB9Q736"
+    },
+    {
+      "title": "The Time Machine",
+      "subtitle": null,
+      "authors": [
+        "H. G. Wells"
+      ],
+      "narrators": [
+        "Alan Munro"
+      ],
+      "series": null,
+      "asin": "B007RPQWCG"
+    },
+    {
+      "title": "A Room with a View",
+      "subtitle": null,
+      "authors": [
+        "E. M. Forster"
+      ],
+      "narrators": [
+        "Rebecca Hall"
+      ],
+      "series": null,
+      "asin": "B07D1BVGWR"
+    },
+    {
+      "title": "Dagon",
+      "subtitle": null,
+      "authors": [
+        "H. P. Lovecraft"
+      ],
+      "narrators": [
+        "John W. Michaels"
+      ],
+      "series": null,
+      "asin": "B00LW3J8RA"
+    },
+    {
+      "title": "Jane Eyre",
+      "subtitle": null,
+      "authors": [
+        "Charlotte Brontë"
+      ],
+      "narrators": [
+        "Thandiwe Newton"
+      ],
+      "series": "Jane Eyre",
+      "asin": "B01COOZ5C2"
+    },
+    {
+      "title": "Wuthering Heights",
+      "subtitle": null,
+      "authors": [
+        "Emily Brontë"
+      ],
+      "narrators": [
+        "Juliet Stevenson"
+      ],
+      "series": null,
+      "asin": "B0186DGBCI"
+    },
+    {
+      "title": "Agnes Grey",
+      "subtitle": null,
+      "authors": [
+        "Anne Brontë"
+      ],
+      "narrators": [
+        "Emilia Fox"
+      ],
+      "series": null,
+      "asin": "B002V8N2QS"
+    },
+    {
+      "title": "Grimm's Fairy Tales",
+      "subtitle": null,
+      "authors": [
+        "Brothers Grimm"
+      ],
+      "narrators": [
+        "Jim Dale",
+        "Janis Ian",
+        "Alfred Molina",
+        "Katherine Kellgren"
+      ],
+      "series": null,
+      "asin": "B01DPV47HM"
+    },
+    {
+      "title": "The Turn of the Screw",
+      "subtitle": null,
+      "authors": [
+        "Henry James"
+      ],
+      "narrators": [
+        "Emma Thompson",
+        "Richard Armitage - introduction"
+      ],
+      "series": null,
+      "asin": "B01ATTZF38"
+    },
+    {
+      "title": "Ghost Stories of an Antiquary",
+      "subtitle": null,
+      "authors": [
+        "M. R. James"
+      ],
+      "narrators": [
+        "David Timson",
+        "Stephen Critchlow"
+      ],
+      "series": null,
+      "asin": "B004FOLXEO"
+    },
+    {
+      "title": "The Adventures of Huckleberry Finn",
+      "subtitle": null,
+      "authors": [
+        "Mark Twain"
+      ],
+      "narrators": [
+        "Robin Field"
+      ],
+      "series": "Twain's Tom and Huck",
+      "asin": "B0057AOV4Y"
+    },
+    {
+      "title": "Middlemarch",
+      "subtitle": null,
+      "authors": [
+        "George Eliot"
+      ],
+      "narrators": [
+        "Juliet Stevenson"
+      ],
+      "series": null,
+      "asin": "B004S7ANSU"
+    },
+    {
+      "title": "The Chronicles of Clovis",
+      "subtitle": null,
+      "authors": [
+        "Hector Hugh Munro (Saki)"
+      ],
+      "narrators": [
+        "Cathy Dobson"
+      ],
+      "series": null,
+      "asin": "B0051PPZVI"
+    },
+    {
+      "title": "The Four Million",
+      "subtitle": null,
+      "authors": [
+        "O. Henry"
+      ],
+      "narrators": [
+        "Walter Zimmerman",
+        "Jim Roberts",
+        "Cindy Hardin Killavey",
+        "Walter Covell",
+        "Jack Benson"
+      ],
+      "series": null,
+      "asin": "B002UZN8HK"
+    },
+    {
+      "title": "O. Henry: Complete Short Stories Collection",
+      "subtitle": null,
+      "authors": [
+        "O. Henry",
+        "William Sydney Porter"
+      ],
+      "narrators": [
+        "Bob Thomley"
+      ],
+      "series": null,
+      "asin": "B007ZEANIS"
+    },
+    {
+      "title": "Around the World in Eighty Days (AmazonClassics Edition)",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne",
+        "George Makepeace Towle - translator"
+      ],
+      "narrators": [
+        "David Colacci"
+      ],
+      "series": null,
+      "asin": "B076PQXBV7"
+    },
+    {
+      "title": "Crime and Punishment",
+      "subtitle": null,
+      "authors": [
+        "Fyodor Dostoevsky"
+      ],
+      "narrators": [
+        "Anthony Heald"
+      ],
+      "series": null,
+      "asin": "B002V9ZF3K"
+    },
+    {
+      "title": "The Brothers Karamazov [Naxos AudioBooks Edition]",
+      "subtitle": null,
+      "authors": [
+        "Constance Garnett - translator",
+        "Fyodor Dostoevsky"
+      ],
+      "narrators": [
+        "Constantine Gregory"
+      ],
+      "series": null,
+      "asin": "B00EZAXAF8"
+    },
+    {
+      "title": "Dracula",
+      "subtitle": null,
+      "authors": [
+        "Bram Stoker"
+      ],
+      "narrators": [
+        "Greg Wise"
+      ],
+      "series": null,
+      "asin": "B002UZKUAS"
+    },
+    {
+      "title": "Frankenstein",
+      "subtitle": null,
+      "authors": [
+        "Mary Shelley"
+      ],
+      "narrators": [
+        "Dan Stevens"
+      ],
+      "series": null,
+      "asin": "B00FQRCM9O"
+    },
+    {
+      "title": "Beowulf",
+      "subtitle": null,
+      "authors": [
+        "Anonymous"
+      ],
+      "narrators": [
+        "Svanur Thorkelsson"
+      ],
+      "series": null,
+      "asin": "B085RHYBV9"
+    },
+    {
+      "title": "The Strange Case of Dr Jekyll and Mr Hyde",
+      "subtitle": null,
+      "authors": [
+        "Robert Louis Stevenson"
+      ],
+      "narrators": [
+        "Richard Armitage"
+      ],
+      "series": null,
+      "asin": "B076FF3QGP"
+    },
+    {
+      "title": "Ghosts",
+      "subtitle": null,
+      "authors": [
+        "Henrik Ibsen"
+      ],
+      "narrators": [
+        "Andrea Giordani"
+      ],
+      "series": null,
+      "asin": "B08876QLDS"
+    },
+    {
+      "title": "Greenmantle",
+      "subtitle": null,
+      "authors": [
+        "John Buchan"
+      ],
+      "narrators": [
+        "Christian Rhodska"
+      ],
+      "series": "Richard Hannay",
+      "asin": "B002V8H9C6"
+    },
+    {
+      "title": "Treasure Island",
+      "subtitle": null,
+      "authors": [
+        "Robert Louis Stevenson"
+      ],
+      "narrators": [
+        "David Buck"
+      ],
+      "series": "Treasure Island",
+      "asin": "B002V0QN30"
+    },
+    {
+      "title": "Ozymandias",
+      "subtitle": null,
+      "authors": [
+        "Percy Bysshe Shelley"
+      ],
+      "narrators": [
+        "Sam Kusi"
+      ],
+      "series": null,
+      "asin": "B09GD1GD8N"
+    },
+    {
+      "title": "War and Peace",
+      "subtitle": null,
+      "authors": [
+        "Leo Tolstoy"
+      ],
+      "narrators": [
+        "Frederick Davidson"
+      ],
+      "series": null,
+      "asin": "B002V0PVJC"
+    },
+    {
+      "title": "Germinal",
+      "subtitle": null,
+      "authors": [
+        "Émile Zola"
+      ],
+      "narrators": [
+        "Leighton Pugh"
+      ],
+      "series": "Rougon-Macquart",
+      "asin": "B00XLZ2H3E"
+    },
+    {
+      "title": "R.U.R. (Rossum's Universal Robots)",
+      "subtitle": null,
+      "authors": [
+        "Karel Capek"
+      ],
+      "narrators": [
+        "Ellis Freeman"
+      ],
+      "series": null,
+      "asin": "B086XLJJ33"
+    },
+    {
+      "title": "The Odyssey",
+      "subtitle": null,
+      "authors": [
+        "Homer",
+        "Samuel Butler - translator"
+      ],
+      "narrators": [
+        "Roger Rees"
+      ],
+      "series": null,
+      "asin": "B00S710A4U"
+    },
+    {
+      "title": "Essays",
+      "subtitle": null,
+      "authors": [
+        "Francis Bacon"
+      ],
+      "narrators": [
+        "David Timson"
+      ],
+      "series": null,
+      "asin": "B09PML71M1"
+    },
+    {
+      "title": "Candide (AudioGO Edition)",
+      "subtitle": null,
+      "authors": [
+        "Voltaire"
+      ],
+      "narrators": [
+        "Jack Davenport"
+      ],
+      "series": null,
+      "asin": "B0049CGKLI"
+    },
+    {
+      "title": "She And Allan",
+      "subtitle": null,
+      "authors": [
+        "H. Rider Haggard"
+      ],
+      "narrators": [
+        "Barnaby Edwards"
+      ],
+      "series": "Ayesha",
+      "asin": "B00CQ5WAXW"
+    },
+    {
+      "title": "The Father Brown Collection: Books 1-4",
+      "subtitle": "The Innocence of Father Brown; The Wisdom of Father Brown; The Incredulity of Father Brown; & The Secret of Father Brown",
+      "authors": [
+        "G. K. Chesterton"
+      ],
+      "narrators": [
+        "Nicholas Boulton"
+      ],
+      "series": "Father Brown Mysteries",
+      "asin": "B0F84DFZ66"
+    },
+    {
+      "title": "The Thirty-Nine Steps",
+      "subtitle": null,
+      "authors": [
+        "John Buchan"
+      ],
+      "narrators": [
+        "David Case"
+      ],
+      "series": "Richard Hannay",
+      "asin": "B002V1PLZK"
+    },
+    {
+      "title": "The Barsoom Collection: Books 1-6",
+      "subtitle": "The Master Mind of Mars; The Chessmen of Mars; Thuvia, Maid of Mars; The Warlord of Mars; The Gods of Mars; A Princess of Mars",
+      "authors": [
+        "Edgar Rice Burroughs"
+      ],
+      "narrators": [
+        "Christopher Ragland"
+      ],
+      "series": "Barsoom",
+      "asin": "B0DHSHFQQH"
+    },
+    {
+      "title": "Anne Of Green Gables -Complete 8-Book Box Set",
+      "subtitle": null,
+      "authors": [
+        "L.M. Montgomery"
+      ],
+      "narrators": [
+        "Beth Kesler"
+      ],
+      "series": "Anne of Green Gables",
+      "asin": "B0GVSJJBGN"
+    },
+    {
+      "title": "Anna of the Five Towns",
+      "subtitle": null,
+      "authors": [
+        "Arnold Bennett"
+      ],
+      "narrators": [
+        "Peter Joyce"
+      ],
+      "series": "The Five Towns",
+      "asin": "B004Q1EFJQ"
+    },
+    {
+      "title": "The Adventures of the Amateur Cracksman",
+      "subtitle": "A. J. Raffles, the Gentleman Thief 1",
+      "authors": [
+        "E. W. Hornung"
+      ],
+      "narrators": [
+        "Candle Swift"
+      ],
+      "series": null,
+      "asin": "B077SHDLW9"
+    },
+    {
+      "title": "Vingt mille lieues sous les mers",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Noam Morgensztern"
+      ],
+      "series": null,
+      "asin": "B0F48KS3BX"
+    },
+    {
+      "title": "Vingt mille lieues sous les mers",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Marc-André Coallier"
+      ],
+      "series": null,
+      "asin": "B008WB1L70"
+    },
+    {
+      "title": "Vingt mille lieues sous les mers",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Jean Gabin",
+        "Jean-Pierre Lituac",
+        "Jean Galipeau"
+      ],
+      "series": null,
+      "asin": "B008Q3A6JI"
+    },
+    {
+      "title": "Vingt mille lieues sous les mers",
+      "subtitle": null,
+      "authors": [
+        "Jules Verne"
+      ],
+      "narrators": [
+        "Fabien Albanese"
+      ],
+      "series": null,
+      "asin": "B0DY31J772"
+    },
+    {
+      "title": "Die Verwandlung",
+      "subtitle": null,
+      "authors": [
+        "Franz Kafka"
+      ],
+      "narrators": [
+        "Ulrich Matthes"
+      ],
+      "series": null,
+      "asin": "B00TPW1FLM"
+    },
+    {
+      "title": "Die Verwandlung",
+      "subtitle": null,
+      "authors": [
+        "Franz Kafka"
+      ],
+      "narrators": [
+        "Felix von Manteuffel"
+      ],
+      "series": null,
+      "asin": "B00TDZQG3I"
+    },
+    {
+      "title": "The Metamorphosis",
+      "subtitle": null,
+      "authors": [
+        "Franz Kafka"
+      ],
+      "narrators": [
+        "David Barnes"
+      ],
+      "series": null,
+      "asin": "B01LFD0GWM"
+    },
+    {
+      "title": "Metamorphosis",
+      "subtitle": null,
+      "authors": [
+        "Franz Kafka"
+      ],
+      "narrators": [
+        "Leanne Yau",
+        "Glenn Hascall",
+        "Linda Barrans",
+        "Ron Altman",
+        "Amanda Friday",
+        "Alan Weyman",
+        "Richard Andrews",
+        "K. G. Cross"
+      ],
+      "series": null,
+      "asin": "B01MU7YH84"
+    },
+    {
+      "title": "Die schönsten Kinder- und Hausmärchen der Gebrüder Grimm",
+      "subtitle": null,
+      "authors": [
+        "Brüder Grimm"
+      ],
+      "narrators": [
+        "Ernst-August Schepmann"
+      ],
+      "series": null,
+      "asin": "B00B4FPVR2"
+    },
+    {
+      "title": "Sämtliche Kinder- und Hausmärchen",
+      "subtitle": null,
+      "authors": [
+        "Brüder Grimm"
+      ],
+      "narrators": [
+        "Thomas Dehler",
+        "Claudia Gräf"
+      ],
+      "series": null,
+      "asin": "B00UXEBBIS"
+    },
+    {
+      "title": "Gebrüder Grimm: Dornröschen (aus: \"Kinder- und Hausmärchen\")",
+      "subtitle": null,
+      "authors": [
+        "Brüder Grimm"
+      ],
+      "narrators": [
+        "Ernst-August Schepmann"
+      ],
+      "series": null,
+      "asin": "B00TPKF9QQ"
+    },
+    {
+      "title": "Die schönsten Märchen",
+      "subtitle": null,
+      "authors": [
+        "Brüder Grimm"
+      ],
+      "narrators": [
+        "Stefan Wilkening",
+        "Miroslav Nemec",
+        "Jochen Striebeck",
+        "Juliane Köhler",
+        "Anna Thalbach"
+      ],
+      "series": null,
+      "asin": "B00T9V0BU0"
+    },
+    {
+      "title": "Faust",
+      "subtitle": "Der Tragödie erster Teil",
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Rolf Günther"
+      ],
+      "series": null,
+      "asin": "B00EOO99WS"
+    },
+    {
+      "title": "Johann Wolfgang von Goethe - Faust. Die komplette Hörbuch Edition",
+      "subtitle": "Der Tragödier erster und zweiter Teil. Vollständig und ungekürzt vorgetragen.",
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Jürgen Fritsche"
+      ],
+      "series": null,
+      "asin": "B0DZXWPQNW"
+    },
+    {
+      "title": "Faust",
+      "subtitle": "Der Tragödie Erster Teil",
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Jürgen Goslar"
+      ],
+      "series": null,
+      "asin": "B00JQEQFL4"
+    },
+    {
+      "title": "Faust I",
+      "subtitle": null,
+      "authors": [
+        "Johann Wolfgang Goethe"
+      ],
+      "narrators": [
+        "Sebastian Rudolph"
+      ],
+      "series": null,
+      "asin": "B00APWL9E4"
+    },
+    {
+      "title": "Faust I + II",
+      "subtitle": null,
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Fred Düren",
+        "Jörg Gudzuhn",
+        "Dieter Mann"
+      ],
+      "series": null,
+      "asin": "B01IDLCAMI"
+    },
+    {
+      "title": "Goethe.Faust. Der Tragödie Erster Teil",
+      "subtitle": "Reclam Hörspiel",
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Hans Sigl"
+      ],
+      "series": "Reclam Hörspiele",
+      "asin": "B0B1QKNWH3"
+    },
+    {
+      "title": "Goethe - Faust 2",
+      "subtitle": "Die Gründgens-Inszenierung 1959",
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Gustaf Gründgens",
+        "Volker Brandt",
+        "Joseph Offenbach",
+        "Benno Gellenbeck",
+        "Ella Büchi",
+        "Elisabeth Goebel"
+      ],
+      "series": null,
+      "asin": "B08SQ3S34B"
+    },
+    {
+      "title": "Faust",
+      "subtitle": null,
+      "authors": [
+        "Johann Wolfgang von Goethe"
+      ],
+      "narrators": [
+        "Tim Habeger"
+      ],
+      "series": null,
+      "asin": "B00769TAK4"
+    },
+    {
+      "title": "Don Quijote de la Mancha",
+      "subtitle": null,
+      "authors": [
+        "Miguel de Cervantes"
+      ],
+      "narrators": [
+        "Carlos Ramos"
+      ],
+      "series": null,
+      "asin": "B08527ZZZD"
+    },
+    {
+      "title": "Don Quijote de la Mancha",
+      "subtitle": null,
+      "authors": [
+        "Miguel de Cervantes"
+      ],
+      "narrators": [
+        "Eladio Ramos",
+        "Jesús Ramos"
+      ],
+      "series": null,
+      "asin": "B07YXBJSVG"
+    },
+    {
+      "title": "Don Quijote de la Mancha",
+      "subtitle": null,
+      "authors": [
+        "Miguel de Cervantes"
+      ],
+      "narrators": [
+        "full cast"
+      ],
+      "series": null,
+      "asin": "B07YP3R658"
+    },
+    {
+      "title": "La Divina Commedia [The Divine Comedy]",
+      "subtitle": null,
+      "authors": [
+        "Dante Alighieri"
+      ],
+      "narrators": [
+        "Silvia Cecchini"
+      ],
+      "series": null,
+      "asin": "B003F6JXC2"
+    },
+    {
+      "title": "La Divina Comedia",
+      "subtitle": null,
+      "authors": [
+        "Dante Alighieri"
+      ],
+      "narrators": [
+        "Artur Mas"
+      ],
+      "series": null,
+      "asin": "B07RGRBKS5"
+    },
+    {
+      "title": "La Divina Comedia [The Divine Comedy]",
+      "subtitle": null,
+      "authors": [
+        "Dante Alighieri"
+      ],
+      "narrators": [
+        "Carlos Celestre"
+      ],
+      "series": null,
+      "asin": "B00BYIJW6A"
+    },
+    {
+      "title": "War and Peace (Russian Edition)",
+      "subtitle": null,
+      "authors": [
+        "Leo Tolstoy"
+      ],
+      "narrators": [
+        "Evgeniy Ternovskiy"
+      ],
+      "series": null,
+      "asin": "B006GDCIY6"
+    },
+    {
+      "title": "Война и мир 1",
+      "subtitle": null,
+      "authors": [
+        "Лев Толстой"
+      ],
+      "narrators": [
+        "Евгений Терновский"
+      ],
+      "series": "Война и мир",
+      "asin": "B08BTM5TDG"
+    },
+    {
+      "title": "Война и мир 2",
+      "subtitle": null,
+      "authors": [
+        "Лев Толстой"
+      ],
+      "narrators": [
+        "Евгений Терновский"
+      ],
+      "series": "Война и мир",
+      "asin": "B08BV2RNS9"
+    },
+    {
+      "title": "Война и мир 3",
+      "subtitle": null,
+      "authors": [
+        "Лев Толстой"
+      ],
+      "narrators": [
+        "Евгений Терновский"
+      ],
+      "series": "Война и мир",
+      "asin": "B08BTZVGS8"
+    },
+    {
+      "title": "Anna Karenina [Russian Edition]",
+      "subtitle": null,
+      "authors": [
+        "Leo Tolstoy"
+      ],
+      "narrators": [
+        "Vyacheslav Gerasimov"
+      ],
+      "series": null,
+      "asin": "B006C692NM"
+    },
+    {
+      "title": "Daniel Defoe Box Set: A Journal of the Plague Year & The Apparition of Mrs. Veal",
+      "subtitle": null,
+      "authors": [
+        "Daniel Defoe"
+      ],
+      "narrators": [
+        "Museum Audiobooks cast"
+      ],
+      "series": null,
+      "asin": "B08ML2HVVW"
+    },
+    {
+      "title": "Can You Forgive Her?",
+      "subtitle": null,
+      "authors": [
+        "Anthony Trollope"
+      ],
+      "narrators": [
+        "Timothy West"
+      ],
+      "series": "The Pallisers",
+      "asin": "B003AAAU7U"
+    },
+    {
+      "title": "Miss or Mrs.?",
+      "subtitle": null,
+      "authors": [
+        "Wilkie Collins"
+      ],
+      "narrators": [
+        "Flo Gibson"
+      ],
+      "series": null,
+      "asin": "B06VVP98S5"
+    },
+    {
+      "title": "Can Such Things Be?",
+      "subtitle": null,
+      "authors": [
+        "Ambrose Bierce"
+      ],
+      "narrators": [
+        "Anthony Heald"
+      ],
+      "series": null,
+      "asin": "B005FGR77S"
+    },
+    {
+      "title": "Is He Popenjoy?",
+      "subtitle": null,
+      "authors": [
+        "Anthony Trollope"
+      ],
+      "narrators": [
+        "Nigel Patterson"
+      ],
+      "series": null,
+      "asin": "B0B441BXY3"
+    },
+    {
+      "title": "100% - The Story of a Patriot",
+      "subtitle": null,
+      "authors": [
+        "Upton Sinclair"
+      ],
+      "narrators": [
+        "Lee Smalley"
+      ],
+      "series": null,
+      "asin": "B09SZD5QKH"
+    },
+    {
+      "title": "Stalky and Co.",
+      "subtitle": null,
+      "authors": [
+        "Rudyard Kipling"
+      ],
+      "narrators": [
+        "Shelly Frasier"
+      ],
+      "series": null,
+      "asin": "B002UUON10"
+    },
+    {
+      "title": "The Life, Adventures and Piracies of Captain Singleton",
+      "subtitle": null,
+      "authors": [
+        "Daniel Defoe"
+      ],
+      "narrators": [
+        "Eric Brooks"
+      ],
+      "series": null,
+      "asin": "B005R353GG"
+    },
+    {
+      "title": "The Cloud of Unknowing",
+      "subtitle": null,
+      "authors": [
+        "Anonymous"
+      ],
+      "narrators": [
+        "Nicholas Boulton"
+      ],
+      "series": null,
+      "asin": "B0DNRK5BY1"
+    },
+    {
+      "title": "IF",
+      "subtitle": null,
+      "authors": [
+        "Rudyard Kipling"
+      ],
+      "narrators": [
+        "Michael Caine"
+      ],
+      "series": null,
+      "asin": "B002V9Z9WW"
+    },
+    {
+      "title": "Белые ночи",
+      "subtitle": null,
+      "authors": [
+        "Федор Достоевский"
+      ],
+      "narrators": [
+        "Руслан Драпалюк"
+      ],
+      "series": null,
+      "asin": "B0CTK91XJ6"
+    },
+    {
+      "title": "杜子春",
+      "subtitle": null,
+      "authors": [
+        "芥川 龍之介"
+      ],
+      "narrators": [
+        "村上 めぐみ"
+      ],
+      "series": null,
+      "asin": "B0B5Z12CCM"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+using Listenarr.Infrastructure.Persistence.Migrations;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
@@ -50,12 +51,15 @@ public sealed class ReleasedStorageRecoveryUpgradeTests : BaseTests
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");
-                await using var legacySeed = new Released134SeedDbContext(options);
-                legacySeed.RootFolders.Add(scenario.Root);
-                legacySeed.Audiobooks.Add(scenario.Audiobook);
-                legacySeed.LibraryDirectoryOwnerships.Add(scenario.Ownership);
-                legacySeed.MoveJobs.Add(scenario.Job);
-                await legacySeed.SaveChangesAsync();
+                await using (var released = ReleasedSchemaWriteContext.Create<AddWeakStorageVerifiedCleanup>(
+                    legacy.Database.GetConnectionString()!))
+                {
+                    released.RootFolders.Add(scenario.Root);
+                    released.Audiobooks.Add(scenario.Audiobook);
+                    released.LibraryDirectoryOwnerships.Add(scenario.Ownership);
+                    released.MoveJobs.Add(scenario.Job);
+                    await released.SaveChangesAsync();
+                }
                 await migrator.MigrateAsync();
             }
             using var coordinator = new FilesystemMutationCoordinator();

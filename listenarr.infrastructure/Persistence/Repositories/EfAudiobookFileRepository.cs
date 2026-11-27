@@ -17,16 +17,25 @@
  */
 using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {
     public partial class EfAudiobookFileRepository : IAudiobookFileRepository
     {
         private readonly ListenArrDbContext _db;
+        private readonly ILogger<EfAudiobookFileRepository> _logger;
+        private readonly TimeProvider _timeProvider;
 
-        public EfAudiobookFileRepository(ListenArrDbContext db)
+        public EfAudiobookFileRepository(
+            ListenArrDbContext db,
+            ILogger<EfAudiobookFileRepository>? logger = null,
+            TimeProvider? timeProvider = null)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
+            _logger = logger ?? NullLogger<EfAudiobookFileRepository>.Instance;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         public async Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default)
@@ -61,10 +70,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 var page = await _db.AudiobookFiles
                     .AsNoTracking()
                     .Where(f => f.Id > lastSeenId)
-                    // A size that is missing, or is the proc-link lstat sentinel an
-                    // earlier registration recorded, is missing metadata too.
-                    .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null
-                        || f.Size == null || f.Size == AudiobookFile.ProcLinkLstatSize)
+                    .Where(MissingMetadata)
                     .Where(f => f.PathSyntax == null || f.PathSyntax == hostSyntax)
                     .OrderBy(f => f.Id)
                     .Take(pageSize)
@@ -101,7 +107,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return results;
         }
 
-        private static bool CanRescanOnCurrentHost(
+        internal static bool CanRescanOnCurrentHost(
             AudiobookFile file,
             string? audiobookBasePath,
             FileSystemPathSyntax hostSyntax)
@@ -268,7 +274,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
                 var existingEntry = _db.Entry(existing);
                 var preservedAudiobookId = existing.AudiobookId;
-                var preservedValues = PathIdentityPropertyNames.ToDictionary(
+                var preservedValues = UpdatePreservedPropertyNames.ToDictionary(
                     propertyName => propertyName,
                     propertyName => existingEntry.Property(propertyName).CurrentValue);
                 existingEntry.CurrentValues.SetValues(file);
@@ -284,7 +290,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     .Property(nameof(AudiobookFile.AudiobookId))
                     .OriginalValue;
                 file.AudiobookId = (int)preservedAudiobookId!;
-                foreach (var propertyName in PathIdentityPropertyNames)
+                foreach (var propertyName in UpdatePreservedPropertyNames)
                 {
                     entry.Property(propertyName).CurrentValue =
                         entry.Property(propertyName).OriginalValue;
@@ -383,7 +389,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToDictionaryAsync(r => r.AudiobookId, r => r.Count, ct);
         }
 
-        private static readonly string[] PathIdentityPropertyNames =
+        // UpdateAsync never saves these from the caller's copy. Path identity
+        // changes only through the guarded identity writes, and the rescan
+        // schedule only through its own writes, so a stale or whole-entity
+        // save cannot roll either back.
+        private static readonly string[] UpdatePreservedPropertyNames =
         [
             nameof(AudiobookFile.Path),
             nameof(AudiobookFile.CanonicalPath),
@@ -398,7 +408,12 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             nameof(AudiobookFile.PathIdentityReason),
             nameof(AudiobookFile.PhysicalObjectIdentity),
             nameof(AudiobookFile.PhysicalIdentityVersion),
-            nameof(AudiobookFile.PhysicalIdentityObservedAtUtc)
+            nameof(AudiobookFile.PhysicalIdentityObservedAtUtc),
+            nameof(AudiobookFile.MetadataRescanDueUtc),
+            nameof(AudiobookFile.MetadataRescanFailureCount),
+            nameof(AudiobookFile.MetadataRescanUnavailableCount),
+            nameof(AudiobookFile.MetadataRescanBlockedCount),
+            nameof(AudiobookFile.MetadataRescanLastOutcome)
         ];
 
         private static AudiobookFilePathIdentity ToIdentity(AudiobookFile file) =>

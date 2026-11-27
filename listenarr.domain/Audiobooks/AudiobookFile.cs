@@ -192,6 +192,16 @@ namespace Listenarr.Domain.Audiobooks
         // When this file record was created
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        // Earliest time the background metadata rescan may select this file
+        // again; a new row is due from its creation.
+        public DateTime MetadataRescanDueUtc { get; set; } = DateTime.UtcNow;
+
+        // Consecutive rescan outcomes on each retry ladder, and the last outcome.
+        public int MetadataRescanFailureCount { get; set; }
+        public int MetadataRescanUnavailableCount { get; set; }
+        public int MetadataRescanBlockedCount { get; set; }
+        public string? MetadataRescanLastOutcome { get; set; }
+
         // Optional source or notes (e.g., DDL, qBittorrent, NZB)
         public string? Source { get; set; }
     }
