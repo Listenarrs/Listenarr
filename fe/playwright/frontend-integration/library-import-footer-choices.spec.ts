@@ -66,4 +66,23 @@ test.describe('Library Import footer choices (API-stubbed)', () => {
 
     await expect(profile).toHaveValue('2')
   })
+
+  test('keeps Monitor after going to another page and back', async ({ page, api }) => {
+    await page.goto('/library-import')
+    await api.wait('savedLibraryImportResults')
+    const monitor = page
+      .locator('.import-footer select')
+      .filter({ has: page.locator('option[value="all"]') })
+    await expect(monitor).toHaveValue('all')
+
+    await monitor.selectOption('none')
+
+    await page.locator('a.nav-item', { hasText: 'Audiobooks' }).click()
+    await expect(page).toHaveURL(/\/audiobooks/)
+    await expect(monitor).toHaveCount(0)
+    await page.locator('a.nav-item', { hasText: 'Library Import' }).click()
+    await expect(page).toHaveURL(/\/library-import/)
+
+    await expect(monitor).toHaveValue('none')
+  })
 })
