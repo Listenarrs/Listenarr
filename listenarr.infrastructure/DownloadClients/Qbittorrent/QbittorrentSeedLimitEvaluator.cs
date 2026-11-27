@@ -43,6 +43,30 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 seedingTimeLimit >= 0 ||
                 (seedingTimeLimit <= -2 && globalMaxSeedingTimeEnabled && globalMaxSeedingTime > 0);
 
+            // Limits are in minutes and seeding time is in seconds. A limit too large to convert
+            // cannot be compared at all, and an unchecked multiply would wrap it into a negative
+            // bound that every seeding time passes, so it holds the torrent back outright, even
+            // when a ratio limit has been reached.
+            long? seedingTimeLimitSeconds = null;
+            if (seedingTimeLimit >= 0)
+            {
+                seedingTimeLimitSeconds = MinutesToSeconds(seedingTimeLimit);
+                if (seedingTimeLimitSeconds is null)
+                {
+                    return false;
+                }
+            }
+
+            long? inheritedSeedingTimeLimitSeconds = null;
+            if (seedingTimeLimit <= -2 && globalMaxSeedingTimeEnabled)
+            {
+                inheritedSeedingTimeLimitSeconds = MinutesToSeconds(globalMaxSeedingTime);
+                if (inheritedSeedingTimeLimitSeconds is null)
+                {
+                    return false;
+                }
+            }
+
             if (!hasEffectiveRatioLimit && !hasEffectiveSeedingTimeLimit)
             {
                 return true;
@@ -58,22 +82,33 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return true;
             }
 
-            if (seedingTimeLimit >= 0 &&
+            if (seedingTimeLimitSeconds is long limitSeconds &&
                 seedingTime is long currentSeedingTime &&
-                currentSeedingTime >= seedingTimeLimit * 60)
+                currentSeedingTime >= limitSeconds)
             {
                 return true;
             }
 
-            if (seedingTimeLimit <= -2 &&
-                globalMaxSeedingTimeEnabled &&
+            if (inheritedSeedingTimeLimitSeconds is long inheritedLimitSeconds &&
                 seedingTime is long inheritedSeedingTime &&
-                inheritedSeedingTime >= globalMaxSeedingTime * 60)
+                inheritedSeedingTime >= inheritedLimitSeconds)
             {
                 return true;
             }
 
             return false;
+        }
+
+        private static long? MinutesToSeconds(long minutes)
+        {
+            try
+            {
+                return checked(minutes * 60);
+            }
+            catch (OverflowException)
+            {
+                return null;
+            }
         }
     }
 }
