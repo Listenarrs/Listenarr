@@ -178,8 +178,12 @@ public partial class ManualImportController
             }
             var sourceProof = sourceCapability.SourceProof.Value;
 
-            var metadata = await _metadataService.ExtractFileMetadataAsync(
-                item.FullPath);
+            // With metadata processing off the service reads no tags and returns null, which is
+            // not a failure: the import goes on with what the file name gives, as download
+            // import does.
+            var metadata = settings.EnableMetadataProcessing
+                ? await _metadataService.ExtractFileMetadataAsync(item.FullPath)
+                : AudioMetadata.FromFileName(item.FullPath);
             if (metadata == null)
             {
                 return ManualImportResultDto.FailureResult(
