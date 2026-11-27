@@ -7,8 +7,8 @@ name: Validate PR version label
 
 on:
   pull_request:
+    # Include stacked PRs targeting fix/*, feature/*, and other working branches.
     types: [ labeled, unlabeled, opened, synchronize, reopened ]
-    branches: [ canary ]
 
 permissions:
   contents: read
