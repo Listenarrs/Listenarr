@@ -96,9 +96,6 @@ const plan = stackPlan({
   coverage,
   coverageRoot: join(frontendDirectory, 'test-results'),
 })
-const ports = await allocatePorts(count * 2)
-const apiPorts = ports.slice(0, count)
-const webPorts = ports.slice(count)
 let fixtureTemplate
 let stacks = []
 let exitCode = 1
@@ -107,6 +104,10 @@ try {
   await writeImportFolders(fixtureTemplate)
 
   await ensureImages({ appImage: plan.appImage, hostImage: plan.hostImage, reuse: plan.reusable })
+  // Chosen after the build, which can take minutes: a port is only free until a stack binds it.
+  const ports = await allocatePorts(count * 2)
+  const apiPorts = ports.slice(0, count)
+  const webPorts = ports.slice(count)
   // Register each stack as soon as it starts, so a later shard failing cannot orphan the earlier ones.
   const startResults = await Promise.allSettled(
     plan.stacks.map(async (descriptor, index) => {
