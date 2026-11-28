@@ -56,19 +56,7 @@ namespace Listenarr.Application.Downloads.Processing
                 throw new InvalidOperationException($"Trying to enqueue an import job for download {download.Id} with status {download.Status}: Status should be Completed");
             }
 
-            var job = new DownloadProcessingJob
-            {
-                DownloadId = download.Id,
-                JobType = ProcessingJobType.MoveOrCopyFile,
-                SourcePath = download.DownloadPath,
-                DownloadClientId = download.DownloadClientId,
-                Priority = 5,
-                Status = ProcessingJobStatus.Pending,
-                JobData = new Dictionary<string, object>
-                {
-                    ["CorrelationId"] = download.Id.ToUpperInvariant()
-                }
-            };
+            var job = NewJobFor(download);
 
             try
             {
@@ -91,6 +79,114 @@ namespace Listenarr.Application.Downloads.Processing
             logger.LogInformation("Queued download {DownloadId} for post-processing: {JobId}", download.Id, job.Id);
             return job.Id;
         }
+
+        public async Task<string> RequeueAsync(Download download)
+        {
+            if (!download.AwaitsImportation())
+            {
+                throw new InvalidOperationException($"Trying to requeue an import job for download {download.Id} with status {download.Status}: Status should be Completed or ImportPending");
+            }
+
+            var existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+            if (existingActive != null)
+            {
+                if (!await jobRepository.TrySaveWithDownloadAsync(download, job: null, existingActive.Id))
+                {
+                    return await SupersededRequeueAsync(download);
+                }
+
+                logger.LogInformation("Download {DownloadId} already has active job {JobId}; no requeue needed", download.Id, existingActive.Id);
+                return existingActive.Id;
+            }
+
+            // The newest job, whatever state it ended in. The download still awaits importation, so
+            // its most recent job did not finish the work regardless of what it recorded, and its
+            // processing log is the only record of why. The recent-completion cooldown that
+            // EnqueueAsync applies is deliberately not applied here: this is someone asking for a
+            // retry, and silently doing nothing is the behaviour being fixed.
+            var previous = (await jobRepository.GetByDownloadIdAsync(download.Id)).LastOrDefault();
+            if (previous != null)
+            {
+                if (!await jobRepository.TrySaveWithDownloadAsync(
+                        download,
+                        previous.Requeue("Requeued by request after the import was blocked"),
+                        expectedActiveJobId: null))
+                {
+                    return await SupersededRequeueAsync(download);
+                }
+
+                logger.LogInformation("Requeued download {DownloadId} for post-processing: {JobId}", download.Id, previous.Id);
+                return previous.Id;
+            }
+
+            // No job survives. Job retention deletes terminal jobs after a week, so a download
+            // blocked longer than that has nothing left to reuse and needs a fresh one.
+            var job = NewJobFor(download);
+            try
+            {
+                if (!await jobRepository.TrySaveWithDownloadAsync(download, job, expectedActiveJobId: null))
+                {
+                    return await SupersededRequeueAsync(download);
+                }
+            }
+            catch (UniqueConstraintViolationException)
+            {
+                // Two retry requests for the same download raced here, both found nothing to
+                // reuse, and both tried to insert. The filtered unique index on
+                // ActiveDeduplicationKey lets exactly one through, and the loser's download write
+                // rolls back with its insert; the winner saved the same unblocked state. EnqueueAsync
+                // handles the same race the same way; without this the loser reaches the
+                // controller's catch-all and the caller is told the retry failed when it was in
+                // fact queued.
+                existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+                if (existingActive != null)
+                {
+                    logger.LogInformation(
+                        "Concurrent requeue prevented - returning existing active job {JobId} for download {DownloadId}",
+                        existingActive.Id,
+                        download.Id);
+                    return existingActive.Id;
+                }
+
+                throw;
+            }
+
+            logger.LogInformation("Queued download {DownloadId} for post-processing with a new job: {JobId}", download.Id, job.Id);
+            return job.Id;
+        }
+
+        // The save found the download or its active job changed since this request read them:
+        // another retry got there first. If that retry's job is still queued or running, it is the
+        // answer. If not, it already ran (the download may be Moved), and applying this request's
+        // stale decision would undo it, so nothing is saved and the caller can look again.
+        private async Task<string> SupersededRequeueAsync(Download download)
+        {
+            var winner = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+            if (winner != null)
+            {
+                logger.LogInformation(
+                    "Concurrent requeue superseded - returning existing active job {JobId} for download {DownloadId}",
+                    winner.Id,
+                    download.Id);
+                return winner.Id;
+            }
+
+            throw new InvalidOperationException($"Download {download.Id} changed while its retry was being queued; nothing was saved");
+        }
+
+        private static DownloadProcessingJob NewJobFor(Download download) => new()
+        {
+            DownloadId = download.Id,
+            JobType = ProcessingJobType.MoveOrCopyFile,
+            SourcePath = download.DownloadPath,
+            DownloadClientId = download.DownloadClientId,
+            Priority = 5,
+            Status = ProcessingJobStatus.Pending,
+            JobData = new Dictionary<string, object>
+            {
+                ["CorrelationId"] = download.Id.ToUpperInvariant()
+            }
+        };
 
         public async Task<DownloadProcessingJob?> GetNextJobAsync()
         {
@@ -120,6 +216,9 @@ namespace Listenarr.Application.Downloads.Processing
 
         public async Task<List<DownloadProcessingJob>> GetJobsForDownloadAsync(string downloadId)
             => await jobRepository.GetByDownloadIdAsync(downloadId);
+
+        public async Task<DownloadProcessingJob?> GetActiveJobAsync(string downloadId)
+            => await jobRepository.GetActiveByDownloadIdAsync(downloadId);
 
         public async Task<QueueStats> GetStatsAsync()
             => await jobRepository.GetStatsAsync();

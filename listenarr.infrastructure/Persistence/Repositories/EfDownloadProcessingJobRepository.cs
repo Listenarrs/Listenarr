@@ -116,6 +116,59 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await ctx.SaveChangesAsync();
         }
 
+        public async Task<bool> TrySaveWithDownloadAsync(Download download, DownloadProcessingJob? job, string? expectedActiveJobId)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
+            if (!await RetryStillAppliesAsync(ctx, download.Id, expectedActiveJobId))
+            {
+                return false;
+            }
+
+            await EfDownloadRepository.StageUpdateAsync(ctx, download);
+            if (job != null)
+            {
+                job.ActiveDeduplicationKey = IsActive(job.Status)
+                    ? BuildActiveDeduplicationKey(job.DownloadId)
+                    : null;
+                if (await ctx.DownloadProcessingJobs.AsNoTracking().AnyAsync(j => j.Id == job.Id))
+                {
+                    ctx.DownloadProcessingJobs.Update(job);
+                }
+                else
+                {
+                    ctx.DownloadProcessingJobs.Add(job);
+                }
+            }
+
+            await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
+            return true;
+        }
+
+        // Read on the transaction's context so the answer still holds when the save commits. A
+        // Moved download was imported by another retry; an active job other than the one the
+        // caller found was queued by another retry, and saving over it would reset that job.
+        private static async Task<bool> RetryStillAppliesAsync(
+            ListenArrDbContext ctx,
+            string downloadId,
+            string? expectedActiveJobId)
+        {
+            var stored = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == downloadId);
+            if (stored == null || !(stored.IsBlocked() || stored.AwaitsImportation()))
+            {
+                return false;
+            }
+
+            var deduplicationKey = BuildActiveDeduplicationKey(downloadId);
+            var activeJobId = await ctx.DownloadProcessingJobs.AsNoTracking()
+                .Where(j => j.ActiveDeduplicationKey == deduplicationKey)
+                .Select(j => j.Id)
+                .FirstOrDefaultAsync();
+            return activeJobId == expectedActiveJobId;
+        }
+
         public async Task<DownloadProcessingJob?> GetByIdAsync(string jobId)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();

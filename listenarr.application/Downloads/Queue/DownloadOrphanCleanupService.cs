@@ -181,10 +181,15 @@ namespace Listenarr.Application.Downloads.Queue
             return OrphanCleanupReason.MissingFromClientSnapshot;
         }
 
+        // A download with a recorded completion observation was reported complete by its client,
+        // and the stability window is holding its finalization, which leaves the row in its
+        // pre-completion status. The monitor finalizes it once a complete poll no longer lists it,
+        // so removing it here would drop a completed download whose files are still on disk.
         private static bool IsEligible(Download download, DateTime now) =>
             download.Status is (DownloadStatus.Queued or DownloadStatus.Downloading or DownloadStatus.Paused) &&
             now - download.StartedAt >= OrphanedDownloadGracePeriod &&
-            !string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase);
+            !string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) &&
+            download.GetCompletionObservedAt() == null;
 
         private enum OrphanCleanupReason
         {

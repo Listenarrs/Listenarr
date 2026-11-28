@@ -97,6 +97,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         [Fact]
         public async Task PollSABnzbd_Mapping_StripsNumericSuffix_AndFinalizesDownload()
         {
+            // Finalization is asserted in the same pass below, so the completion stability
+            // window has to be out of the way. Stated rather than inherited.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithoutCompletionStabilityWindow()
+                .Build());
+
             // Create a file under a directory WITHOUT the numeric suffix (this is the real local layout)
             var source = FileService.GetTempDirectory("download");
             var destination = FileService.GetTempDirectory("destination");
@@ -148,6 +154,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         [Fact]
         public async Task PollSABnzbd_SetsDownloadPath_FromHistoryStorage_WhenPathWasEmpty()
         {
+            // Finalization is asserted in the same pass below, so the completion stability
+            // window has to be out of the way. Stated rather than inherited.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithoutCompletionStabilityWindow()
+                .Build());
+
             var source = FileService.GetTempDirectory("sabnzbd-path-test");
             var destination = FileService.GetTempDirectory("sabnzbd-path-destination");
             await FileService.GetFileAsync(source, "hello.m4b");

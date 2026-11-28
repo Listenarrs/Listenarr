@@ -88,7 +88,7 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
         }
 
         public async Task RecordGrabbedAsync(string downloadId, string clientId, string title,
-            DownloadProtocol protocol, Guid? audiobookId = null)
+            DownloadProtocol protocol, int? audiobookId = null)
         {
             var history = new DownloadHistory
             {
@@ -96,7 +96,6 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
                 EventType = DownloadHistoryEventType.Grabbed,
                 Status = DownloadItemStatus.Queued,
                 EventDate = DateTime.UtcNow,
-                AudiobookId = audiobookId,
                 DownloadClient = "Unknown",
                 DownloadClientId = clientId,
                 Protocol = protocol,
@@ -104,7 +103,7 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
                 WasImported = false
             };
 
-            await AddUnifiedAsync(history);
+            await AddUnifiedAsync(history, audiobookId);
 
             _logger.LogInformation(
                 "Recorded Grabbed event for {DownloadId} ({Title}) from client {ClientId}",
@@ -160,7 +159,7 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
         }
 
         public async Task RecordImportedAsync(string downloadId, string clientId, string title,
-            Guid? audiobookId = null)
+            int? audiobookId = null)
         {
             var history = new DownloadHistory
             {
@@ -168,7 +167,6 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
                 EventType = DownloadHistoryEventType.Imported,
                 Status = DownloadItemStatus.Imported,
                 EventDate = DateTime.UtcNow,
-                AudiobookId = audiobookId,
                 DownloadClient = "Unknown",
                 DownloadClientId = clientId,
                 Protocol = DownloadProtocol.Torrent,
@@ -177,11 +175,11 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
                 ImportedAt = DateTime.UtcNow
             };
 
-            await AddUnifiedAsync(history);
+            await AddUnifiedAsync(history, audiobookId);
 
             _logger.LogInformation(
                 "Recorded Imported event for {DownloadId} ({Title}) audiobook {AudiobookId}",
-                downloadId, title, audiobookId ?? Guid.Empty);
+                downloadId, title, audiobookId);
         }
 
         public async Task RecordImportFailedAsync(string downloadId, string clientId, string title,
@@ -326,13 +324,20 @@ namespace Listenarr.Infrastructure.ActivityHistory.Services
             return oldEntries.Count;
         }
 
-        private async Task AddUnifiedAsync(DownloadHistory history)
+        /// <summary>
+        /// Writes the canonical history row for a download event. The audiobook key is passed
+        /// separately because <see cref="History.AudiobookId"/> is the integer library key that
+        /// per-book history queries filter on, while <see cref="DownloadHistory.AudiobookId"/> is
+        /// the legacy compatibility identifier and cannot carry it.
+        /// </summary>
+        private async Task AddUnifiedAsync(DownloadHistory history, int? audiobookId = null)
         {
             var normalizedId = history.DownloadId.ToUpperInvariant();
             _context.History.Add(new History
             {
                 DownloadId = normalizedId,
                 DownloadClientId = history.DownloadClientId,
+                AudiobookId = audiobookId,
                 AudiobookExternalId = history.AudiobookId?.ToString(),
                 SourceTitle = history.Title,
                 AudiobookTitle = history.Title,

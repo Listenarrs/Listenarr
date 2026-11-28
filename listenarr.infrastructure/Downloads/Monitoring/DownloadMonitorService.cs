@@ -70,7 +70,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         }
     }
 
-    public class DownloadMonitorProcessor(
+    public partial class DownloadMonitorProcessor(
         IServiceScopeFactory scopeFactory,
         IDownloadPushService downloadPushService,
         TimeProvider timeProvider,
@@ -197,12 +197,14 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 try
                 {
                     var previousDownloads = clientDownloads.Select(item => item.Clone()).ToList();
-                    var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken);
+                    var pollReport = new DownloadPollReport();
+                    var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken, pollReport);
 
-                    foreach (Download download in updatedDownloads)
+                    foreach (Download download in await WithHeldDownloadsMissingFromPollAsync(downloadClientGateway, client, updatedDownloads, clientDownloads, pollReport, cancellationToken))
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
+                        var isHeld = previousDownload != null && HoldIfUnsettled(download, previousDownload, pollReport, appSettings);
                         if (previousDownload == null ||
                             !await downloadService.TryUpdateFromClientPollAsync(previousDownload, download, cancellationToken))
                         {
@@ -210,6 +212,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                             continue;
                         }
 
+                        if (isHeld) continue;
                         await TriggerCallbacks(client, download, previousDownload, cancellationToken);
                     }
 

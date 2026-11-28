@@ -183,10 +183,10 @@ namespace Listenarr.Application.Downloads.Common
                 }
             }
 
-            return await TranslateQueueItemPathsAsync(client, item);
+            return RecoverRemovedTorrentPayload(download, await TranslateQueueItemPathsAsync(client, item));
         }
 
-        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default)
+        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default, DownloadPollReport? pollReport = null)
         {
             var ids = GetExternalIds(downloads);
             if (ids.Count == 0)
@@ -211,6 +211,12 @@ namespace Listenarr.Application.Downloads.Common
                     ex);
             }
 
+            // Translation fills an unlisted item's files from its content path, which may also
+            // hold files the torrent does not list, so note which files the client listed first.
+            var clientListedIds = items
+                .Where(item => item.SourceFiles is { Count: > 0 })
+                .Select(item => item.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
             items = [.. await Task.WhenAll(tasks)];
 
@@ -223,6 +229,8 @@ namespace Listenarr.Application.Downloads.Common
                 {
                     continue;
                 }
+
+                pollReport?.ReportedDownloadIds.Add(download.Id);
 
                 logger.LogDebug(
                     "Found matching download client item for {DownloadId}: {Title} (ExternalId: {ExternalId}, Status: {Status}, Progress: {Progress:F2}, LocalPath: {LocalPath}, ContentPath: {ContentPath})",
@@ -251,6 +259,7 @@ namespace Listenarr.Application.Downloads.Common
                     item.Status);
 
                 QueueItemConverter.UpdateFromQueueItem(download, item);
+                RecordedTorrentContent.Record(download, item, clientListedIds.Contains(item.Id));
                 updatedIds.Add(download.Id);
             }
 
@@ -317,30 +326,7 @@ namespace Listenarr.Application.Downloads.Common
                 // Scan ContentPath only after the adapter has supplied a non-empty path.
                 // Active queue snapshots may not be import-ready, so adapters should leave
                 // ContentPath null until a reliable file or completed storage directory exists.
-                if (fileSystem.FileExists(item.ContentPath))
-                {
-                    item.SourceFiles = [item.ContentPath];
-                }
-                else
-                {
-                    // Some clients can only report a directory. Expand it so import code can
-                    // operate on the specific files that belong to this download.
-                    try
-                    {
-                        item.SourceFiles = [.. fileSystem
-                            .EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)
-                            .Select(f => FileUtils.NormalizeStoredPath(f))];
-                    }
-                    catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-                    {
-                        LogMissingSourceFiles(
-                            client,
-                            item,
-                            $"content path scanning failed with path {item.ContentPath}",
-                            exception);
-                        item.SourceFiles = [];
-                    }
-                }
+                item.SourceFiles = ListContentPathFiles(client, item);
             }
             else
             {
@@ -359,6 +345,77 @@ namespace Listenarr.Application.Downloads.Common
             item.SourceFiles = new HashSet<string>(item.SourceFiles, sourceFileComparer).ToList();
 
             return item;
+        }
+
+        /// <summary>
+        /// Restores the payload of a torrent the client no longer lists, from the files the
+        /// monitor last recorded for it.
+        /// </summary>
+        /// <remarks>
+        /// The import resolvers read a torrent's file list from the client, so an item the client
+        /// removed after reporting it complete leaves nothing to import even though its payload
+        /// is still on disk. The recorded content path is that torrent's own file or top-level
+        /// folder, already mapped to a local path. A folder can also hold files the torrent never
+        /// listed, so only the files recorded from the client's list are imported from it; a
+        /// folder recorded without that list stays blocked. The download's save folder is not
+        /// used: it is shared with every other torrent saved there.
+        /// </remarks>
+        private QueueItem RecoverRemovedTorrentPayload(Download download, QueueItem item)
+        {
+            if (item.SourceFiles is { Count: > 0 } || !string.IsNullOrEmpty(item.ContentPath)
+                || string.IsNullOrEmpty(download.GetMetadataString("TorrentHash")))
+            {
+                return item;
+            }
+
+            var recordedPath = download.GetMetadataString("ClientContentPath");
+            if (string.IsNullOrWhiteSpace(recordedPath) || RecordedTorrentContent.ContainsSaveFolder(recordedPath, download.DownloadPath))
+            {
+                return item;
+            }
+
+            var files = RecordedTorrentContent.ResolveFiles(download, recordedPath, fileSystem);
+            if (files == null)
+            {
+                logger.LogWarning(
+                    "Download {DownloadId} is no longer listed by its client and its recorded file list is missing or no longer matches the disk; its import needs manual review",
+                    download.Id);
+                return item;
+            }
+
+            item.ContentPath = recordedPath;
+            item.SourceFiles = files;
+            logger.LogInformation(
+                "Download {DownloadId} is no longer listed by its client; importing its {FileCount} recorded file(s)",
+                download.Id,
+                item.SourceFiles.Count);
+            return item;
+        }
+
+        private List<string> ListContentPathFiles(DownloadClientConfiguration client, QueueItem item)
+        {
+            if (fileSystem.FileExists(item.ContentPath))
+            {
+                return [item.ContentPath];
+            }
+
+            // Some clients can only report a directory. Expand it so import code can
+            // operate on the specific files that belong to this download.
+            try
+            {
+                return [.. fileSystem
+                    .EnumerateFiles(item.ContentPath, "*.*", SearchOption.AllDirectories)
+                    .Select(f => FileUtils.NormalizeStoredPath(f))];
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                LogMissingSourceFiles(
+                    client,
+                    item,
+                    $"content path scanning failed with path {item.ContentPath}",
+                    exception);
+                return [];
+            }
         }
 
         private async Task<IEqualityComparer<string>> ResolveSourceFileComparerAsync(QueueItem item)
